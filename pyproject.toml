@@ -10,7 +10,6 @@ readme = "README.md"
 license = {text = "MIT"}
 dependencies = [
     "lxml>=5.3.0",
-    "pymarc>=5.2.0",
     "rapidfuzz>=3.10.0",
     "lmdb>=1.5.1",
     "msgpack>=1.1.0",
@@ -33,9 +32,16 @@ build-backend = "pdm.backend"
 distribution = true
 
 [tool.pdm.build]
-includes = ["src/pd_matcher", "src/pd_matcher/config/defaults/*.yaml"]
+includes = [
+    "src/pd_matcher",
+    "src/pd_matcher/config/defaults/*.yaml",
+    "src/pd_matcher/normalize/stopwords_data/*.json",
+]
 package-dir = "src"
-source-includes = ["src/pd_matcher/config/defaults/*.yaml"]
+source-includes = [
+    "src/pd_matcher/config/defaults/*.yaml",
+    "src/pd_matcher/normalize/stopwords_data/*.json",
+]
 
 [tool.pdm.dev-dependencies]
 dev = [

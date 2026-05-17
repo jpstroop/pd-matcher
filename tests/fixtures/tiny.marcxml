@@ -1,0 +1,90 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<collection xmlns='http://www.loc.gov/MARC21/slim'>
+  <record>
+    <leader>00000cam a2200000 i 4500</leader>
+    <controlfield tag='001'>marc-001</controlfield>
+    <controlfield tag='005'>20250102030523.0</controlfield>
+    <controlfield tag='008'>200718s1940    nyu           000 0 eng  </controlfield>
+    <datafield ind1=' ' ind2=' ' tag='010'><subfield code='a'>  40012345 </subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='010'><subfield code='a'>ignored second 010</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='020'><subfield code='a'>9780000000000</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='020'><subfield code='a'>0000000001</subfield></datafield>
+    <datafield ind1='1' ind2=' ' tag='100'><subfield code='a'>Alpha, Alice,</subfield></datafield>
+    <datafield ind1='1' ind2=' ' tag='100'><subfield code='a'>Ignored second 100</subfield></datafield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>A study of widgets /</subfield><subfield code='b'>and other small parts ;</subfield><subfield code='c'>by Alice Alpha.</subfield></datafield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>Ignored second 245</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='250'><subfield code='a'>First edition.</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='250'><subfield code='a'>Ignored second 250</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='260'><subfield code='a'>New York :</subfield><subfield code='b'>Acme Press,</subfield><subfield code='c'>1940.</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='260'><subfield code='a'>Ignored</subfield><subfield code='b'>Ignored</subfield><subfield code='c'>Ignored</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='300'><subfield code='a'>200 pages ;</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='300'><subfield code='a'>ignored 300</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='490'><subfield code='a'>Series One ;</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='700'><subfield code='a'>Bravo, Bob,</subfield><subfield code='e'>editor</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='700'><subfield code='a'>Charlie, Carol.</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='999'><subfield code='a'>unknown tag, ignored</subfield></datafield>
+  </record>
+  <record>
+    <controlfield tag='001'>marc-002</controlfield>
+    <controlfield tag='008'>200718s1955    fr            000 0 fre  </controlfield>
+    <datafield ind1='1' ind2=' ' tag='100'><subfield code='a'>Dubois, David</subfield></datafield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>Le petit livre</subfield></datafield>
+    <datafield ind1=' ' ind2='1' tag='264'><subfield code='a'>Paris :</subfield><subfield code='b'>Editions Beta,</subfield><subfield code='c'>1955.</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='440'><subfield code='a'>Petite serie</subfield></datafield>
+  </record>
+  <record>
+    <controlfield tag='001'>marc-003</controlfield>
+    <controlfield tag='008'>short</controlfield>
+    <datafield ind1='2' ind2=' ' tag='110'><subfield code='a'>Some Corporate Body.</subfield></datafield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>Annual report</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='830'><subfield code='a'>Reports series</subfield></datafield>
+  </record>
+  <record>
+    <controlfield tag='001'>marc-004-no-245</controlfield>
+    <controlfield tag='008'>200718s1972    xxu           000 0 eng  </controlfield>
+    <datafield ind1='1' ind2=' ' tag='100'><subfield code='a'>Echo, Erin</subfield></datafield>
+  </record>
+  <record>
+    <controlfield tag='008'>200718s1972    xxu           000 0 eng  </controlfield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>Title without an 001</subfield></datafield>
+  </record>
+  <record>
+    <controlfield tag='001'>marc-006</controlfield>
+    <controlfield tag='008'>200718s1968                  000 0 ger  </controlfield>
+    <datafield ind1='1' ind2='1' tag='111'><subfield code='a'>Some Meeting Name</subfield></datafield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>Proceedings :   </subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='260'><subfield code='c'>circa 1968.</subfield></datafield>
+  </record>
+  <record>
+    <controlfield tag='001'>marc-007-260c-no-year</controlfield>
+    <controlfield tag='008'>200718s1959                  000 0 eng  </controlfield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>Undated work</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='260'><subfield code='c'>n.d.</subfield></datafield>
+  </record>
+  <record>
+    <controlfield tag='001'>marc-008-260c-out-of-range</controlfield>
+    <controlfield tag='008'>200718s2099                  000 0 eng  </controlfield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>Pretend year</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='260'><subfield code='c'>3000 not a real year</subfield></datafield>
+  </record>
+  <record>
+    <controlfield tag='001'>marc-009-008-year-out-of-range</controlfield>
+    <controlfield tag='008'>200718s9999                  000 0 eng  </controlfield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>Bogus 008 year</subfield></datafield>
+  </record>
+  <record>
+    <controlfield tag='001'>marc-010-008-letters</controlfield>
+    <controlfield tag='008'>200718sabcd                  000 0 eng  </controlfield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>Letters in year position</subfield></datafield>
+  </record>
+  <record>
+    <controlfield tag='001'>   </controlfield>
+    <controlfield tag='008'>200718s1965    xxu           000 0 eng  </controlfield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>Pure whitespace 001</subfield></datafield>
+  </record>
+  <record>
+    <controlfield tag='001'>marc-012-empty-245a</controlfield>
+    <controlfield tag='008'>200718s1965    xxu           000 0 eng  </controlfield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>   </subfield></datafield>
+  </record>
+</collection>

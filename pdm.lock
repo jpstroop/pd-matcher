@@ -5,7 +5,7 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:04901cd73b0b4cf4a0c70dd952ddd115cf7b11dfeeb1650d7940d550f4811543"
+content_hash = "sha256:3083513c52df30b17070cefca25030dfa194d7a0fb1a5afbfaa7927b88cac2de"
 
 [[metadata.targets]]
 requires_python = ">=3.14"
@@ -486,17 +486,6 @@ groups = ["default", "dev"]
 files = [
     {file = "pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176"},
     {file = "pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f"},
-]
-
-[[package]]
-name = "pymarc"
-version = "5.3.1"
-requires_python = ">=3.9"
-summary = "Read, write and modify MARC bibliographic data"
-groups = ["default"]
-files = [
-    {file = "pymarc-5.3.1-py3-none-any.whl", hash = "sha256:3fcc09f9d51ef27c40f8d215e3219d0f3eb29716a0767e689c4923e38182ad73"},
-    {file = "pymarc-5.3.1.tar.gz", hash = "sha256:d289233d7298aeae45d976081710391cf21e754f73928132508b8adfe8ea0b49"},
 ]
 
 [[package]]
