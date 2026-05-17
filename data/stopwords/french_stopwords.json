@@ -1,0 +1,25 @@
+{
+  "description": "French stopword configuration based on ground truth analysis",
+  "source": "Minimal list - French showed negative impact with aggressive stopword removal",
+  "minimum_word_threshold": 4,
+  "notes": "French articles and prepositions are more meaningful for matching. Use very conservative list.",
+  
+  "title_stopwords": [
+    "et", "ou", "avec", "dans", "pour", "sur", "par", "aux", "des"
+  ],
+  
+  "author_stopwords": [
+    "et", "avec", "par"
+  ],
+  
+  "publisher_stopwords": [
+    "et", "&"
+  ],
+  
+  "notes_on_exclusions": {
+    "not_included": [
+      "le", "la", "les", "un", "une", "de", "du"
+    ],
+    "reason": "French articles are integral to titles and removing them caused score degradation. 'De' is often part of names."
+  }
+}

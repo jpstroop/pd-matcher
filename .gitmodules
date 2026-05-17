@@ -1,0 +1,6 @@
+[submodule "data/nypl-ren"]
+	path = data/nypl-ren
+	url = https://github.com/NYPL/cce-renewals.git
+[submodule "data/nypl-reg"]
+	path = data/nypl-reg
+	url = https://github.com/NYPL/catalog_of_copyright_entries_project.git

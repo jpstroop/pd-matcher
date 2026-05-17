@@ -1,0 +1,15 @@
+.venv/
+caches/
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.pyc
+dist/
+build/
+.pdm-python
+
+# Large data files (not versioned; future: download apparatus)
+data/candidate_marc_file.marcxml
