@@ -1,0 +1,84 @@
+"""Shared fixtures for Phase 6 worker tests.
+
+Most tests need: a tiny LMDB index built from the project's tiny
+fixtures, a minimal :class:`MatchingConfig`, a minimal
+:class:`CopyrightRuleSet`, an :class:`IdfTable` built from the index,
+and a :class:`CopyrightAssessmentConfig` pinned to a fixed date. The
+fixtures here construct each once per test so the worker / writer / pool
+suites can exercise the real pipeline without standing up the full
+package on their own.
+"""
+
+from datetime import date
+from pathlib import Path
+
+from pytest import fixture
+
+from pd_matcher.config.loader import load_copyright_rules
+from pd_matcher.config.schemas import CopyrightAssessmentConfig
+from pd_matcher.config.schemas import CopyrightRuleSet
+from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.index.builder import build_index
+from pd_matcher.index.lookup import NyplIndexLookup
+from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.idf import build_idf_table
+
+_FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
+_DEFAULTS = (
+    Path(__file__).resolve().parents[3]
+    / "src"
+    / "pd_matcher"
+    / "config"
+    / "defaults"
+    / "copyright_rules.yaml"
+)
+
+
+@fixture
+def tiny_index_path(tmp_path: Path) -> Path:
+    """Build a tiny LMDB index from the shared fixtures and return its path."""
+    reg_dir = tmp_path / "reg"
+    ren_dir = tmp_path / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "tiny_reg.xml").write_bytes((_FIXTURES / "tiny_reg.xml").read_bytes())
+    (ren_dir / "tiny_ren.tsv").write_bytes((_FIXTURES / "tiny_ren.tsv").read_bytes())
+    out_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    return out_path
+
+
+@fixture
+def tiny_idf(tiny_index_path: Path) -> IdfTable:
+    """Return an :class:`IdfTable` built from the tiny index."""
+    with NyplIndexLookup(tiny_index_path) as lookup:
+        return build_idf_table(lookup)
+
+
+@fixture
+def matching_config() -> MatchingConfig:
+    """Return the project-default :class:`MatchingConfig`."""
+    return MatchingConfig(
+        title_weight=0.40,
+        author_weight=0.20,
+        publisher_weight=0.10,
+        year_weight=0.10,
+        edition_weight=0.05,
+        lccn_weight=0.10,
+        isbn_weight=0.05,
+        year_window=2,
+        min_combined_score=30.0,
+        scorer="weighted_mean",
+    )
+
+
+@fixture
+def copyright_config() -> CopyrightAssessmentConfig:
+    """Return a :class:`CopyrightAssessmentConfig` pinned to 2026-05-18."""
+    return CopyrightAssessmentConfig(today=date(2026, 5, 18))
+
+
+@fixture
+def ruleset() -> CopyrightRuleSet:
+    """Return the production Cornell rule set."""
+    return load_copyright_rules(_DEFAULTS)
