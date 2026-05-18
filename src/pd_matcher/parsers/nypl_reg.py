@@ -1,11 +1,14 @@
-"""Streaming parser for NYPL transcribed copyright registration XML files.
+"""Streaming parser for NYPL's XML transcription of the CCE registration corpus.
 
-NYPL's registration corpus is split into one XML file per year/volume/issue,
-and the project ships sixty-three year directories. ``iter_nypl_reg_records``
-parses a single file using :func:`lxml.etree.iterparse` over
-``<copyrightEntry>`` elements, mirroring the streaming/clearing pattern used
-in :mod:`pd_matcher.parsers.marc`. ``iter_nypl_reg_directory`` walks the
-year tree in sorted order and chains records from every file beneath it.
+The source data is the U.S. Copyright Office's Catalog of Copyright Entries
+(CCE), published by the Library of Congress and transcribed into XML by
+NYPL. The CCE registration corpus is split into one XML file per
+year/volume/issue, and the project ships sixty-three year directories.
+``iter_nypl_reg_records`` parses a single file using
+:func:`lxml.etree.iterparse` over ``<copyrightEntry>`` elements, mirroring
+the streaming/clearing pattern used in :mod:`pd_matcher.parsers.marc`.
+``iter_nypl_reg_directory`` walks the year tree in sorted order and chains
+records from every file beneath it.
 
 The canonical registration number is the ``regnum`` attribute on the
 ``<copyrightEntry>`` element; the inline ``<regNum>`` text often contains
@@ -151,7 +154,7 @@ def iter_nypl_reg_records(path: Path) -> Iterator[NyplRegRecord]:
     """Yield :class:`NyplRegRecord` objects streamed from a single XML file.
 
     Args:
-        path: Filesystem path to one NYPL registration XML file.
+        path: Filesystem path to one CCE registration XML file (NYPL transcription).
 
     Yields:
         Validated :class:`NyplRegRecord` instances in document order.

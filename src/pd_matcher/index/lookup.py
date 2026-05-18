@@ -1,11 +1,13 @@
-"""Read-only query API over the LMDB-backed NYPL index.
+"""Read-only query API over the LMDB-backed CCE index.
 
 Phase 4's matcher and Phase 7's ``pd-matcher index info`` CLI consume the
 index through :class:`NyplIndexLookup`; it opens the underlying
 :class:`NyplIndexStore` in read-only mode and exposes a small,
-caller-friendly API. Read-only mode is the LMDB sweet spot — many worker
-processes can mmap the same env directory without any contention, which is
-the whole reason this project picked LMDB.
+caller-friendly API. The indexed data is the U.S. Copyright Office's
+Catalog of Copyright Entries (CCE), published by the Library of Congress
+and transcribed into XML/TSV by NYPL. Read-only mode is the LMDB sweet
+spot — many worker processes can mmap the same env directory without any
+contention, which is the whole reason this project picked LMDB.
 """
 
 from collections.abc import Iterator
@@ -45,7 +47,7 @@ class IndexStats(Struct, frozen=True, forbid_unknown_fields=True):
 
 
 class NyplIndexLookup:
-    """Read-only LMDB lookup over the indexed NYPL corpus.
+    """Read-only LMDB lookup over the indexed CCE corpus.
 
     The store is opened read-only on construction and held for the lifetime
     of the instance; callers should use the class as a context manager to

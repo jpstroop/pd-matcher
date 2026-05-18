@@ -1,11 +1,14 @@
-"""Streaming parser for NYPL transcribed copyright renewal TSV files.
+"""Streaming parser for NYPL's TSV transcription of the CCE renewal corpus.
 
-The renewal corpus ships as tab-separated value files with one of two stable
-header schemas. Files covering the pre-1978 entries (the vast majority) use
-the original column names ``author``, ``title``, ``rdat``, ``notes``. Files
-named ``*-from-db.tsv`` (1978 and later) use the variant names ``auth``,
-``titl``, ``dreg``, ``note``. Column ordering, count, and semantics are
-otherwise identical, and both decode to the same :class:`NyplRenRecord`.
+The source data is the U.S. Copyright Office's Catalog of Copyright Entries
+(CCE), published by the Library of Congress and transcribed into TSV by
+NYPL. The CCE renewal corpus ships as tab-separated value files with one of
+two stable header schemas. Files covering the pre-1978 entries (the vast
+majority) use the original column names ``author``, ``title``, ``rdat``,
+``notes``. Files named ``*-from-db.tsv`` (1978 and later) use the variant
+names ``auth``, ``titl``, ``dreg``, ``note``. Column ordering, count, and
+semantics are otherwise identical, and both decode to the same
+:class:`NyplRenRecord`.
 
 We use :func:`csv.reader` (not :class:`csv.DictReader`) for two reasons:
 (a) iterating positional rows is measurably faster on the large files we
@@ -179,7 +182,7 @@ def iter_nypl_ren_records(path: Path) -> Iterator[NyplRenRecord]:
         columns = _COLUMN_MAPS.get(header_tuple)
         if columns is None:
             raise NyplRenHeaderError(
-                f"Unexpected NYPL renewal header in {path}: got {header_tuple!r}; "
+                f"Unexpected CCE renewal header in {path}: got {header_tuple!r}; "
                 f"expected one of pre-1978 {_HEADER_PRE_1978!r} "
                 f"or from-db {_HEADER_FROM_DB!r}"
             )

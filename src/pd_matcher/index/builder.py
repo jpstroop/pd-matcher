@@ -1,7 +1,9 @@
-"""Build the NYPL LMDB index from streaming parser output.
+"""Build the LMDB index from streaming parser output.
 
-The builder owns the orchestration that turns the on-disk NYPL corpus into
-the LMDB env that Phase 4's matcher reads. Renewals stream first so the
+The builder owns the orchestration that turns the on-disk CCE corpus
+(the U.S. Copyright Office's Catalog of Copyright Entries, published by
+the Library of Congress and transcribed into XML/TSV by NYPL) into the
+LMDB env that Phase 4's matcher reads. Renewals stream first so the
 ``ren_by_oreg`` lookup is fully populated by the time registrations are
 ingested; that way every :class:`IndexedNyplRegRecord` can have its
 ``was_renewed`` flag resolved with a single ``ren_by_oreg.get`` call instead
@@ -231,11 +233,13 @@ def build_index(
     schema_version: int = 1,
     force: bool = False,
 ) -> BuildReport:
-    """Materialise the NYPL LMDB index from the two source directories.
+    """Materialise the LMDB index from the two CCE source directories.
 
     Args:
-        reg_dir: Directory holding the NYPL registration XML tree.
-        ren_dir: Directory holding the NYPL renewal TSV files.
+        reg_dir: Directory holding the CCE registration XML tree
+            (NYPL transcription).
+        ren_dir: Directory holding the CCE renewal TSV files
+            (NYPL transcription).
         out_path: LMDB env directory to create or overwrite.
         schema_version: Bumped whenever the stored record shape changes.
         force: When ``True`` always rebuild even if the existing env matches.

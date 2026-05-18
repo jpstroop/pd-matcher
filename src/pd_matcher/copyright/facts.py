@@ -40,12 +40,12 @@ def _join_publisher_text(
     """Return a single lowercase string containing every publisher-like token.
 
     The result is the union of MARC's ``publisher`` field plus every entry
-    of the matched NYPL record's ``publisher_names`` and ``claimants``.
+    of the matched CCE registration's ``publisher_names`` and ``claimants``.
     Used by the inference layer to detect US-government works via regex.
 
     Args:
         marc: The MARC bibliographic record under evaluation.
-        nypl: The matched NYPL registration, if any.
+        nypl: The matched CCE registration, if any.
 
     Returns:
         A space-joined lowercase string, or ``None`` when no publisher
@@ -77,10 +77,11 @@ def build_facts(
             matching pass has been run yet (e.g. a record published
             after the registration window).
         today: The reference date used by every age-sensitive predicate.
-        matched_nypl: The hydrated NYPL registration corresponding to
-            ``match.best``. Optional; when omitted the inference layer
-            loses access to NYPL-side publisher tokens but the rules
-            still evaluate.
+        matched_nypl: The hydrated CCE registration corresponding to
+            ``match.best`` (loaded from the NYPL-transcribed index).
+            Optional; when omitted the inference layer loses access to
+            registration-side publisher tokens but the rules still
+            evaluate.
 
     Returns:
         A frozen :class:`Facts` capturing the predicate inputs.

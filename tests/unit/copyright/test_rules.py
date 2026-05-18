@@ -145,7 +145,7 @@ def test_negate_flips_predicate_value() -> None:
             PredicateCall(predicate="country_is_us"),
             PredicateCall(predicate="was_renewed", negate=True),
         ],
-        then="PD_US_PUB_REGISTERED_NOT_RENEWED",
+        then="PD_REGISTERED_NOT_RENEWED",
         explanation="not renewed",
     )
     facts = make_facts(
@@ -155,7 +155,7 @@ def test_negate_flips_predicate_value() -> None:
         was_renewed=False,
     )
     result = assess(facts, _ruleset_for(rule))
-    assert result.status is CopyrightStatus.PD_US_PUB_REGISTERED_NOT_RENEWED
+    assert result.status is CopyrightStatus.PD_REGISTERED_NOT_RENEWED
 
 
 def test_enable_assumptions_false_blocks_inference_rules() -> None:
@@ -166,7 +166,7 @@ def test_enable_assumptions_false_blocks_inference_rules() -> None:
             PredicateCall(predicate="country_is_us"),
             PredicateCall(predicate="has_us_notice"),
         ],
-        then="IN_COPYRIGHT_US_PUB_REGISTERED_AND_RENEWED",
+        then="IN_COPYRIGHT_REGISTERED_AND_RENEWED",
         explanation="needs notice",
     )
     facts = make_facts(
@@ -186,7 +186,7 @@ def test_static_and_dynamic_assumptions_concatenated() -> None:
             PredicateCall(predicate="country_is_us"),
             PredicateCall(predicate="has_us_notice"),
         ],
-        then="PD_US_PUB_REGISTERED_NOT_RENEWED",
+        then="PD_REGISTERED_NOT_RENEWED",
         explanation="combo",
         assumptions=["Static assumption"],
     )
@@ -306,7 +306,7 @@ def test_shipped_us_pub_1931_1963_registered_not_renewed(
         was_renewed=False,
     )
     result = assess(facts, ruleset)
-    assert result.status is CopyrightStatus.PD_US_PUB_REGISTERED_NOT_RENEWED
+    assert result.status is CopyrightStatus.PD_REGISTERED_NOT_RENEWED
 
 
 def test_shipped_us_pub_1931_1963_registered_and_renewed(
@@ -319,7 +319,7 @@ def test_shipped_us_pub_1931_1963_registered_and_renewed(
         was_renewed=True,
     )
     result = assess(facts, ruleset)
-    assert result.status is CopyrightStatus.IN_COPYRIGHT_US_PUB_REGISTERED_AND_RENEWED
+    assert result.status is CopyrightStatus.IN_COPYRIGHT_REGISTERED_AND_RENEWED
 
 
 def test_shipped_us_pub_1964_1977_with_notice(ruleset: CopyrightRuleSet) -> None:
@@ -329,7 +329,7 @@ def test_shipped_us_pub_1964_1977_with_notice(ruleset: CopyrightRuleSet) -> None
         was_registered=True,
     )
     result = assess(facts, ruleset)
-    assert result.status is CopyrightStatus.IN_COPYRIGHT_US_PUB_1964_1977_WITH_NOTICE
+    assert result.status is CopyrightStatus.IN_COPYRIGHT_1964_1977_WITH_NOTICE
 
 
 def test_shipped_us_pub_1978_1989_no_registration(
@@ -351,7 +351,7 @@ def test_shipped_us_pub_1978_1989_registered(ruleset: CopyrightRuleSet) -> None:
         was_registered=True,
     )
     result = assess(facts, ruleset)
-    assert result.status is CopyrightStatus.IN_COPYRIGHT_US_PUB_1978_1989_CURED
+    assert result.status is CopyrightStatus.IN_COPYRIGHT_1978_1989_CURED
 
 
 def test_shipped_us_pub_post_1989(ruleset: CopyrightRuleSet) -> None:
@@ -417,7 +417,7 @@ def test_us_pub_registered_not_renewed_negative_year_outside_window(
         was_renewed=False,
     )
     result = assess(facts, ruleset)
-    assert result.status is not CopyrightStatus.PD_US_PUB_REGISTERED_NOT_RENEWED
+    assert result.status is not CopyrightStatus.PD_REGISTERED_NOT_RENEWED
 
 
 def test_foreign_no_treaty_negative_other_country(
@@ -427,3 +427,134 @@ def test_foreign_no_treaty_negative_other_country(
     facts = make_facts(pub_year=1985, pub_country_code="fr")
     result = assess(facts, ruleset)
     assert result.status is not CopyrightStatus.PD_FOREIGN_NO_TREATY_COUNTRY
+
+
+# -----------------------------------------------------------------------
+# Foreign-registered routing: a foreign-authored work that registered    #
+# with the US Copyright Office must follow Category 2 (registration     #
+# gates the formality-failure logic), not Category 3 URAA.              #
+# -----------------------------------------------------------------------
+
+
+def test_foreign_registered_and_renewed_follows_category_2(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """Foreign work that registered AND renewed -> IN_COPYRIGHT_REGISTERED_AND_RENEWED.
+
+    URAA restores works that failed the US formalities; a surviving CCE
+    registration *is* the US formality, so the work follows Category 2.
+    """
+    facts = make_facts(
+        pub_year=1950,
+        pub_country_code="fr",
+        was_registered=True,
+        was_renewed=True,
+    )
+    result = assess(facts, ruleset)
+    assert result.status is CopyrightStatus.IN_COPYRIGHT_REGISTERED_AND_RENEWED
+
+
+def test_foreign_registered_not_renewed_follows_category_2(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """Foreign work registered but never renewed -> PD_REGISTERED_NOT_RENEWED."""
+    facts = make_facts(
+        pub_year=1950,
+        pub_country_code="fr",
+        was_registered=True,
+        was_renewed=False,
+    )
+    result = assess(facts, ruleset)
+    assert result.status is CopyrightStatus.PD_REGISTERED_NOT_RENEWED
+
+
+def test_foreign_registered_1964_1977_follows_category_2(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """Foreign work registered 1964-1977 -> IN_COPYRIGHT_1964_1977_WITH_NOTICE."""
+    facts = make_facts(
+        pub_year=1970,
+        pub_country_code="fr",
+        was_registered=True,
+    )
+    result = assess(facts, ruleset)
+    assert result.status is CopyrightStatus.IN_COPYRIGHT_1964_1977_WITH_NOTICE
+
+
+def test_foreign_registered_1978_1989_cured_follows_category_2(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """Foreign work registered in 1978-Feb 1989 -> IN_COPYRIGHT_1978_1989_CURED."""
+    facts = make_facts(
+        pub_year=1985,
+        pub_country_code="fr",
+        was_registered=True,
+    )
+    result = assess(facts, ruleset)
+    assert result.status is CopyrightStatus.IN_COPYRIGHT_1978_1989_CURED
+
+
+def test_foreign_registered_does_not_fire_uraa_restored(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """A foreign-registered 1931-1977 work must NOT yield URAA_RESTORED."""
+    facts = make_facts(
+        pub_year=1950,
+        pub_country_code="fr",
+        was_registered=True,
+        was_renewed=True,
+    )
+    result = assess(facts, ruleset)
+    assert result.status is not CopyrightStatus.IN_COPYRIGHT_FOREIGN_URAA_RESTORED
+
+
+def test_foreign_registered_does_not_fire_1978_2002_floor(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """A foreign-registered 1978-2002 work must NOT yield the 2047 floor.
+
+    A registered work in 1978-1989 gets the registration cure
+    (Category 2). A registered work 1990-2002 falls through Category 3
+    URAA rules (all negated on registration) and lands on
+    ``UNKNOWN_NO_RULE_MATCHED``, but never on the floor leaf.
+    """
+    facts = make_facts(
+        pub_year=1985,
+        pub_country_code="fr",
+        was_registered=True,
+    )
+    result = assess(facts, ruleset)
+    assert result.status is not CopyrightStatus.IN_COPYRIGHT_PRE_1978_PUBLISHED_1978_2002_FLOOR
+
+
+def test_foreign_registered_does_not_fire_post_1989(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """A foreign-registered post-2003 work must NOT yield FOREIGN_POST_1989."""
+    facts = make_facts(
+        pub_year=2010,
+        pub_country_code="fr",
+        was_registered=True,
+    )
+    result = assess(facts, ruleset)
+    assert result.status is not CopyrightStatus.IN_COPYRIGHT_FOREIGN_POST_1989
+
+
+def test_foreign_registered_pre_1923_does_not_fire_pd_home_country(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """A foreign-registered pre-1923 work must NOT yield FOREIGN_IN_HOME_COUNTRY_PD_1996.
+
+    Pinned ``today=2017`` so the moving-wall short-circuit does not fire.
+    The 1931-1963 registered branch requires ``published_between
+    [1931, 1963]`` so a 1922 work cannot fire it either; this test
+    simply asserts that registration disables the home-country PD path.
+    """
+    facts = make_facts(
+        pub_year=1922,
+        pub_country_code="fr",
+        was_registered=True,
+        today=date(2017, 1, 1),
+    )
+    result = assess(facts, ruleset)
+    assert result.status is not CopyrightStatus.PD_FOREIGN_IN_HOME_COUNTRY_PD_1996
