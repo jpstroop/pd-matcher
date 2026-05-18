@@ -4,7 +4,7 @@ from typer.testing import CliRunner
 
 from pd_matcher.cli import app
 
-_runner: CliRunner = CliRunner()
+_runner: CliRunner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
 
 
 def test_root_help_lists_subcommands() -> None:

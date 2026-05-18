@@ -13,15 +13,15 @@ def test_iter_marc_records_returns_expected_first_record() -> None:
     by_id = {r.control_id: r for r in records}
     first = by_id["marc-001"]
     assert first.title == "A study of widgets and other small parts"
-    assert first.statement_of_responsibility == "by Alice Alpha."
+    assert first.statement_of_responsibility == "by Alice Alpha"
     assert first.lccn == "40012345"
     assert first.isbns == ("9780000000000", "0000000001")
     assert first.main_author == "Alpha, Alice"
-    assert first.added_authors == ("Bravo, Bob", "Charlie, Carol.")
-    assert first.edition == "First edition."
+    assert first.added_authors == ("Bravo, Bob", "Charlie, Carol")
+    assert first.edition == "First edition"
     assert first.publication_place == "New York"
     assert first.publisher == "Acme Press"
-    assert first.publication_date_raw == "1940."
+    assert first.publication_date_raw == "1940"
     assert first.publication_year == 1940
     assert first.extent == "200 pages"
     assert first.series_titles == ("Series One",)
@@ -44,7 +44,7 @@ def test_iter_marc_records_handles_corporate_author_and_short_008() -> None:
     records = list(iter_marc_records(FIXTURE))
     by_id = {r.control_id: r for r in records}
     third = by_id["marc-003"]
-    assert third.main_author == "Some Corporate Body."
+    assert third.main_author == "Some Corporate Body"
     assert third.publication_year is None
     assert third.language_code is None
     assert third.country_code is None
@@ -65,7 +65,7 @@ def test_iter_marc_records_falls_back_to_008_when_260c_lacks_year() -> None:
     by_id = {r.control_id: r for r in records}
     seventh = by_id["marc-007-260c-no-year"]
     assert seventh.publication_year == 1959
-    assert seventh.publication_date_raw == "n.d."
+    assert seventh.publication_date_raw == "n.d"
 
 
 def test_iter_marc_records_rejects_out_of_range_years_in_both_sources() -> None:

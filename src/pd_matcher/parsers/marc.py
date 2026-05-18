@@ -26,7 +26,7 @@ _CONTROLFIELD_TAG = f"{{{_MARC_NS}}}controlfield"
 _DATAFIELD_TAG = f"{{{_MARC_NS}}}datafield"
 _SUBFIELD_TAG = f"{{{_MARC_NS}}}subfield"
 
-_TRAILING_PUNCT = " /:;,="
+_TRAILING_PUNCT = " /:;,=."
 _YEAR_RE = re_compile(r"(\d{4})")
 _YEAR_MIN = 1450
 _YEAR_MAX = 2050
