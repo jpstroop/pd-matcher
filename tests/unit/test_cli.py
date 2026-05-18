@@ -1,19 +1,78 @@
 """Tests for :mod:`pd_matcher.cli`."""
 
+from csv import DictReader
+from datetime import date
+from json import loads
+from pathlib import Path
+from typing import Self
+
+from msgspec.msgpack import Encoder
+from pytest import MonkeyPatch
 from typer.testing import CliRunner
 
 from pd_matcher.cli import app
+from pd_matcher.index.builder import build_index
+from pd_matcher.match.combiners.calibrator import PlattCalibrator
 
+_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 _runner: CliRunner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
+
+
+def _stage_sources(tmp_path: Path) -> tuple[Path, Path]:
+    """Copy the tiny reg/ren fixtures into ``tmp_path`` and return their dirs."""
+    reg_dir = tmp_path / "reg"
+    ren_dir = tmp_path / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "tiny_reg.xml").write_bytes((_FIXTURES / "tiny_reg.xml").read_bytes())
+    (ren_dir / "tiny_ren.tsv").write_bytes((_FIXTURES / "tiny_ren.tsv").read_bytes())
+    return reg_dir, ren_dir
+
+
+def _build_index(tmp_path: Path) -> Path:
+    """Build a tiny LMDB index in ``tmp_path`` and return its path."""
+    reg_dir, ren_dir = _stage_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    return out_path
+
+
+def _write_ground_truth(path: Path, today: date) -> None:
+    """Write a small ground-truth CSV using fields known to the tiny index."""
+    header = (
+        "marc_id,marc_title_original,marc_title_normalized,marc_title_stemmed,"
+        "marc_author_original,marc_author_normalized,marc_author_stemmed,"
+        "marc_main_author_original,marc_main_author_normalized,marc_main_author_stemmed,"
+        "marc_publisher_original,marc_publisher_normalized,marc_publisher_stemmed,"
+        "marc_year,marc_lccn,marc_lccn_normalized,marc_country_code,marc_language_code,"
+        "match_type,match_title,match_title_normalized,match_author,match_author_normalized,"
+        "match_publisher,match_publisher_normalized,match_year,match_source_id,match_date,"
+        "title_score,author_score,publisher_score,combined_score,year_difference,"
+        "copyright_status"
+    )
+    row = (
+        f"marc-aaa,A study of widgets,a study of widgets,studi widget,"
+        f"by Smith,by smith,smith,Smith John,smith john,smith john,"
+        f"Acme Press,acme press,acme press,"
+        f"{today.year - 80},,,xxu,eng,"
+        f"registration,A study of widgets,a study of widgets,smith john,smith john,"
+        f"acme press,acme press,{today.year - 80},UUID-0001,1940,100,80,90,90.0,0,"
+        f"PD_REGISTERED_NOT_RENEWED\n"
+    )
+    bogus = (
+        "marc-bbb,Unrelated Title,unrelated title,unrelat titl,,"
+        ",,,,,,,,1955,,,xxu,eng,"
+        ",,,,,,,,,,,,,,GIBBERISH_LABEL\n"
+    )
+    path.write_text(header + "\n" + row + bogus, encoding="utf-8")
 
 
 def test_root_help_lists_subcommands() -> None:
     """The top-level ``--help`` should list every registered command."""
     result = _runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "index" in result.stdout
-    assert "match" in result.stdout
-    assert "eval" in result.stdout
+    for token in ("index", "match", "eval", "train-scorer"):
+        assert token in result.stdout
 
 
 def test_index_help_lists_build_and_info() -> None:
@@ -28,9 +87,8 @@ def test_index_build_help() -> None:
     """``index build --help`` must succeed and mention each option."""
     result = _runner.invoke(app, ["index", "build", "--help"])
     assert result.exit_code == 0
-    assert "--reg-dir" in result.stdout
-    assert "--ren-dir" in result.stdout
-    assert "--out" in result.stdout
+    for flag in ("--reg-dir", "--ren-dir", "--out", "--force"):
+        assert flag in result.stdout
 
 
 def test_index_info_help() -> None:
@@ -44,7 +102,15 @@ def test_match_help_lists_options() -> None:
     """``match --help`` must mention every public option."""
     result = _runner.invoke(app, ["match", "--help"])
     assert result.exit_code == 0
-    for flag in ("--marc", "--index", "--out", "--workers", "--year-window", "--min-score"):
+    for flag in (
+        "--marc",
+        "--index",
+        "--out",
+        "--workers",
+        "--year-window",
+        "--min-score",
+        "--as-of",
+    ):
         assert flag in result.stdout
 
 
@@ -52,86 +118,699 @@ def test_eval_help_lists_options() -> None:
     """``eval --help`` must mention every public option."""
     result = _runner.invoke(app, ["eval", "--help"])
     assert result.exit_code == 0
-    for flag in ("--ground-truth", "--index", "--report"):
+    for flag in ("--ground-truth", "--index", "--report", "--as-of", "--limit"):
         assert flag in result.stdout
 
 
-def test_index_build_exits_with_not_implemented_code() -> None:
-    """``index build`` must parse args and exit 2 (not yet implemented)."""
+def test_train_scorer_help_lists_phase_9_note() -> None:
+    """``train-scorer --help`` must succeed (and mention the Phase 9 placeholder)."""
+    result = _runner.invoke(app, ["train-scorer", "--help"])
+    assert result.exit_code == 0
+    assert "Phase 9" in result.stdout
+
+
+def test_index_build_succeeds_on_tiny_fixtures(tmp_path: Path) -> None:
+    """``index build`` against the tiny fixtures returns code 0 and prints counts."""
+    reg_dir, ren_dir = _stage_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
     result = _runner.invoke(
         app,
         [
             "index",
             "build",
             "--reg-dir",
-            "/tmp/reg",
+            str(reg_dir),
             "--ren-dir",
-            "/tmp/ren",
+            str(ren_dir),
             "--out",
-            "/tmp/idx",
+            str(out_path),
         ],
     )
-    assert result.exit_code == 2
-    assert "not yet implemented" in result.output
+    assert result.exit_code == 0, result.output
+    assert "registrations:" in result.stdout
+    assert out_path.exists()
 
 
-def test_index_info_exits_with_not_implemented_code() -> None:
-    """``index info`` must parse args and exit 2."""
-    result = _runner.invoke(app, ["index", "info", "--lmdb-path", "/tmp/idx"])
-    assert result.exit_code == 2
-    assert "not yet implemented" in result.output
+def test_index_build_force_rebuilds(tmp_path: Path) -> None:
+    """``--force`` triggers a rebuild even when the index is already current."""
+    reg_dir, ren_dir = _stage_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    result = _runner.invoke(
+        app,
+        [
+            "index",
+            "build",
+            "--reg-dir",
+            str(reg_dir),
+            "--ren-dir",
+            str(ren_dir),
+            "--out",
+            str(out_path),
+            "--force",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "skipped: no" in result.stdout
 
 
-def test_match_exits_with_not_implemented_code() -> None:
-    """``match`` must parse args and exit 2."""
+def test_index_build_rejects_missing_reg_dir(tmp_path: Path) -> None:
+    """``index build`` fails fast with exit 1 when ``--reg-dir`` is absent."""
+    result = _runner.invoke(
+        app,
+        [
+            "index",
+            "build",
+            "--reg-dir",
+            str(tmp_path / "missing"),
+            "--ren-dir",
+            str(tmp_path),
+            "--out",
+            str(tmp_path / "idx.lmdb"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--reg-dir" in result.output
+
+
+def test_index_build_rejects_missing_ren_dir(tmp_path: Path) -> None:
+    """``index build`` fails fast with exit 1 when ``--ren-dir`` is absent."""
+    reg_dir, _ = _stage_sources(tmp_path)
+    result = _runner.invoke(
+        app,
+        [
+            "index",
+            "build",
+            "--reg-dir",
+            str(reg_dir),
+            "--ren-dir",
+            str(tmp_path / "missing"),
+            "--out",
+            str(tmp_path / "idx.lmdb"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--ren-dir" in result.output
+
+
+def test_index_build_reports_oserror(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``index build`` surfaces OSError as a runtime failure with exit 1."""
+    reg_dir, ren_dir = _stage_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+
+    def _raise(**_kwargs: object) -> object:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("pd_matcher.cli.build_index", _raise)
+    result = _runner.invoke(
+        app,
+        [
+            "index",
+            "build",
+            "--reg-dir",
+            str(reg_dir),
+            "--ren-dir",
+            str(ren_dir),
+            "--out",
+            str(out_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "disk full" in result.output
+
+
+def test_index_info_succeeds(tmp_path: Path) -> None:
+    """``index info`` prints the populated counts for an existing env."""
+    index_path = _build_index(tmp_path)
+    result = _runner.invoke(app, ["index", "info", "--lmdb-path", str(index_path)])
+    assert result.exit_code == 0, result.output
+    assert "schema_version:" in result.stdout
+    assert "registrations:" in result.stdout
+
+
+def test_index_info_rejects_missing_path(tmp_path: Path) -> None:
+    """``index info`` fails with exit 1 when the env directory is missing."""
+    result = _runner.invoke(app, ["index", "info", "--lmdb-path", str(tmp_path / "nope")])
+    assert result.exit_code == 1
+    assert "does not exist" in result.output
+
+
+def test_index_info_reports_corrupt_env(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``index info`` surfaces RuntimeError from incomplete metadata."""
+    index_path = _build_index(tmp_path)
+
+    class _BrokenLookup:
+        def __init__(self, _path: Path) -> None:
+            pass
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def stats(self) -> object:
+            raise RuntimeError("meta missing")
+
+    monkeypatch.setattr("pd_matcher.cli.NyplIndexLookup", _BrokenLookup)
+    result = _runner.invoke(app, ["index", "info", "--lmdb-path", str(index_path)])
+    assert result.exit_code == 1
+    assert "meta missing" in result.output
+
+
+def test_match_runs_against_tiny_fixtures(tmp_path: Path) -> None:
+    """``match`` end-to-end produces a CSV with one row per MARC record."""
+    index_path = _build_index(tmp_path)
+    out_csv = tmp_path / "out.csv"
     result = _runner.invoke(
         app,
         [
             "match",
             "--marc",
-            "/tmp/a.marcxml",
+            str(_FIXTURES / "tiny.marcxml"),
             "--index",
-            "/tmp/idx",
+            str(index_path),
             "--out",
-            "/tmp/out.csv",
+            str(out_csv),
             "--workers",
-            "4",
+            "1",
             "--year-window",
-            "3",
+            "2",
             "--min-score",
-            "80.0",
+            "30.0",
+            "--as-of",
+            "2026-05-18",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert out_csv.exists()
+    with out_csv.open(encoding="utf-8") as fp:
+        rows = list(DictReader(fp))
+    assert rows
+    assert (tmp_path / "idf.msgpack").exists()
+
+
+def test_match_loads_calibrator_when_present(tmp_path: Path) -> None:
+    """A calibrator at ``<index_parent>/calibrator.msgpack`` is honored."""
+    index_path = _build_index(tmp_path)
+    encoder = Encoder()
+    cal = PlattCalibrator(
+        a=-1.0,
+        b=0.0,
+        trained_at="2026-05-18T00:00:00+00:00",
+        n_positive=10,
+        n_negative=20,
+    )
+    (tmp_path / "calibrator.msgpack").write_bytes(encoder.encode(cal))
+    out_csv = tmp_path / "out.csv"
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(out_csv),
+            "--workers",
+            "1",
+            "--min-score",
+            "1.0",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_match_with_default_workers(tmp_path: Path) -> None:
+    """``match`` without ``--workers`` uses the worker default (cpu_count - 1)."""
+    index_path = _build_index(tmp_path)
+    out_csv = tmp_path / "out.csv"
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(out_csv),
+            "--min-score",
+            "1.0",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_match_rejects_bad_as_of(tmp_path: Path) -> None:
+    """``match --as-of`` rejects malformed dates with exit 2 on stderr."""
+    index_path = _build_index(tmp_path)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.csv"),
+            "--as-of",
+            "not-a-date",
         ],
     )
     assert result.exit_code == 2
-    assert "not yet implemented" in result.output
+    assert "expected ISO date" in result.output
 
 
-def test_eval_exits_with_not_implemented_code() -> None:
-    """``eval`` must parse args (with and without ``--report``) and exit 2."""
+def test_match_rejects_missing_marc(tmp_path: Path) -> None:
+    """``match`` exits 1 when the MARC file is absent."""
+    index_path = _build_index(tmp_path)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(tmp_path / "missing.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.csv"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--marc" in result.output
+
+
+def test_match_rejects_missing_index(tmp_path: Path) -> None:
+    """``match`` exits 1 when the index directory is absent."""
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(tmp_path / "missing.lmdb"),
+            "--out",
+            str(tmp_path / "out.csv"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--index" in result.output
+
+
+def test_match_reports_interrupted(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """When ``run_match`` reports ``interrupted=True`` the CLI exits 130."""
+    index_path = _build_index(tmp_path)
+    out_csv = tmp_path / "out.csv"
+
+    from pd_matcher.workers.pool import RunReport
+
+    def _fake_run_match(**_kwargs: object) -> RunReport:
+        return RunReport(
+            records_processed=2,
+            records_written=1,
+            records_enqueued=3,
+            duration_seconds=0.01,
+            by_status={},
+            interrupted=True,
+        )
+
+    monkeypatch.setattr("pd_matcher.cli.run_match", _fake_run_match)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(out_csv),
+        ],
+    )
+    assert result.exit_code == 130
+    assert "interrupted" in result.output
+
+
+def test_match_surfaces_oserror_from_run_match(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """An OSError from ``run_match`` surfaces as exit 1."""
+    index_path = _build_index(tmp_path)
+
+    def _raise(**_kwargs: object) -> object:
+        raise OSError("pipe broken")
+
+    monkeypatch.setattr("pd_matcher.cli.run_match", _raise)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.csv"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "pipe broken" in result.output
+
+
+def test_match_surfaces_idf_oserror(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """An OSError from ``load_or_build_idf`` surfaces as exit 1."""
+    index_path = _build_index(tmp_path)
+
+    def _raise(*_args: object, **_kwargs: object) -> object:
+        raise OSError("cannot write idf")
+
+    monkeypatch.setattr("pd_matcher.cli.load_or_build_idf", _raise)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.csv"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "cannot write idf" in result.output
+
+
+def test_match_surfaces_matching_config_error(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A ConfigError during matching-defaults load surfaces as exit 1."""
+    index_path = _build_index(tmp_path)
+    from pd_matcher.config.loader import ConfigError
+
+    def _raise() -> object:
+        raise ConfigError("bad yaml")
+
+    monkeypatch.setattr("pd_matcher.cli._load_default_matching_config", _raise)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.csv"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "matching defaults" in result.output
+
+
+def test_match_surfaces_ruleset_error(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A ConfigError during ruleset load surfaces as exit 1."""
+    index_path = _build_index(tmp_path)
+    from pd_matcher.config.loader import ConfigError
+
+    def _raise(_path: Path) -> object:
+        raise ConfigError("ruleset corrupt")
+
+    monkeypatch.setattr("pd_matcher.cli.load_copyright_rules", _raise)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.csv"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "copyright rules" in result.output
+
+
+def test_eval_runs_against_tiny_index(tmp_path: Path) -> None:
+    """``eval`` succeeds against the tiny index + a synthetic GT CSV."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path, date(2026, 5, 18))
+    report_path = tmp_path / "report.json"
     result = _runner.invoke(
         app,
         [
             "eval",
             "--ground-truth",
-            "/tmp/gt.csv",
+            str(gt_path),
             "--index",
-            "/tmp/idx",
+            str(index_path),
             "--report",
-            "/tmp/r.json",
+            str(report_path),
+            "--as-of",
+            "2026-05-18",
+            "--limit",
+            "2",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Eval report:" in result.stdout
+    assert report_path.exists()
+    payload = loads(report_path.read_text(encoding="utf-8"))
+    assert payload["rows_evaluated"] == 2
+
+
+def test_eval_without_report_does_not_write_file(tmp_path: Path) -> None:
+    """When ``--report`` is omitted no JSON file is written."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path, date(2026, 5, 18))
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--ground-truth",
+            str(gt_path),
+            "--index",
+            str(index_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_eval_rejects_bad_as_of(tmp_path: Path) -> None:
+    """``eval --as-of`` rejects malformed dates with exit 2."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path, date(2026, 5, 18))
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--ground-truth",
+            str(gt_path),
+            "--index",
+            str(index_path),
+            "--as-of",
+            "bogus",
         ],
     )
     assert result.exit_code == 2
-    result_no_report = _runner.invoke(
-        app,
-        ["eval", "--ground-truth", "/tmp/gt.csv", "--index", "/tmp/idx"],
-    )
-    assert result_no_report.exit_code == 2
 
 
-def test_root_callback_accepts_json_logs_flag() -> None:
-    """The root callback's ``--json-logs`` flag must be wired through."""
+def test_eval_rejects_missing_ground_truth(tmp_path: Path) -> None:
+    """``eval`` exits 1 when ``--ground-truth`` does not exist."""
+    index_path = _build_index(tmp_path)
     result = _runner.invoke(
         app,
-        ["--log-level", "DEBUG", "--json-logs", "index", "info", "--lmdb-path", "/tmp/x"],
+        [
+            "eval",
+            "--ground-truth",
+            str(tmp_path / "nope.csv"),
+            "--index",
+            str(index_path),
+        ],
     )
+    assert result.exit_code == 1
+    assert "--ground-truth" in result.output
+
+
+def test_eval_rejects_missing_index(tmp_path: Path) -> None:
+    """``eval`` exits 1 when ``--index`` does not exist."""
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path, date(2026, 5, 18))
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--ground-truth",
+            str(gt_path),
+            "--index",
+            str(tmp_path / "missing.lmdb"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--index" in result.output
+
+
+def test_eval_surfaces_matching_config_error(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A ConfigError during matching-defaults load surfaces as exit 1."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path, date(2026, 5, 18))
+    from pd_matcher.config.loader import ConfigError
+
+    def _raise() -> object:
+        raise ConfigError("bad yaml")
+
+    monkeypatch.setattr("pd_matcher.cli._load_default_matching_config", _raise)
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--ground-truth",
+            str(gt_path),
+            "--index",
+            str(index_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "matching defaults" in result.output
+
+
+def test_eval_surfaces_run_eval_oserror(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """An OSError from ``run_eval`` surfaces as exit 1."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path, date(2026, 5, 18))
+
+    def _raise(**_kwargs: object) -> object:
+        raise OSError("io error")
+
+    monkeypatch.setattr("pd_matcher.cli.run_eval", _raise)
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--ground-truth",
+            str(gt_path),
+            "--index",
+            str(index_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "io error" in result.output
+
+
+def test_train_scorer_returns_phase_9_stub() -> None:
+    """``train-scorer`` exits 2 with the Phase 9 placeholder message."""
+    result = _runner.invoke(app, ["train-scorer"])
     assert result.exit_code == 2
+    assert "Phase 9" in result.output
+
+
+def test_root_callback_accepts_log_flags() -> None:
+    """The root callback honors ``--log-level``, ``--json-logs`` and ``--quiet``."""
+    result = _runner.invoke(
+        app,
+        [
+            "--log-level",
+            "DEBUG",
+            "--json-logs",
+            "--quiet",
+            "index",
+            "info",
+            "--lmdb-path",
+            "/tmp/x",
+        ],
+    )
+    assert result.exit_code == 1
+
+
+def test_as_of_past_date_affects_moving_wall(tmp_path: Path) -> None:
+    """``--as-of`` in the deep past short-circuits the moving wall.
+
+    The moving wall (Phase 5) fires when ``pub_year < today.year - 95``.
+    Setting ``--as-of 1950-01-01`` makes the cutoff 1855 — no record in
+    the tiny fixtures qualifies — so no row carries
+    ``PD_BY_AGE_PRE_95_YEARS``. With ``--as-of 2200-01-01`` the cutoff
+    is 2105, every record qualifies, and at least one row carries that
+    status.
+    """
+    index_path = _build_index(tmp_path)
+    out_early = tmp_path / "early.csv"
+    early = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(out_early),
+            "--workers",
+            "1",
+            "--min-score",
+            "1.0",
+            "--as-of",
+            "1950-01-01",
+        ],
+    )
+    assert early.exit_code == 0, early.output
+    with out_early.open(encoding="utf-8") as fp:
+        early_statuses = {row["copyright_status"] for row in DictReader(fp)}
+    assert "PD_BY_AGE_PRE_95_YEARS" not in early_statuses
+
+    out_late = tmp_path / "late.csv"
+    late = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(out_late),
+            "--workers",
+            "1",
+            "--min-score",
+            "1.0",
+            "--as-of",
+            "2200-01-01",
+        ],
+    )
+    assert late.exit_code == 0, late.output
+    with out_late.open(encoding="utf-8") as fp:
+        late_statuses = {row["copyright_status"] for row in DictReader(fp)}
+    assert "PD_BY_AGE_PRE_95_YEARS" in late_statuses
