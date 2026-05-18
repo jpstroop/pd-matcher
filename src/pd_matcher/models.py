@@ -66,8 +66,59 @@ class NyplRenRecord(Struct, frozen=True, forbid_unknown_fields=True):
     full_text: str | None = None
 
 
+class IndexedNyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
+    """A :class:`NyplRegRecord` augmented with its precomputed renewal flag.
+
+    The matcher always cares whether a registration was renewed, so the join
+    against ``ren_by_oreg`` is performed once during index build and baked
+    into this struct rather than re-evaluated per candidate at match time.
+    All other fields mirror :class:`NyplRegRecord` exactly.
+    """
+
+    uuid: str
+    title: str
+    was_renewed: bool
+    regnum: str | None = None
+    reg_date: date | None = None
+    reg_year: int | None = None
+    author_name: str | None = None
+    edition: str | None = None
+    publisher_names: tuple[str, ...] = ()
+    publication_places: tuple[str, ...] = ()
+    claimants: tuple[str, ...] = ()
+
+
+def index_reg(record: NyplRegRecord, *, was_renewed: bool) -> IndexedNyplRegRecord:
+    """Copy a parsed :class:`NyplRegRecord` into an :class:`IndexedNyplRegRecord`.
+
+    Args:
+        record: The parser output to wrap.
+        was_renewed: Pre-resolved renewal status; ``True`` when a matching
+            renewal entry exists in ``ren_by_oreg``.
+
+    Returns:
+        A new :class:`IndexedNyplRegRecord` with the same field values plus
+        the supplied ``was_renewed`` flag.
+    """
+    return IndexedNyplRegRecord(
+        uuid=record.uuid,
+        title=record.title,
+        was_renewed=was_renewed,
+        regnum=record.regnum,
+        reg_date=record.reg_date,
+        reg_year=record.reg_year,
+        author_name=record.author_name,
+        edition=record.edition,
+        publisher_names=record.publisher_names,
+        publication_places=record.publication_places,
+        claimants=record.claimants,
+    )
+
+
 __all__ = [
+    "IndexedNyplRegRecord",
     "MarcRecord",
     "NyplRegRecord",
     "NyplRenRecord",
+    "index_reg",
 ]
