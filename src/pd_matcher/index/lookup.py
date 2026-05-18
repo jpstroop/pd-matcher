@@ -86,6 +86,17 @@ class NyplIndexLookup:
             return None
         return decode_ren(blob)
 
+    def iter_registrations(self) -> Iterator[IndexedNyplRegRecord]:
+        """Yield every registration in the index in storage order.
+
+        Used by Phase 4's IDF builder to scan the entire corpus once and
+        compute per-token document frequencies. The walk is read-only and
+        streams from a single LMDB cursor, so it is safe to invoke while
+        other readers are open.
+        """
+        for _key, blob in self._store.reg_by_id.iter_items():
+            yield decode_reg(blob)
+
     def candidates_for_year(
         self,
         year: int,

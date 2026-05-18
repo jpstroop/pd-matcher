@@ -1,0 +1,176 @@
+"""Tests for :mod:`pd_matcher.match.combiners.weighted_mean`.
+
+These tests pin down the post-walk-back behaviour of the combiner: an
+exact-LCCN ``Evidence`` is **not** a short-circuit; it is just a heavily
+weighted contributor like the other scorers. The combiner is a plain
+weighted mean over present Evidence, end of story.
+"""
+
+from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
+from pd_matcher.match.evidence import Evidence
+
+
+def _ev(
+    scorer: str,
+    score: float,
+    *,
+    skipped: bool = False,
+    decisive: bool = False,
+) -> Evidence:
+    return Evidence(
+        scorer=scorer,
+        score=score,
+        max=100.0,
+        skipped=skipped,
+        decisive=decisive,
+        features=(),
+    )
+
+
+def test_weighted_mean_combines_present_evidence(matching_config: MatchingConfig) -> None:
+    """The combiner averages over present Evidence weighted by config."""
+    combiner = WeightedMeanCombiner(config=matching_config)
+    evidence = (
+        _ev("title.token_set", 100.0),
+        _ev("name.author", 100.0),
+        _ev("name.publisher", 100.0),
+        _ev("year.delta", 100.0),
+        _ev("edition.compat", 100.0),
+        _ev("lccn.exact", 100.0, decisive=True),
+        _ev("isbn.exact", 100.0, decisive=True),
+    )
+    combined = combiner.combine(evidence)
+    assert combined.raw == 100.0
+    assert combined.calibrated == 1.0
+
+
+def test_weighted_mean_partial_evidence(matching_config: MatchingConfig) -> None:
+    """The mean of a single 50/100 Evidence (the rest skipped) is 50."""
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 50.0),
+            _ev("name.author", 100.0, skipped=True),
+        )
+    )
+    assert combined.raw == 50.0
+
+
+def test_weighted_mean_lccn_decisive_does_not_short_circuit(
+    matching_config: MatchingConfig,
+) -> None:
+    """An exact-LCCN Evidence at max is weighted, not a short-circuit.
+
+    With title=0, lccn=100 and the default weights (title=0.40,
+    lccn=0.10), the raw score is the weighted mean over those two present
+    scorers: ``(0.40*0 + 0.10*1.0) / (0.40 + 0.10) * 100 = 20``. It is
+    emphatically not 100.
+    """
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 0.0),
+            _ev("lccn.exact", 100.0, decisive=True),
+        )
+    )
+    expected = (
+        (matching_config.lccn_weight * 1.0)
+        / (matching_config.title_weight + matching_config.lccn_weight)
+        * 100.0
+    )
+    assert combined.raw == expected
+    assert combined.raw < 100.0
+    assert combined.calibrated == combined.raw / 100.0
+
+
+def test_weighted_mean_lccn_match_with_conflicting_title_is_moderate(
+    matching_config: MatchingConfig,
+) -> None:
+    """A perfect LCCN match plus a zero-scoring title yields a moderate raw.
+
+    The whole point of walking back the short-circuit: a transcription
+    error in either side of the LCCN comparison would otherwise have
+    promoted a clear mismatch to 100% confidence.
+    """
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 0.0),
+            _ev("name.author", 0.0),
+            _ev("name.publisher", 0.0),
+            _ev("year.delta", 100.0),
+            _ev("edition.compat", 0.0),
+            _ev("lccn.exact", 100.0, decisive=True),
+        )
+    )
+    # Year + LCCN carry the score: (0.10 + 0.10) / sum_of_all_weights
+    cfg = matching_config
+    denom = (
+        cfg.title_weight
+        + cfg.author_weight
+        + cfg.publisher_weight
+        + cfg.year_weight
+        + cfg.edition_weight
+        + cfg.lccn_weight
+    )
+    expected = ((cfg.year_weight + cfg.lccn_weight) / denom) * 100.0
+    assert combined.raw == expected
+    assert combined.raw < 50.0
+
+
+def test_weighted_mean_isbn_contributes_its_share(matching_config: MatchingConfig) -> None:
+    """A perfect ISBN match contributes its 0.05 share, not 100%."""
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 0.0),
+            _ev("isbn.exact", 100.0, decisive=True),
+        )
+    )
+    expected = (
+        (matching_config.isbn_weight * 1.0)
+        / (matching_config.title_weight + matching_config.isbn_weight)
+        * 100.0
+    )
+    assert combined.raw == expected
+    assert combined.raw < 100.0
+
+
+def test_weighted_mean_skipped_lccn_does_not_contribute(
+    matching_config: MatchingConfig,
+) -> None:
+    """A skipped LCCN Evidence is excluded entirely from the mean."""
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 50.0),
+            _ev("lccn.exact", 100.0, skipped=True, decisive=True),
+        )
+    )
+    assert combined.raw == 50.0
+
+
+def test_weighted_mean_all_skipped_returns_zero(matching_config: MatchingConfig) -> None:
+    """If every Evidence is skipped the raw and calibrated scores are zero."""
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 0.0, skipped=True),
+            _ev("name.author", 0.0, skipped=True),
+        )
+    )
+    assert combined.raw == 0.0
+    assert combined.calibrated == 0.0
+
+
+def test_weighted_mean_ignores_unknown_scorer(matching_config: MatchingConfig) -> None:
+    """Evidence from an unknown scorer is excluded from the mean."""
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 100.0),
+            _ev("mystery.scorer", 0.0),
+        )
+    )
+    assert combined.raw == 100.0
