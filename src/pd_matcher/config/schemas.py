@@ -21,21 +21,45 @@ _DEFAULT_LMDB_MAP_SIZE_BYTES: int = 16 * 1024 * 1024 * 1024
 
 
 class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
-    """Per-field weights and thresholds used by the scoring pipeline."""
+    """Per-field weights and thresholds used by the scoring pipeline.
+
+    The seven field weights (``title_weight``, ``author_weight``,
+    ``publisher_weight``, ``year_weight``, ``edition_weight``,
+    ``lccn_weight``, ``isbn_weight``) must sum to ``1.0`` within
+    :data:`_WEIGHT_SUM_TOLERANCE`. Identifier scorers (LCCN, ISBN) are
+    weighted alongside the heuristic scorers rather than short-circuiting
+    the combiner: in this corpus, transcription/OCR errors give standard
+    identifiers a non-trivial false-positive rate, so the Platt calibrator
+    learns the empirical ``P(true match)`` for the resulting raw scores.
+    """
 
     title_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
     author_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
     publisher_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
+    year_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
+    edition_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
+    lccn_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
+    isbn_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
     year_window: Annotated[int, Meta(ge=0)]
     min_combined_score: Annotated[float, Meta(ge=0.0, le=100.0)]
     scorer: Literal["weighted_mean", "learned"] = "weighted_mean"
 
     def __post_init__(self) -> None:
         """Reject weight tuples that do not sum to 1.0 within tolerance."""
-        total = self.title_weight + self.author_weight + self.publisher_weight
+        total = (
+            self.title_weight
+            + self.author_weight
+            + self.publisher_weight
+            + self.year_weight
+            + self.edition_weight
+            + self.lccn_weight
+            + self.isbn_weight
+        )
         if abs(total - 1.0) > _WEIGHT_SUM_TOLERANCE:
             raise ValueError(
-                f"title_weight + author_weight + publisher_weight must sum to 1.0 (got {total!r})"
+                "title_weight + author_weight + publisher_weight + year_weight + "
+                "edition_weight + lccn_weight + isbn_weight must sum to 1.0 "
+                f"(got {total!r})"
             )
 
 

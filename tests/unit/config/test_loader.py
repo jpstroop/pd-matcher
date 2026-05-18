@@ -17,9 +17,13 @@ def test_load_shipped_matching_defaults() -> None:
     resource = files("pd_matcher.config.defaults") / "matching.yaml"
     with as_file(resource) as path:
         cfg = load_matching_config(path)
-    assert cfg.title_weight == 0.5
-    assert cfg.author_weight == 0.3
-    assert cfg.publisher_weight == 0.2
+    assert cfg.title_weight == 0.40
+    assert cfg.author_weight == 0.20
+    assert cfg.publisher_weight == 0.10
+    assert cfg.year_weight == 0.10
+    assert cfg.edition_weight == 0.05
+    assert cfg.lccn_weight == 0.10
+    assert cfg.isbn_weight == 0.05
     assert cfg.year_window == 2
     assert cfg.min_combined_score == 70.0
     assert cfg.scorer == "weighted_mean"
@@ -66,6 +70,7 @@ def test_load_matching_config_raises_on_schema_violation(tmp_path: Path) -> None
     bad = tmp_path / "bad_schema.yaml"
     bad.write_text(
         "title_weight: 0.9\nauthor_weight: 0.3\npublisher_weight: 0.1\n"
+        "year_weight: 0.05\nedition_weight: 0.05\n"
         "year_window: 2\nmin_combined_score: 50.0\n",
         encoding="utf-8",
     )
