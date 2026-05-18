@@ -1,11 +1,12 @@
 """Pragmatic-assumption wrappers around :mod:`predicates`.
 
 The Cornell matrix conditions on facts we cannot directly observe from
-MARC + NYPL (notice present? US-gov work? in foreign-country PD by 1996?).
-We do not attempt strict three-valued logic; instead each inference here
-encodes one *documented* assumption and returns the assumption string so
-the rule engine can surface it in the final assessment. A human reviewer
-can therefore see exactly which leaps the engine took.
+MARC + the CCE registration corpus (notice present? US-gov work? in
+foreign-country PD by 1996?). We do not attempt strict three-valued
+logic; instead each inference here encodes one *documented* assumption
+and returns the assumption string so the rule engine can surface it in
+the final assessment. A human reviewer can therefore see exactly which
+leaps the engine took.
 
 Inference functions return ``(value, assumption | None)``. ``value`` is
 the boolean the predicate slot expects; ``assumption`` is ``None`` when
@@ -59,9 +60,9 @@ def has_us_notice(facts: Facts) -> tuple[bool, str | None]:
     """Return whether the work bore a US copyright notice (assumed from registration).
 
     Catalogers attached the copyright symbol to registered works as a
-    matter of standard practice; the NYPL registration itself is strong
-    evidence of notice. We therefore treat ``was_registered=True`` as
-    sufficient and surface the assumption to the assessment.
+    matter of standard practice; a surviving CCE registration is itself
+    strong evidence of notice. We therefore treat ``was_registered=True``
+    as sufficient and surface the assumption to the assessment.
     """
     if facts.was_registered:
         return True, "Assumed notice: registration implies notice was affixed"

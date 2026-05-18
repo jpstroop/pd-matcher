@@ -113,7 +113,7 @@ def test_assess_record_enable_assumptions_flag_threads_through() -> None:
                     PredicateCall(predicate="was_registered"),
                     PredicateCall(predicate="has_us_notice"),
                 ],
-                then="IN_COPYRIGHT_US_PUB_REGISTERED_AND_RENEWED",
+                then="IN_COPYRIGHT_REGISTERED_AND_RENEWED",
                 explanation="needs notice",
             ),
         ],
@@ -128,7 +128,7 @@ def test_assess_record_enable_assumptions_flag_threads_through() -> None:
         ruleset=custom,
         enable_assumptions=False,
     )
-    assert permissive.status is CopyrightStatus.IN_COPYRIGHT_US_PUB_REGISTERED_AND_RENEWED
+    assert permissive.status is CopyrightStatus.IN_COPYRIGHT_REGISTERED_AND_RENEWED
     assert strict.status is CopyrightStatus.UNKNOWN_NO_RULE_MATCHED
 
 

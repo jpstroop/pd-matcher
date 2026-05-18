@@ -85,7 +85,7 @@ def test_iter_nypl_ren_records_raises_on_unexpected_header(tmp_path: Path) -> No
     with raises(NyplRenHeaderError) as excinfo:
         list(iter_nypl_ren_records(bad))
     message = str(excinfo.value)
-    assert "Unexpected NYPL renewal header" in message
+    assert "Unexpected CCE renewal header" in message
     assert "pre-1978" in message
     assert "from-db" in message
     assert "'author'" in message

@@ -5,9 +5,20 @@ version: "1.0.0"
 # encodes only the two Cornell categories that apply to MARC book
 # records:
 #
-#   * Category 2 -- works first published in the United States,
-#     including the federal-government carve-out.
-#   * Category 3 -- works first published outside the United States.
+#   * Category 2 -- works first published in the United States OR
+#     registered with the US Copyright Office. Cornell's title for this
+#     category is "Works Registered or First Published in the US"; the
+#     two paths are independent. A foreign-authored work that registered
+#     with the US Copyright Office obtained US copyright protection on
+#     the same terms as a US-published work, so the formality-failure
+#     rules below (not-renewed / no-notice-cure-by-registration) gate on
+#     registration rather than country.
+#   * Category 3 -- works first published outside the United States that
+#     did NOT register with the US Copyright Office. URAA restoration
+#     only restores works that *failed* the US formalities; a CCE
+#     registration *is* the US formality, so any foreign-registered work
+#     follows Category 2 instead. The Category 3 rules below carry an
+#     explicit ``was_registered`` (negated) predicate to enforce this.
 #
 # Categories 1 (unpublished), 4 (sound recordings) and 5 (architectural)
 # are intentionally absent from both this file and the supporting code.
@@ -43,10 +54,10 @@ rules:
     assumptions: []
 
   # ---------------------------------------------------------------- #
-  # Category 2: US-published 1931-1977.                              #
-  # Three exit doors -- no notice / with notice not renewed / with   #
-  # notice and renewed. Order: cheapest / most certain evidence      #
-  # first.                                                           #
+  # Category 2: US-published 1931-1977 with no surviving registration.#
+  # Formality failure (no notice, no registration) is a US-specific  #
+  # concept -- a foreign-published work without a US registration    #
+  # follows Category 3 (URAA), not this branch.                      #
   # ---------------------------------------------------------------- #
 
   - name: us_pub_1931_1977_not_registered_no_notice
@@ -58,58 +69,90 @@ rules:
         negate: true
     then: PD_US_PUB_NO_NOTICE_1931_1977
     explanation: >-
-      US-published 1931-1977 with no surviving NYPL registration;
-      under the pre-1989 formality regime publication without notice
-      and without registration placed the work in the public domain.
+      US-published 1931-1977 with no surviving CCE registration; under
+      the pre-1989 formality regime publication without notice and
+      without registration placed the work in the public domain.
     assumptions:
-      - "Assumed no notice: absence of NYPL registration treated as evidence of no notice"
+      - "Assumed no notice: absence of CCE registration treated as evidence of no notice"
 
-  - name: us_pub_1931_1963_registered_not_renewed
+  # ---------------------------------------------------------------- #
+  # Category 2: registered 1931-1963 -- renewal branch.              #
+  # Foreign authors routinely registered works with the US Copyright #
+  # Office to obtain US protection; those works appear in the CCE.   #
+  # Registration is the formality that matters here, not country of  #
+  # first publication, so neither rule gates on ``country_is_us``.   #
+  # ---------------------------------------------------------------- #
+
+  - name: registered_1931_1963_not_renewed
     when:
-      - predicate: country_is_us
       - predicate: published_between
         args: [1931, 1963]
       - predicate: has_us_notice
       - predicate: was_registered
       - predicate: was_renewed
         negate: true
-    then: PD_US_PUB_REGISTERED_NOT_RENEWED
+    then: PD_REGISTERED_NOT_RENEWED
     explanation: >-
-      US-published 1931-1963 with notice (assumed because registered)
-      and never renewed during the 28th-year window; the work fell
-      into the public domain when its first term expired.
+      Registered work, regardless of country of first publication, that
+      was not renewed during its initial term (1931-1963 publication
+      cohort, 28-year window). The work fell into the public domain
+      when its first term expired. Foreign-authored works that
+      registered with the US Copyright Office follow the same rule as
+      US-published works.
     assumptions: []
 
-  - name: us_pub_1931_1963_registered_and_renewed
+  - name: registered_1931_1963_renewed
     when:
-      - predicate: country_is_us
       - predicate: published_between
         args: [1931, 1963]
       - predicate: has_us_notice
       - predicate: was_registered
       - predicate: was_renewed
-    then: IN_COPYRIGHT_US_PUB_REGISTERED_AND_RENEWED
+    then: IN_COPYRIGHT_REGISTERED_AND_RENEWED
     explanation: >-
-      US-published 1931-1963 with notice and timely renewal;
-      protected for 95 years from the date of publication.
+      Registered work with timely renewal (1931-1963 publication cohort).
+      Protected for 95 years from the date of publication. Applies to
+      foreign-authored works that obtained US copyright via CCE
+      registration as well as to US-published works.
     assumptions: []
 
-  - name: us_pub_1964_1977_with_notice
+  - name: registered_1964_1977_with_notice
     when:
-      - predicate: country_is_us
       - predicate: published_between
         args: [1964, 1977]
       - predicate: has_us_notice
-    then: IN_COPYRIGHT_US_PUB_1964_1977_WITH_NOTICE
+    then: IN_COPYRIGHT_1964_1977_WITH_NOTICE
     explanation: >-
-      US-published 1964-1977 with notice; renewal was automatic for
-      this cohort, so the work is protected for 95 years from
+      Registered work, regardless of country of first publication,
+      published 1964-1977 with notice; renewal was automatic for this
+      cohort, so the work is protected for 95 years from publication.
+    assumptions: []
+
+  # ---------------------------------------------------------------- #
+  # Category 2: 1978 -- 28 Feb 1989, registration cure.              #
+  # Any registered work in the window enjoys the cure; foreign-      #
+  # registered works are included.                                   #
+  # ---------------------------------------------------------------- #
+
+  - name: registered_1978_1989_cured
+    when:
+      - predicate: published_between
+        args: [1978, 1989]
+      - predicate: was_registered
+    then: IN_COPYRIGHT_1978_1989_CURED
+    explanation: >-
+      Published between 1 Jan 1978 and 28 Feb 1989 with a surviving CCE
+      registration; even if notice was originally omitted, the five-year
+      registration cure preserved the copyright. Applies to any
+      registered work in the window, regardless of country of first
       publication.
     assumptions: []
 
   # ---------------------------------------------------------------- #
-  # Category 2: US-published 1978 -- 28 Feb 1989.                    #
-  # The five-year cure window for missing notice produces two leaves.#
+  # Category 2: US-published 1978 -- 28 Feb 1989, no registration.   #
+  # No-notice/no-registration formality failure is uniquely a US     #
+  # concept; foreign-published unregistered works in the same window #
+  # follow the URAA branch in Category 3.                            #
   # ---------------------------------------------------------------- #
 
   - name: us_pub_1978_1989_no_registration
@@ -126,24 +169,13 @@ rules:
       omission was never corrected and the work entered the public
       domain.
     assumptions:
-      - "Assumed no notice: absence of NYPL registration within five years treated as no cure"
-
-  - name: us_pub_1978_1989_registered
-    when:
-      - predicate: country_is_us
-      - predicate: published_between
-        args: [1978, 1989]
-      - predicate: was_registered
-    then: IN_COPYRIGHT_US_PUB_1978_1989_CURED
-    explanation: >-
-      US-published between 1 Jan 1978 and 28 Feb 1989 with a
-      surviving registration; even if notice was originally omitted,
-      the five-year registration cure preserved the copyright.
-    assumptions: []
+      - "Assumed no notice: absence of CCE registration within five years treated as no cure"
 
   # ---------------------------------------------------------------- #
   # Category 2: US-published 1 Mar 1989 onward.                       #
-  # Notice is no longer required after Berne implementation.         #
+  # Notice is no longer required after Berne implementation. This is #
+  # US-specific because foreign post-1989 works have a separate rule #
+  # (URAA does not apply, but Category 3's post-1989 branch does).   #
   # ---------------------------------------------------------------- #
 
   - name: us_pub_post_1989
@@ -159,10 +191,23 @@ rules:
     assumptions: []
 
   # ---------------------------------------------------------------- #
-  # Category 3: Foreign-published works.                             #
+  # Category 3: Foreign-published works that did NOT register with   #
+  # the US Copyright Office.                                         #
+  #                                                                  #
+  # URAA restoration only restores works that *failed* the US        #
+  # formalities; a CCE registration *is* the US formality. Every     #
+  # URAA-adjacent rule therefore requires ``was_registered`` to be   #
+  # false. The two exceptions are:                                   #
+  #   * ``foreign_no_treaty_country`` -- a registration in a country #
+  #     with no copyright relations would have been unenforceable,   #
+  #     so the no-treaty status dominates.                           #
+  #   * ``foreign_delayed_uraa_insufficient_data`` -- already a punt #
+  #     to UNKNOWN; the country-specific restoration date is what we #
+  #     need, regardless of registration.                            #
+  #                                                                  #
   # Order: (1) no-treaty countries, (2) pre-1923 foreign-PD-by-1996  #
-  # inference, (3) URAA-restored mid-century works, (4) post-1989    #
-  # works, (5) the 31 Dec 2047 floor case, (6) delayed-URAA fallback.#
+  # inference, (3) URAA-restored mid-century works, (4) the 31 Dec   #
+  # 2047 floor case, (5) post-1989 works, (6) delayed-URAA fallback. #
   # ---------------------------------------------------------------- #
 
   - name: foreign_no_treaty_country
@@ -172,23 +217,30 @@ rules:
     explanation: >-
       First published in a country with no US copyright relations
       (Eritrea, Ethiopia, Iran, Iraq, Marshall Islands, San Marino);
-      US copyright never attached.
+      US copyright never attached. Country status dominates: even a
+      CCE registration in such a country would have been unenforceable.
     assumptions: []
 
   - name: foreign_pre_1923_pd_home_country_1996
     when:
       - predicate: country_is_foreign
+      - predicate: was_registered
+        negate: true
       - predicate: foreign_in_pd_home_country_1996
     then: PD_FOREIGN_IN_HOME_COUNTRY_PD_1996
     explanation: >-
-      Foreign work published before 1923 and presumed to have entered
-      the public domain in its source country by 1 January 1996;
-      URAA did not restore US copyright.
+      Foreign work published before 1923, never registered with the US
+      Copyright Office, and presumed to have entered the public domain
+      in its source country by 1 January 1996; URAA did not restore US
+      copyright. A surviving CCE registration would route the work
+      through Category 2 instead.
     assumptions: []
 
   - name: foreign_1931_1977_uraa_restored
     when:
       - predicate: country_is_foreign
+      - predicate: was_registered
+        negate: true
       - predicate: published_between
         args: [1931, 1977]
       - predicate: country_delayed_uraa
@@ -196,13 +248,18 @@ rules:
     then: IN_COPYRIGHT_FOREIGN_URAA_RESTORED
     explanation: >-
       Foreign work first published 1931-1977 in a country whose URAA
-      restoration date is 1 January 1996; US copyright was restored
-      and runs 95 years from publication.
+      restoration date is 1 January 1996, with no surviving CCE
+      registration; US copyright was restored under URAA and runs 95
+      years from publication. Foreign works that DID register with the
+      US Copyright Office follow Category 2 (registered_*) instead --
+      URAA only restores works that failed the US formalities.
     assumptions: []
 
   - name: foreign_1978_2002_pre_1978_creation_floor
     when:
       - predicate: country_is_foreign
+      - predicate: was_registered
+        negate: true
       - predicate: published_between
         args: [1978, 2002]
       - predicate: country_no_treaty
@@ -211,15 +268,17 @@ rules:
         negate: true
     then: IN_COPYRIGHT_PRE_1978_PUBLISHED_1978_2002_FLOOR
     explanation: >-
-      Foreign-published 1978-2002 with a presumed pre-1978 creation
-      date: the 31 Dec 2047 floor applies (greater of 70 yr p.m.a.
-      or the floor).
+      Foreign-published 1978-2002, never registered with the US
+      Copyright Office, with a presumed pre-1978 creation date: the
+      31 Dec 2047 floor applies (greater of 70 yr p.m.a. or the floor).
     assumptions:
       - "Assumed pre-1978 creation: applied 31 Dec 2047 floor for foreign 1978-2002 publication"
 
   - name: foreign_post_1989_with_relations
     when:
       - predicate: country_is_foreign
+      - predicate: was_registered
+        negate: true
       - predicate: published_on_or_after
         args: [2003]
       - predicate: country_no_treaty
@@ -229,8 +288,9 @@ rules:
     then: IN_COPYRIGHT_FOREIGN_POST_1989
     explanation: >-
       Foreign work first published on or after 1 January 2003 in a
-      country with US copyright relations; protected for 70 years
-      post-mortem auctoris (or corporate terms).
+      country with US copyright relations, never registered with the
+      US Copyright Office; protected for 70 years post-mortem auctoris
+      (or corporate terms).
     assumptions: []
 
   - name: foreign_delayed_uraa_insufficient_data

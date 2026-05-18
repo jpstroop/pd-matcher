@@ -1,10 +1,12 @@
 """Copyright rule engine — Phase 5 of the pd_matcher pipeline.
 
 Public entry point: :func:`assess_record`. Given a parsed MARC record and
-the matcher's verdict (which may be ``None`` when no match was found),
-it returns a :class:`CopyrightAssessment` describing the work's
-public-domain status, the rule that fired, and any documented
-assumptions the inference layer relied on.
+the matcher's verdict against the CCE registration corpus (the U.S.
+Copyright Office's Catalog of Copyright Entries, published by the
+Library of Congress and transcribed into XML/TSV by NYPL), it returns a
+:class:`CopyrightAssessment` describing the work's public-domain status,
+the rule that fired, and any documented assumptions the inference layer
+relied on.
 
 The shipped Cornell ruleset is loaded once at import time from
 ``pd_matcher/config/defaults/copyright_rules.yaml`` and cached for the
@@ -62,10 +64,10 @@ def assess_record(
         today: Reference date for age-sensitive predicates; defaults to
             :meth:`date.today`. Pin a value for tests and reproducible
             runs.
-        matched_nypl: The hydrated NYPL registration corresponding to
-            ``match.best``. Optional; supply it to enable publisher-
-            based inference (e.g. US-government detection) on the
-            NYPL side.
+        matched_nypl: The hydrated CCE registration corresponding to
+            ``match.best`` (loaded from the NYPL-transcribed index).
+            Optional; supply it to enable publisher-based inference
+            (e.g. US-government detection) on the registration side.
         ruleset: An override ruleset; defaults to the shipped Cornell
             matrix.
         enable_assumptions: When ``False``, predicates that surface a

@@ -1,12 +1,14 @@
 """Optional end-to-end index build against the real submodule data.
 
-Skipped when the NYPL submodules are not checked out. When the submodules
-are present this test builds the full LMDB index into ``tmp_path`` and
-asserts the produced counts are within order-of-magnitude bands. Measured
-against the corpus as of project init: ~2.17M registrations, ~444k
-renewals, ~160k renewal joins, ~95 year buckets, full build in ~37s. The
-corpus may evolve over time, so the assertions deliberately use generous
-bands instead of exact counts.
+The submodules contain NYPL's XML/TSV transcription of the U.S. Copyright
+Office's Catalog of Copyright Entries (CCE), which is published by the
+Library of Congress. This test is skipped when those submodules are not
+checked out. When the submodules are present it builds the full LMDB
+index into ``tmp_path`` and asserts the produced counts are within
+order-of-magnitude bands. Measured against the corpus as of project init:
+~2.17M registrations, ~444k renewals, ~160k renewal joins, ~95 year
+buckets, full build in ~37s. The corpus may evolve over time, so the
+assertions deliberately use generous bands instead of exact counts.
 """
 
 from pathlib import Path

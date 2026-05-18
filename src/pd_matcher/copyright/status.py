@@ -29,9 +29,12 @@ class CopyrightStatus(StrEnum):
     PD_US_PUB_NO_NOTICE_1931_1977 = "PD_US_PUB_NO_NOTICE_1931_1977"
     """Category 2: US-published 1931-1977 without copyright notice."""
 
-    PD_US_PUB_REGISTERED_NOT_RENEWED = "PD_US_PUB_REGISTERED_NOT_RENEWED"
-    """Category 2: US-published 1931-1963 with notice but the copyright
-    was not renewed during its 28th year."""
+    PD_REGISTERED_NOT_RENEWED = "PD_REGISTERED_NOT_RENEWED"
+    """Category 2: any registered work, 1931-1963, with notice (assumed
+    from registration) but never renewed during its 28th year. Foreign
+    authors could and did register works with the US Copyright Office;
+    a CCE registration is the US formality regardless of the work's
+    country of first publication."""
 
     PD_US_PUB_NO_REGISTRATION_1978_1989 = "PD_US_PUB_NO_REGISTRATION_1978_1989"
     """Category 2: US-published 1978-1 Mar 1989 without notice and
@@ -49,17 +52,22 @@ class CopyrightStatus(StrEnum):
     """Category 3: first published in a country with no US copyright
     relations (Eritrea, Ethiopia, Iran, Iraq, Marshall Islands, etc.)."""
 
-    IN_COPYRIGHT_US_PUB_REGISTERED_AND_RENEWED = "IN_COPYRIGHT_US_PUB_REGISTERED_AND_RENEWED"
-    """Category 2: US-published 1931-1963 with notice and timely
-    renewal; copyright runs 95 years from publication."""
+    IN_COPYRIGHT_REGISTERED_AND_RENEWED = "IN_COPYRIGHT_REGISTERED_AND_RENEWED"
+    """Category 2: any registered work, 1931-1963, with notice and timely
+    renewal; copyright runs 95 years from publication. Applies to
+    foreign-authored works that obtained US copyright via CCE
+    registration as well as to US-published works."""
 
-    IN_COPYRIGHT_US_PUB_1964_1977_WITH_NOTICE = "IN_COPYRIGHT_US_PUB_1964_1977_WITH_NOTICE"
-    """Category 2: US-published 1964-1977 with notice; automatic
-    renewal; copyright runs 95 years from publication."""
+    IN_COPYRIGHT_1964_1977_WITH_NOTICE = "IN_COPYRIGHT_1964_1977_WITH_NOTICE"
+    """Category 2: any registered work, 1964-1977, with notice; renewal
+    was automatic for this cohort, so copyright runs 95 years from
+    publication regardless of country of first publication."""
 
-    IN_COPYRIGHT_US_PUB_1978_1989_CURED = "IN_COPYRIGHT_US_PUB_1978_1989_CURED"
-    """Category 2: US-published 1978-1 Mar 1989 without notice but
-    registered within five years (defect cured)."""
+    IN_COPYRIGHT_1978_1989_CURED = "IN_COPYRIGHT_1978_1989_CURED"
+    """Category 2: 1978-1 Mar 1989 publication with a surviving
+    registration; even if notice was originally omitted, the five-year
+    registration cure preserved the copyright. Applies to any
+    registered work in the window."""
 
     IN_COPYRIGHT_US_PUB_POST_1989 = "IN_COPYRIGHT_US_PUB_POST_1989"
     """Category 2: US-published on or after 1 Mar 1989; notice is no
