@@ -7,3 +7,11 @@ confidence score.
 
 See `data/ANALYSIS_RESULTS.md` for the empirical findings that drive the
 scoring strategy.
+
+## Setup
+
+After cloning, install dependencies with `pdm install`, then wire up the
+pre-commit hook with `pdm run pre-commit install`. The hook formats and
+lints touched Python files and applies standard whitespace hygiene on
+every commit; the heavier gates (`mypy`, `pytest`) run via `pdm run gates`
+and (eventually) CI.

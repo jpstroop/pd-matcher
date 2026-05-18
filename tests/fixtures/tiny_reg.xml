@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<copyrightEntries>
+  <copyrightEntry regnum="A111111" id="UUID-0001"><author><authorName>Smith, John</authorName></author><title>A study of widgets.</title><edition>1st ed.</edition><regDate date="1940-05-10">May 10, 1940</regDate><publisher><pubName claimant="yes">Acme Press</pubName><pubPlace>New York</pubPlace></publisher></copyrightEntry>
+  <copyrightEntry regnum="A222222" id="UUID-0002"><author><authorName>Dubois, David</authorName></author><title>Le petit livre.</title><regDate date="1955-03-02">Mar. 2, 1955</regDate><publisher><pubName claimant="yes">Editions Beta</pubName><pubPlace>Paris</pubPlace></publisher><publisher><pubName>Distributor Inc.</pubName><pubPlace>London</pubPlace></publisher><claimant>Estate of Dubois</claimant></copyrightEntry>
+  <copyrightEntry regnum="A333333" id="UUID-0003"><title>Untitled author.</title><regDate date="1962-07-04">Jul. 4, 1962</regDate></copyrightEntry>
+  <copyrightEntry id="UUID-0004"><author><authorName>No Regnum</authorName></author><title>Edge case.</title><regDate>1965</regDate></copyrightEntry>
+  <copyrightEntry regnum="A555555" id="UUID-0005"><author><authorName>Missing Date</authorName></author><title>No date here.</title></copyrightEntry>
+  <copyrightEntry regnum="A666666" id=""><title>Empty id is unusable.</title></copyrightEntry>
+  <copyrightEntry regnum="A777777" id="UUID-0007"><title>   </title></copyrightEntry>
+  <copyrightEntry regnum="A888888" id="UUID-0008"><author><authorName>Bad Date</authorName></author><title>Bad date attribute.</title><regDate date="not-a-date">unknown</regDate></copyrightEntry>
+  <copyrightEntry regnum="A999999" id="UUID-0009"><author><authorName>No Reg Date Text</authorName></author><title>Blank regDate text.</title><regDate/></copyrightEntry>
+  <copyrightEntry regnum="A000010" id="UUID-0010"><title>Publisher edge cases.</title><publisher><pubName claimant="yes"/><pubName>Real Name</pubName><pubPlace/><pubPlace>Real Place</pubPlace></publisher><claimant/></copyrightEntry>
+</copyrightEntries>

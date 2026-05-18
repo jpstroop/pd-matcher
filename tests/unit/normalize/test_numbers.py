@@ -1,0 +1,120 @@
+"""Tests for :mod:`pd_matcher.normalize.numbers`."""
+
+from hypothesis import given
+from hypothesis.strategies import integers
+
+from pd_matcher.normalize.numbers import normalize_numbers
+from pd_matcher.normalize.numbers import ordinal_word_to_int
+from pd_matcher.normalize.numbers import roman_to_arabic
+from pd_matcher.normalize.numbers import word_to_int
+
+
+def test_roman_to_arabic_handles_standard_cases() -> None:
+    assert roman_to_arabic("I") == 1
+    assert roman_to_arabic("iv") == 4
+    assert roman_to_arabic("XIV") == 14
+    assert roman_to_arabic("MCMXLIV") == 1944
+
+
+def test_roman_to_arabic_rejects_empty_and_invalid() -> None:
+    assert roman_to_arabic("") is None
+    assert roman_to_arabic("abc") is None
+    assert roman_to_arabic("xq") is None
+
+
+def _int_to_roman(value: int) -> str:
+    table = [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ]
+    out: list[str] = []
+    remaining = value
+    for amount, symbol in table:
+        while remaining >= amount:
+            out.append(symbol)
+            remaining -= amount
+    return "".join(out)
+
+
+@given(integers(min_value=1, max_value=3999))
+def test_roman_to_arabic_round_trips_canonical_form(value: int) -> None:
+    assert roman_to_arabic(_int_to_roman(value)) == value
+
+
+def test_word_to_int_supported_languages() -> None:
+    assert word_to_int("Three", "eng") == 3
+    assert word_to_int("trois", "fre") == 3
+    assert word_to_int("drei", "ger") == 3
+    assert word_to_int("tres", "spa") == 3
+    assert word_to_int("tre", "ita") == 3
+
+
+def test_word_to_int_falls_back_to_english_for_unknown_language() -> None:
+    assert word_to_int("seven", "lat") == 7
+
+
+def test_word_to_int_returns_none_for_unknown_word() -> None:
+    assert word_to_int("flarp", "eng") is None
+    assert word_to_int("", "eng") is None
+
+
+def test_ordinal_word_to_int_supported_languages() -> None:
+    assert ordinal_word_to_int("First", "eng") == 1
+    assert ordinal_word_to_int("premier", "fre") == 1
+    assert ordinal_word_to_int("erste", "ger") == 1
+    assert ordinal_word_to_int("primero", "spa") == 1
+    assert ordinal_word_to_int("primo", "ita") == 1
+
+
+def test_ordinal_word_to_int_returns_none_for_unknown_word() -> None:
+    assert ordinal_word_to_int("zeroth", "eng") is None
+    assert ordinal_word_to_int("", "eng") is None
+
+
+def test_ordinal_word_to_int_falls_back_to_english() -> None:
+    assert ordinal_word_to_int("second", "lat") == 2
+
+
+def test_normalize_numbers_expands_abbreviations_and_words() -> None:
+    out = normalize_numbers("Vol. III, ed. first", "eng")
+    assert out == "volume 3 edition 1"
+
+
+def test_normalize_numbers_passes_unknown_tokens_through() -> None:
+    out = normalize_numbers("a study of widgets", "eng")
+    assert out == "a study of widgets"
+
+
+def test_normalize_numbers_converts_number_words_in_situ() -> None:
+    out = normalize_numbers("three little widgets", "eng")
+    assert out == "3 little widgets"
+
+
+def test_normalize_numbers_handles_french_ordinals() -> None:
+    out = normalize_numbers("premier livre", "fre")
+    assert out == "1 livre"
+
+
+def test_normalize_numbers_empty_string() -> None:
+    assert normalize_numbers("", "eng") == ""
+
+
+def test_normalize_numbers_handles_multiple_abbreviations() -> None:
+    out = normalize_numbers("no. 3 pt. ii bk. iv", "eng")
+    assert out == "number 3 part 2 book 4"
+
+
+def test_normalize_numbers_treats_pure_punctuation_token_as_passthrough() -> None:
+    out = normalize_numbers("3 , ii", "eng")
+    assert out == "3 , 2"
