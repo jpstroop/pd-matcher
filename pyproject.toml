@@ -12,7 +12,6 @@ dependencies = [
     "lxml>=5.3.0",
     "rapidfuzz>=3.10.0",
     "lmdb>=1.5.1",
-    "msgpack>=1.1.0",
     "PyStemmer>=2.2.0.3",
     "typer[all]>=0.15.0",
     "rich>=13.9.0",
@@ -64,7 +63,7 @@ warn_unreachable = true
 no_implicit_reexport = true
 
 [[tool.mypy.overrides]]
-module = ["Stemmer", "lmdb", "msgpack"]
+module = ["Stemmer"]
 ignore_missing_imports = true
 
 [tool.ruff]
@@ -104,7 +103,10 @@ line-ending = "lf"
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-addopts = "--cov=src/pd_matcher --cov-branch --cov-fail-under=100 --cov-report=term-missing"
+addopts = "--cov=src/pd_matcher --cov-branch --cov-fail-under=100 --cov-report=term-missing -m 'not slow'"
+markers = [
+    "slow: long-running integration tests (excluded from default run)",
+]
 
 [tool.coverage.run]
 branch = true
