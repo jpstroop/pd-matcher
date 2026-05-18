@@ -8,10 +8,12 @@ from msgspec import to_builtins
 from pytest import raises
 
 from pd_matcher.config.loader import _path_dec_hook
+from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRule
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import IndexConfig
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.config.schemas import PredicateCall
 
 
 def _valid_matching() -> dict[str, object]:
@@ -84,25 +86,54 @@ def test_matching_config_forbids_extra_fields() -> None:
         convert(data, type=MatchingConfig)
 
 
-def test_copyright_rule_roundtrip_and_validation() -> None:
-    """CopyrightRule should round-trip and reject blank predicates."""
+def test_predicate_call_roundtrip_and_defaults() -> None:
+    """PredicateCall round-trips and defaults ``args``/``negate`` correctly."""
+    call = convert(
+        {"predicate": "published_between", "args": [1931, 1989]},
+        type=PredicateCall,
+    )
+    again = convert(to_builtins(call), type=PredicateCall)
+    assert call == again
+    assert call.negate is False
+    bare = convert({"predicate": "country_is_us"}, type=PredicateCall)
+    assert bare.args == ()
+    assert bare.negate is False
+
+
+def test_predicate_call_is_frozen_and_forbids_extras() -> None:
+    """PredicateCall rejects mutation and unknown fields."""
+    call = convert({"predicate": "p"}, type=PredicateCall)
+    with raises(AttributeError):
+        setattr(call, "predicate", "q")
+    with raises(ValidationError):
+        convert({"predicate": "p", "x": 1}, type=PredicateCall)
+
+
+def test_copyright_rule_roundtrip() -> None:
+    """CopyrightRule should round-trip through to_builtins."""
     rule = convert(
         {
             "name": "pd_pre_1929",
-            "when": ["published_in_range(0, 1928)"],
-            "then": "PD_PRE_1929",
-            "explanation": "Anything published before 1929 is in the public domain.",
+            "when": [{"predicate": "published_before", "args": [1929]}],
+            "then": "PD_BY_AGE_PRE_95_YEARS",
+            "explanation": "Published before 1929; PD by age alone.",
+            "assumptions": ["moving-wall snapshot"],
         },
         type=CopyrightRule,
     )
     again = convert(to_builtins(rule), type=CopyrightRule)
     assert rule == again
-    with raises(ValueError, match=r"when\[0\] is empty"):
+    assert rule.when[0].args == (1929,)
+
+
+def test_copyright_rule_rejects_blank_predicate_name() -> None:
+    """The min-length constraint must reject an empty predicate name."""
+    with raises(ValidationError):
         convert(
             {
                 "name": "bad",
-                "when": ["   "],
-                "then": "UNKNOWN",
+                "when": [{"predicate": ""}],
+                "then": "UNKNOWN_NO_RULE_MATCHED",
                 "explanation": "x",
             },
             type=CopyrightRule,
@@ -154,6 +185,29 @@ def test_copyright_rule_set_is_frozen_and_forbids_extras() -> None:
         setattr(rs, "version", "2.0.0")
     with raises(ValidationError):
         convert({"version": "1.0.0", "rules": [], "extra": 1}, type=CopyrightRuleSet)
+
+
+def test_copyright_assessment_config_defaults_and_overrides() -> None:
+    """CopyrightAssessmentConfig defaults ``today`` to None and round-trips."""
+    cfg = convert({}, type=CopyrightAssessmentConfig)
+    assert cfg.today is None
+    assert cfg.enable_assumptions is True
+    cfg2 = convert(
+        {"today": "2026-05-18", "enable_assumptions": False},
+        type=CopyrightAssessmentConfig,
+    )
+    assert cfg2.enable_assumptions is False
+    again = convert(to_builtins(cfg2), type=CopyrightAssessmentConfig)
+    assert again == cfg2
+
+
+def test_copyright_assessment_config_is_frozen_and_forbids_extras() -> None:
+    """CopyrightAssessmentConfig rejects mutation and unknown fields."""
+    cfg = convert({}, type=CopyrightAssessmentConfig)
+    with raises(AttributeError):
+        setattr(cfg, "enable_assumptions", False)
+    with raises(ValidationError):
+        convert({"extra": 1}, type=CopyrightAssessmentConfig)
 
 
 def test_index_config_defaults_and_roundtrip() -> None:

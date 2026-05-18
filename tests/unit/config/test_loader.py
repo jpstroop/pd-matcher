@@ -34,8 +34,8 @@ def test_load_shipped_copyright_rules_defaults() -> None:
     resource = files("pd_matcher.config.defaults") / "copyright_rules.yaml"
     with as_file(resource) as path:
         rs = load_copyright_rules(path)
-    assert rs.version == "0.1.0"
-    assert rs.rules == []
+    assert rs.version == "1.0.0"
+    assert len(rs.rules) > 0
 
 
 def test_load_index_config_from_temp_yaml(tmp_path: Path) -> None:
