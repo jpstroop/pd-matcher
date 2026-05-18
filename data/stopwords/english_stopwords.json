@@ -3,7 +3,7 @@
   "source": "Generic stop-words library with field-specific additions",
   "minimum_word_threshold": 3,
   "notes": "English benefits from removing articles, prepositions, and conjunctions. Field-specific additions for better matching.",
-  
+
   "title_stopwords": [
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
     "has", "he", "in", "is", "it", "its", "of", "on", "that", "the",
@@ -12,17 +12,17 @@
     "when", "where", "which", "who", "why", "how", "all", "some",
     "other", "another", "any", "many", "more", "most", "such", "our"
   ],
-  
+
   "author_stopwords": [
     "a", "an", "and", "as", "at", "by", "for", "from", "in", "of",
     "on", "the", "to", "with", "or", "ed", "trans", "comp"
   ],
-  
+
   "publisher_stopwords": [
     "a", "an", "and", "at", "by", "for", "from", "in", "of", "on",
     "the", "to", "with"
   ],
-  
+
   "notes_on_exclusions": {
     "not_included": [
       "new", "history", "story", "life", "american", "world", "book",

@@ -3,19 +3,19 @@
   "source": "Conservative list due to small sample size (68 records)",
   "minimum_word_threshold": 3,
   "notes": "Very limited data for Italian. Using minimal approach.",
-  
+
   "title_stopwords": [
     "e", "o", "con", "per", "tra", "fra"
   ],
-  
+
   "author_stopwords": [
     "e", "con"
   ],
-  
+
   "publisher_stopwords": [
     "e", "&"
   ],
-  
+
   "notes_on_exclusions": {
     "not_included": [
       "il", "la", "lo", "gli", "le", "un", "una", "di", "da", "del", "della", "dei", "delle"

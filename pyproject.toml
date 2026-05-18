@@ -31,6 +31,14 @@ build-backend = "pdm.backend"
 [tool.pdm]
 distribution = true
 
+[tool.pdm.scripts]
+fmt = "ruff format src tests"
+lint = "ruff check src tests"
+lint-fix = "ruff check --fix src tests"
+typecheck = "mypy src tests"
+test = "pytest"
+gates = {composite = ["fmt", "lint", "typecheck", "test"]}
+
 [tool.pdm.build]
 includes = [
     "src/pd_matcher",
@@ -41,18 +49,6 @@ package-dir = "src"
 source-includes = [
     "src/pd_matcher/config/defaults/*.yaml",
     "src/pd_matcher/normalize/stopwords_data/*.json",
-]
-
-[tool.pdm.dev-dependencies]
-dev = [
-    "pytest>=8.3.0",
-    "pytest-cov>=6.0.0",
-    "pytest-xdist>=3.6.0",
-    "mypy>=1.13.0",
-    "ruff>=0.8.0",
-    "hypothesis>=6.115.0",
-    "types-PyYAML>=6.0.12",
-    "lxml-stubs>=0.5.1",
 ]
 
 [tool.mypy]
@@ -119,4 +115,17 @@ exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
     "raise AssertionError\\(.unreachable.\\)",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "pytest-xdist>=3.6.0",
+    "mypy>=1.13.0",
+    "ruff>=0.8.0",
+    "hypothesis>=6.115.0",
+    "types-PyYAML>=6.0.12",
+    "lxml-stubs>=0.5.1",
+    "pre-commit>=4.6.0",
 ]

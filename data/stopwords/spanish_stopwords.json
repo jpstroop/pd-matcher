@@ -3,19 +3,19 @@
   "source": "Conservative list due to small sample size (81 records)",
   "minimum_word_threshold": 3,
   "notes": "Limited data for Spanish. Using conservative approach similar to French.",
-  
+
   "title_stopwords": [
     "y", "o", "con", "para", "por", "sobre", "entre"
   ],
-  
+
   "author_stopwords": [
     "y", "con", "por"
   ],
-  
+
   "publisher_stopwords": [
     "y", "&"
   ],
-  
+
   "notes_on_exclusions": {
     "not_included": [
       "el", "la", "los", "las", "un", "una", "de", "del"

@@ -3,19 +3,19 @@
   "source": "Minimal list - German showed negative impact with aggressive stopword removal",
   "minimum_word_threshold": 4,
   "notes": "German articles and compound words are meaningful. Use very conservative list.",
-  
+
   "title_stopwords": [
     "und", "oder", "mit", "in", "auf", "zu", "bei", "nach", "aus"
   ],
-  
+
   "author_stopwords": [
     "und", "mit", "von"
   ],
-  
+
   "publisher_stopwords": [
     "und", "&"
   ],
-  
+
   "notes_on_exclusions": {
     "not_included": [
       "der", "die", "das", "den", "dem", "des", "ein", "eine", "einer"
