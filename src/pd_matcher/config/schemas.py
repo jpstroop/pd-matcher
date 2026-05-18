@@ -8,6 +8,7 @@ metaclass leaks no ``Any`` into our type checker, and it generates ``__slots__``
 by default, matching the project's memory-efficiency policy.
 """
 
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 from typing import Literal
@@ -63,24 +64,41 @@ class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
             )
 
 
+class PredicateCall(Struct, frozen=True, forbid_unknown_fields=True):
+    """One predicate invocation inside a :class:`CopyrightRule` ``when`` list.
+
+    ``predicate`` is the name of a callable registered in either
+    :mod:`pd_matcher.copyright.predicates` (returns ``bool``) or
+    :mod:`pd_matcher.copyright.inference` (returns ``(bool, str | None)``
+    so it can surface a documented assumption). ``args`` holds positional
+    arguments; only ``int`` and ``float`` are supported because every
+    Cornell predicate takes year boundaries or confidence thresholds.
+    ``negate`` flips the predicate's truth value; an inference function
+    that fires under negation still surfaces its assumption (the
+    explanation should make clear the negation is intentional).
+    """
+
+    predicate: Annotated[str, Meta(min_length=1)]
+    args: tuple[int | float, ...] = ()
+    negate: bool = False
+
+
 class CopyrightRule(Struct, frozen=True, forbid_unknown_fields=True):
     """One row of the Cornell public-domain matrix in declarative form.
 
-    ``when`` predicates are stored as strings here; the Phase 5 rule engine
-    parses and evaluates them. ``then`` likewise references a
-    ``CopyrightStatus`` member by name and is resolved in Phase 5.
+    Each ``when`` element is a :class:`PredicateCall`; the Phase 5 rule
+    engine resolves the names and evaluates them in order. ``then``
+    references a :class:`~pd_matcher.copyright.status.CopyrightStatus`
+    member by name and is resolved at evaluation time. ``assumptions``
+    holds static assumption strings that always apply when the rule
+    fires; inference predicates may add further dynamic assumptions.
     """
 
     name: Annotated[str, Meta(min_length=1)]
     then: Annotated[str, Meta(min_length=1)]
     explanation: Annotated[str, Meta(min_length=1)]
-    when: list[str] = field(default_factory=list)
-
-    def __post_init__(self) -> None:
-        """Reject blank predicate strings inside the ``when`` list."""
-        for index, predicate in enumerate(self.when):
-            if not predicate.strip():
-                raise ValueError(f"when[{index}] is empty or whitespace-only")
+    when: list[PredicateCall] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
 
 
 class CopyrightRuleSet(Struct, frozen=True, forbid_unknown_fields=True):
@@ -88,6 +106,25 @@ class CopyrightRuleSet(Struct, frozen=True, forbid_unknown_fields=True):
 
     version: Annotated[str, Meta(min_length=1)]
     rules: list[CopyrightRule] = field(default_factory=list)
+
+
+class CopyrightAssessmentConfig(Struct, frozen=True, forbid_unknown_fields=True):
+    """Runtime configuration for the copyright rule engine.
+
+    Attributes:
+        today: Reference date for age-sensitive predicates. ``None``
+            means the engine uses :meth:`date.today` at call time so
+            the moving wall advances naturally every 1 January. Tests
+            and the (Phase 7) ``--as-of`` CLI flag pin a specific date
+            for reproducibility.
+        enable_assumptions: When ``False`` the engine refuses to honor
+            inference predicates that would contribute an assumption,
+            forcing every rule to depend only on directly-observed
+            facts. Defaults to ``True``.
+    """
+
+    today: date | None = None
+    enable_assumptions: bool = True
 
 
 class IndexConfig(Struct, frozen=True, forbid_unknown_fields=True):
@@ -99,8 +136,10 @@ class IndexConfig(Struct, frozen=True, forbid_unknown_fields=True):
 
 
 __all__ = [
+    "CopyrightAssessmentConfig",
     "CopyrightRule",
     "CopyrightRuleSet",
     "IndexConfig",
     "MatchingConfig",
+    "PredicateCall",
 ]
