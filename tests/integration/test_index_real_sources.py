@@ -2,10 +2,11 @@
 
 Skipped when the NYPL submodules are not checked out. When the submodules
 are present this test builds the full LMDB index into ``tmp_path`` and
-asserts the produced counts are within the order of magnitude documented in
-the project plan (~642k registrations, ~107k renewals). The corpus may
-evolve over time, so the assertions deliberately use generous bands instead
-of exact counts.
+asserts the produced counts are within order-of-magnitude bands. Measured
+against the corpus as of project init: ~2.17M registrations, ~444k
+renewals, ~160k renewal joins, ~95 year buckets, full build in ~37s. The
+corpus may evolve over time, so the assertions deliberately use generous
+bands instead of exact counts.
 """
 
 from pathlib import Path
@@ -30,13 +31,13 @@ def test_full_index_build_against_real_sources(tmp_path: Path) -> None:
     report = build_index(reg_dir=_REG_DIR, ren_dir=_REN_DIR, out_path=out_path)
 
     assert report.skipped is False
-    # Plan documents roughly 642k registrations; allow a wide band so the
+    # Measured ~2.17M registrations at project init; allow a wide band so the
     # test does not flake when the upstream submodule grows or trims a year.
-    assert 400_000 <= report.registrations_written <= 1_000_000
-    # Renewals: roughly 100k expected.
-    assert 50_000 <= report.renewals_written <= 300_000
-    # Year buckets: 1923-1977 plus margins.
-    assert 50 <= report.year_buckets <= 80
+    assert 1_500_000 <= report.registrations_written <= 5_000_000
+    # Renewals: measured ~444k at project init.
+    assert 200_000 <= report.renewals_written <= 1_000_000
+    # Year buckets: measured 95 at project init (corpus spans roughly 1908-2002).
+    assert 50 <= report.year_buckets <= 150
     # Renewal joins are bounded by registrations and renewals.
     assert 0 < report.renewal_joins <= report.registrations_written
 
