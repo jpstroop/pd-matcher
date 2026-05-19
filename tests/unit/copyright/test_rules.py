@@ -1,7 +1,5 @@
 """Tests for :mod:`pd_matcher.copyright.rules`."""
 
-from datetime import date
-
 from pytest import raises
 
 from pd_matcher.config.schemas import CopyrightRule
@@ -20,7 +18,7 @@ def _ruleset_for(rule: CopyrightRule) -> CopyrightRuleSet:
 
 
 def test_moving_wall_short_circuit_returns_pd_by_age() -> None:
-    """``pub_year < today.year - 95`` should not consult any rule."""
+    """``pub_year < as_of_year - 95`` should not consult any rule."""
     sentinel_rule = CopyrightRule(
         name="sentinel",
         when=[PredicateCall(predicate="country_is_us")],
@@ -372,8 +370,8 @@ def test_shipped_foreign_no_treaty_country(ruleset: CopyrightRuleSet) -> None:
 def test_shipped_foreign_pre_1923_pd_home_country_1996(
     ruleset: CopyrightRuleSet,
 ) -> None:
-    """Pinned ``today=2017`` to land between the moving wall and the 1923 cutoff."""
-    facts = make_facts(pub_year=1922, pub_country_code="fr", today=date(2017, 1, 1))
+    """Pinned ``as_of_year=2017`` to land between the moving wall and the 1923 cutoff."""
+    facts = make_facts(pub_year=1922, pub_country_code="fr", as_of_year=2017)
     result = assess(facts, ruleset)
     assert result.status is CopyrightStatus.PD_FOREIGN_IN_HOME_COUNTRY_PD_1996
 
@@ -545,7 +543,7 @@ def test_foreign_registered_pre_1923_does_not_fire_pd_home_country(
 ) -> None:
     """A foreign-registered pre-1923 work must NOT yield FOREIGN_IN_HOME_COUNTRY_PD_1996.
 
-    Pinned ``today=2017`` so the moving-wall short-circuit does not fire.
+    Pinned ``as_of_year=2017`` so the moving-wall short-circuit does not fire.
     The 1931-1963 registered branch requires ``published_between
     [1931, 1963]`` so a 1922 work cannot fire it either; this test
     simply asserts that registration disables the home-country PD path.
@@ -554,7 +552,7 @@ def test_foreign_registered_pre_1923_does_not_fire_pd_home_country(
         pub_year=1922,
         pub_country_code="fr",
         was_registered=True,
-        today=date(2017, 1, 1),
+        as_of_year=2017,
     )
     result = assess(facts, ruleset)
     assert result.status is not CopyrightStatus.PD_FOREIGN_IN_HOME_COUNTRY_PD_1996

@@ -99,13 +99,13 @@ pd-matcher match \
   [--workers N] \
   [--year-window N] \
   [--min-score F] \
-  [--as-of YYYY-MM-DD]
+  [--as-of YYYY]
 ```
 
 - `--workers N` — number of worker processes. Defaults to `cpu_count - 1`. On a 32-core box, that's 31 matching processes plus one for the writer plus the producer and reporter in main.
 - `--year-window N` — overrides the matching config's year window (default 2). The matcher only considers CCE records published within `±N` years of the MARC record.
 - `--min-score F` — overrides the matching config's minimum calibrated score (default 0.70). Below this threshold a candidate is dropped from the result.
-- `--as-of YYYY-MM-DD` — reference date for the moving wall. Defaults to today. Use this to reproduce historical runs or to test the "what will be PD on Jan 1, 2027" question.
+- `--as-of YYYY` — reference *year* for the moving wall, defaults to the current year. Use this to reproduce historical runs or to test what enters PD on Jan 1 of a future year. Accepted range is 1923–2100.
 
 The match command streams: it never holds the whole MARC file in memory. Workers share the LMDB index via the OS page cache, so memory overhead grows with worker count only by a small fixed amount per process.
 
@@ -121,7 +121,7 @@ pd-matcher eval \
   --index caches/cce.lmdb \
   [--report eval.json] \
   [--limit N] \
-  [--as-of YYYY-MM-DD]
+  [--as-of YYYY]
 ```
 
 - `--report PATH` — write the full `EvalReport` as JSON.

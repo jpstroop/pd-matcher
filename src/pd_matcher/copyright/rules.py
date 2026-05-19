@@ -203,8 +203,7 @@ def assess(
             status=CopyrightStatus.PD_BY_AGE_PRE_95_YEARS,
             matched_rule_name="moving_wall_short_circuit",
             explanation=(
-                f"Published in {facts.pub_year}; more than 95 years before "
-                f"{facts.today.isoformat()}."
+                f"Published in {facts.pub_year}; more than 95 years before {facts.as_of_year}."
             ),
             assumptions=(),
         )

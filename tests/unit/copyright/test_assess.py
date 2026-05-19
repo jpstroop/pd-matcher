@@ -1,7 +1,5 @@
 """End-to-end tests for :func:`pd_matcher.copyright.assess_record`."""
 
-from datetime import date
-
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -18,7 +16,7 @@ from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.result import CandidateMatch
 from pd_matcher.match.result import MatchResult
 from pd_matcher.models import MarcRecord
-from tests.unit.copyright.conftest import TODAY
+from tests.unit.copyright.conftest import AS_OF_YEAR
 from tests.unit.copyright.conftest import make_facts
 
 
@@ -64,20 +62,20 @@ def _marc(
 def test_assess_record_uses_shipped_ruleset_by_default() -> None:
     """No explicit ruleset -> the shipped Cornell matrix is used."""
     marc = _marc(publication_year=1985, country_code="nyu")
-    result = assess_record(marc, None, today=TODAY)
+    result = assess_record(marc, None, as_of_year=AS_OF_YEAR)
     assert result.status is CopyrightStatus.PD_US_PUB_NO_REGISTRATION_1978_1989
 
 
 def test_assess_record_short_circuits_via_moving_wall() -> None:
     """A pre-moving-wall MARC record returns ``PD_BY_AGE_PRE_95_YEARS``."""
     marc = _marc(publication_year=1900)
-    result = assess_record(marc, None, today=TODAY)
+    result = assess_record(marc, None, as_of_year=AS_OF_YEAR)
     assert result.status is CopyrightStatus.PD_BY_AGE_PRE_95_YEARS
     assert result.matched_rule_name == "moving_wall_short_circuit"
 
 
-def test_assess_record_defaults_today_to_date_today() -> None:
-    """Omitting ``today`` falls back to :meth:`date.today` without erroring."""
+def test_assess_record_defaults_as_of_year_to_current_year() -> None:
+    """Omitting ``as_of_year`` falls back to the current year without erroring."""
     marc = _marc(publication_year=1990)
     result = assess_record(marc, None)
     assert isinstance(result.status, CopyrightStatus)
@@ -97,7 +95,7 @@ def test_assess_record_accepts_custom_ruleset() -> None:
         ],
     )
     marc = _marc(publication_year=1985)
-    result = assess_record(marc, None, today=TODAY, ruleset=custom)
+    result = assess_record(marc, None, as_of_year=AS_OF_YEAR, ruleset=custom)
     assert result.status is CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA
 
 
@@ -120,11 +118,11 @@ def test_assess_record_enable_assumptions_flag_threads_through() -> None:
     )
     marc = _marc(publication_year=1950)
     match = _registered_match()
-    permissive = assess_record(marc, match, today=TODAY, ruleset=custom)
+    permissive = assess_record(marc, match, as_of_year=AS_OF_YEAR, ruleset=custom)
     strict = assess_record(
         marc,
         match,
-        today=TODAY,
+        as_of_year=AS_OF_YEAR,
         ruleset=custom,
         enable_assumptions=False,
     )
@@ -150,7 +148,7 @@ def test_assess_is_deterministic(
         pub_country_code=country,
         was_registered=registered,
         was_renewed=renewed and registered,
-        today=date(2026, 5, 18),
+        as_of_year=2026,
     )
     rs = default_ruleset()
     first = assess(facts, rs)

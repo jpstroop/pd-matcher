@@ -6,7 +6,6 @@ the resulting CSV has one row per MARC record in the fixture.
 """
 
 from csv import DictReader
-from datetime import date
 from pathlib import Path
 
 from pd_matcher.config.loader import load_copyright_rules
@@ -60,7 +59,7 @@ def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
         min_combined_score=30.0,
         scorer="weighted_mean",
     )
-    copyright_config = CopyrightAssessmentConfig(today=date(2026, 5, 18))
+    copyright_config = CopyrightAssessmentConfig(as_of_year=2026)
     ruleset = load_copyright_rules(_DEFAULTS)
     report = run_match(
         marc_path=marc_path,

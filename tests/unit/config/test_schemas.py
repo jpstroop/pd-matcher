@@ -188,17 +188,26 @@ def test_copyright_rule_set_is_frozen_and_forbids_extras() -> None:
 
 
 def test_copyright_assessment_config_defaults_and_overrides() -> None:
-    """CopyrightAssessmentConfig defaults ``today`` to None and round-trips."""
+    """CopyrightAssessmentConfig defaults ``as_of_year`` to None and round-trips."""
     cfg = convert({}, type=CopyrightAssessmentConfig)
-    assert cfg.today is None
+    assert cfg.as_of_year is None
     assert cfg.enable_assumptions is True
     cfg2 = convert(
-        {"today": "2026-05-18", "enable_assumptions": False},
+        {"as_of_year": 2026, "enable_assumptions": False},
         type=CopyrightAssessmentConfig,
     )
+    assert cfg2.as_of_year == 2026
     assert cfg2.enable_assumptions is False
     again = convert(to_builtins(cfg2), type=CopyrightAssessmentConfig)
     assert again == cfg2
+
+
+def test_copyright_assessment_config_rejects_out_of_range_year() -> None:
+    """``as_of_year`` is validated to the 1923-2100 range."""
+    with raises(ValidationError):
+        convert({"as_of_year": 1922}, type=CopyrightAssessmentConfig)
+    with raises(ValidationError):
+        convert({"as_of_year": 2101}, type=CopyrightAssessmentConfig)
 
 
 def test_copyright_assessment_config_is_frozen_and_forbids_extras() -> None:

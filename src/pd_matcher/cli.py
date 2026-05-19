@@ -6,7 +6,7 @@ reported on stderr with these exit codes:
 * ``0`` — success
 * ``1`` — runtime error (missing file, bad config, IO failure)
 * ``2`` — argument error (typer-default for parse failures, plus the
-  ``--as-of`` ISO-date validator and the not-yet-implemented stubs)
+  ``--as-of`` year validator and the not-yet-implemented stubs)
 * ``130`` — interrupted by SIGINT
 """
 
@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Annotated
 
 from msgspec import to_builtins
+from typer import BadParameter
 from typer import Exit
 from typer import Option
 from typer import Typer
@@ -48,6 +49,9 @@ _INTERRUPTED_EXIT_CODE: int = 130
 
 _IDF_CACHE_NAME: str = "idf.msgpack"
 _CALIBRATOR_NAME: str = "calibrator.msgpack"
+
+_AS_OF_MIN_YEAR: int = 1923
+_AS_OF_MAX_YEAR: int = 2100
 
 
 app: Typer = Typer(
@@ -97,17 +101,28 @@ def _fail(message: str, *, code: int = _RUNTIME_ERROR_EXIT_CODE) -> Exit:
     return Exit(code=code)
 
 
-def _parse_as_of(value: str | None) -> date:
-    """Parse an ``--as-of`` flag value or default to today."""
+def _parse_as_of(value: str | None) -> int:
+    """Parse an ``--as-of`` flag value or default to the current year.
+
+    The data this CLI consumes (CCE registrations, MARC publication info,
+    renewal years) is year-granular, so the flag accepts a four-digit
+    year. ``1923`` is the lower bound of the CCE corpus; ``2100`` is a
+    typo-catcher upper bound. Values outside the range, or non-integer
+    strings, raise :class:`typer.BadParameter` with a clear message.
+    """
     if value is None:
-        return date.today()
+        return date.today().year
     try:
-        return date.fromisoformat(value)
+        year = int(value, 10)
     except ValueError as exc:
-        raise _fail(
-            f"--as-of: expected ISO date YYYY-MM-DD (got {value!r}): {exc}",
-            code=_ARG_ERROR_EXIT_CODE,
+        raise BadParameter(
+            f"--as-of: expected a four-digit year YYYY (got {value!r})",
         ) from exc
+    if year < _AS_OF_MIN_YEAR or year > _AS_OF_MAX_YEAR:
+        raise BadParameter(
+            f"--as-of: year must be between {_AS_OF_MIN_YEAR} and {_AS_OF_MAX_YEAR} (got {year})",
+        )
+    return year
 
 
 def _load_default_matching_config() -> MatchingConfig:
@@ -273,7 +288,10 @@ def match(
         str | None,
         Option(
             "--as-of",
-            help="Reference date in ISO format (YYYY-MM-DD); defaults to today.",
+            help=(
+                "Reference year (YYYY) for the moving-wall calculation."
+                " Defaults to the current year."
+            ),
         ),
     ] = None,
 ) -> None:
@@ -286,7 +304,7 @@ def match(
             --out /tmp/results.csv \\
             --workers 4
     """
-    today = _parse_as_of(as_of)
+    as_of_year = _parse_as_of(as_of)
     if not marc.is_file():
         raise _fail(f"--marc does not exist or is not a file: {marc}")
     if not index.exists():
@@ -315,7 +333,7 @@ def match(
         ruleset = load_copyright_rules(ruleset_path)
     except ConfigError as exc:
         raise _fail(f"failed to load copyright rules: {exc}") from exc
-    copyright_config = CopyrightAssessmentConfig(today=today)
+    copyright_config = CopyrightAssessmentConfig(as_of_year=as_of_year)
     idf_cache_path = index.parent / _IDF_CACHE_NAME
     try:
         idf = load_or_build_idf(idf_cache_path, lambda: NyplIndexLookup(index))
@@ -358,7 +376,10 @@ def eval_(
         str | None,
         Option(
             "--as-of",
-            help="Reference date in ISO format (YYYY-MM-DD); defaults to today.",
+            help=(
+                "Reference year (YYYY) for the moving-wall calculation."
+                " Defaults to the current year."
+            ),
         ),
     ] = None,
     limit: Annotated[
@@ -374,7 +395,7 @@ def eval_(
             --index caches/nypl.lmdb \\
             --report /tmp/eval.json
     """
-    today = _parse_as_of(as_of)
+    as_of_year = _parse_as_of(as_of)
     if not ground_truth.is_file():
         raise _fail(f"--ground-truth does not exist or is not a file: {ground_truth}")
     if not index.exists():
@@ -383,12 +404,12 @@ def eval_(
         matching_config = _load_default_matching_config()
     except ConfigError as exc:
         raise _fail(f"failed to load matching defaults: {exc}") from exc
-    copyright_config = CopyrightAssessmentConfig(today=today)
+    copyright_config = CopyrightAssessmentConfig(as_of_year=as_of_year)
     try:
         eval_report = run_eval(
             ground_truth_path=ground_truth,
             index_path=index,
-            today=today,
+            as_of_year=as_of_year,
             matching_config=matching_config,
             copyright_config=copyright_config,
             limit=limit,
