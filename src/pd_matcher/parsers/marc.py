@@ -7,7 +7,8 @@ rejected because it materializes the whole document; the iterparse pattern
 below holds at most one ``<record>`` element in memory at a time. A small
 warning counter exposes how many records were skipped for missing required
 fields so callers can surface dataset quality issues without re-reading the
-file.
+file. A second counter tracks how many subfield values were repaired by the
+encoding-hygiene pass; see :mod:`pd_matcher.normalize.encoding`.
 """
 
 from collections.abc import Iterator
@@ -19,6 +20,7 @@ from lxml.etree import _Element
 from lxml.etree import iterparse
 
 from pd_matcher.models import MarcRecord
+from pd_matcher.normalize.encoding import clean_text
 
 _MARC_NS = "http://www.loc.gov/MARC21/slim"
 _RECORD_TAG = f"{{{_MARC_NS}}}record"
@@ -37,19 +39,26 @@ _LOGGER = getLogger(__name__)
 class MarcParseStats:
     """Mutable counters surfaced to callers after a parse run."""
 
-    __slots__ = ("emitted", "skipped_missing_001", "skipped_missing_245a")
+    __slots__ = (
+        "emitted",
+        "mojibake_fixed_count",
+        "skipped_missing_001",
+        "skipped_missing_245a",
+    )
 
     def __init__(self) -> None:
         self.emitted = 0
         self.skipped_missing_001 = 0
         self.skipped_missing_245a = 0
+        self.mojibake_fixed_count = 0
 
 
-def _clean(value: str | None) -> str | None:
-    """Strip MARC trailing punctuation and surrounding whitespace.
+def _clean(value: str | None, stats: MarcParseStats) -> str | None:
+    """Strip MARC trailing punctuation, then run encoding hygiene.
 
     Args:
         value: Raw subfield text or ``None``.
+        stats: Counters mutated when the encoding pass repairs the value.
 
     Returns:
         Cleaned text, or ``None`` if ``value`` is ``None`` or empties out.
@@ -57,7 +66,12 @@ def _clean(value: str | None) -> str | None:
     if value is None:
         return None
     stripped = value.strip().rstrip(_TRAILING_PUNCT).strip()
-    return stripped or None
+    if not stripped:
+        return None
+    cleaned = clean_text(stripped)
+    if cleaned.mojibake_fixed:
+        stats.mojibake_fixed_count += 1
+    return cleaned.text or None
 
 
 def _extract_year(raw_260c: str | None, control_008: str | None) -> int | None:
@@ -189,13 +203,13 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
         stats.skipped_missing_001 += 1
         _LOGGER.warning("marc.skip", extra={"reason": "missing_001"})
         return None
-    cleaned_title_a = _clean(title_a)
+    cleaned_title_a = _clean(title_a, stats)
     if cleaned_title_a is None:
         stats.skipped_missing_245a += 1
         _LOGGER.warning("marc.skip", extra={"reason": "missing_245a", "control_id": control_id})
         return None
 
-    cleaned_title_b = _clean(title_b)
+    cleaned_title_b = _clean(title_b, stats)
     if cleaned_title_b is None:
         full_title = cleaned_title_a
     else:
@@ -205,21 +219,23 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
     return MarcRecord(
         control_id=control_id,
         title=full_title,
-        lccn=_clean(lccn),
-        isbns=tuple(cleaned for cleaned in (_clean(v) for v in isbns) if cleaned is not None),
-        main_author=_clean(main_author),
-        added_authors=tuple(
-            cleaned for cleaned in (_clean(v) for v in added_authors) if cleaned is not None
+        lccn=_clean(lccn, stats),
+        isbns=tuple(
+            cleaned for cleaned in (_clean(v, stats) for v in isbns) if cleaned is not None
         ),
-        statement_of_responsibility=_clean(sor),
-        edition=_clean(edition),
-        publication_place=_clean(pub_place),
-        publisher=_clean(publisher),
-        publication_date_raw=_clean(pub_date_raw),
+        main_author=_clean(main_author, stats),
+        added_authors=tuple(
+            cleaned for cleaned in (_clean(v, stats) for v in added_authors) if cleaned is not None
+        ),
+        statement_of_responsibility=_clean(sor, stats),
+        edition=_clean(edition, stats),
+        publication_place=_clean(pub_place, stats),
+        publisher=_clean(publisher, stats),
+        publication_date_raw=_clean(pub_date_raw, stats),
         publication_year=_extract_year(pub_date_raw, control_008),
-        extent=_clean(extent),
+        extent=_clean(extent, stats),
         series_titles=tuple(
-            cleaned for cleaned in (_clean(v) for v in series_titles) if cleaned is not None
+            cleaned for cleaned in (_clean(v, stats) for v in series_titles) if cleaned is not None
         ),
         language_code=_slice_008(control_008, 35, 38),
         country_code=_slice_008(control_008, 15, 18),

@@ -87,4 +87,11 @@
     <controlfield tag='008'>200718s1965    xxu           000 0 eng  </controlfield>
     <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>   </subfield></datafield>
   </record>
+  <record>
+    <controlfield tag='001'>marc-013-mojibake</controlfield>
+    <controlfield tag='008'>200718s1962    fr            000 0 fre  </controlfield>
+    <datafield ind1='1' ind2=' ' tag='100'><subfield code='a'>Foucault, Michel</subfield></datafield>
+    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>Histoire de la folie Ã  l'Ã¢ge classique</subfield></datafield>
+    <datafield ind1=' ' ind2=' ' tag='260'><subfield code='a'>Paris :</subfield><subfield code='b'>Plon,</subfield><subfield code='c'>1962.</subfield></datafield>
+  </record>
 </collection>

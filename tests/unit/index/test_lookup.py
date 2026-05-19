@@ -67,9 +67,10 @@ def test_candidates_for_year_with_window_walks_buckets_in_ascending_year_order(
     with NyplIndexLookup(out_path) as lookup:
         records = list(lookup.candidates_for_year(1960, window=5))
     # Year buckets in range 1955..1965 contain UUID-0002 (1955), UUID-0003
-    # (1962) and UUID-0004 (1965); they are walked in ascending year order.
+    # (1962), UUID-0011 (1962), and UUID-0004 (1965); they are walked in
+    # ascending year order.
     uuids = [r.uuid for r in records]
-    assert uuids == ["UUID-0002", "UUID-0003", "UUID-0004"]
+    assert uuids == ["UUID-0002", "UUID-0003", "UUID-0011", "UUID-0004"]
 
 
 def test_candidates_for_year_returns_nothing_for_empty_bucket(tmp_path: Path) -> None:
@@ -116,7 +117,7 @@ def test_stats_reflect_build_report(tmp_path: Path) -> None:
     with NyplIndexLookup(out_path) as lookup:
         stats = lookup.stats()
     assert stats.schema_version == 1
-    assert stats.registrations_written == 8
+    assert stats.registrations_written == 9
     assert stats.renewals_written == 4
     assert stats.renewal_joins == 2
     assert stats.year_buckets == 4

@@ -7,6 +7,7 @@ from pytest import mark
 from pytest import raises
 
 from pd_matcher.parsers.nypl_ren import NyplRenHeaderError
+from pd_matcher.parsers.nypl_ren import NyplRenParseStats
 from pd_matcher.parsers.nypl_ren import iter_nypl_ren_directory
 from pd_matcher.parsers.nypl_ren import iter_nypl_ren_records
 
@@ -117,3 +118,108 @@ def test_iter_nypl_ren_directory_mixes_schemas(tmp_path: Path) -> None:
 
 def test_iter_nypl_ren_directory_handles_empty_root(tmp_path: Path) -> None:
     assert list(iter_nypl_ren_directory(tmp_path)) == []
+
+
+_PRE_1978_HEADER = (
+    "entry_id\tvolume\tpart\tnumber\tpage\tauthor\ttitle\toreg\todat\t"
+    "id\trdat\tclaimants\tnew_matter\tsee_also_ren\tsee_also_reg\tnotes\tfull_text"
+)
+
+
+def _build_row(title: str | bytes) -> bytes:
+    """Compose one TSV data row with ``title`` injected as the title cell."""
+    title_bytes = title if isinstance(title, bytes) else title.encode("utf-8")
+    return (
+        b"entry-001\t4\t14A\t1\t1\tSmith\t"
+        + title_bytes
+        + b"\tA111111\t1940-05-10\tR200001\t1968-05-15\t\t\t\t\t\trow"
+    )
+
+
+def test_iter_nypl_ren_records_repairs_mojibake_in_text_mode(tmp_path: Path) -> None:
+    fixture = tmp_path / "moji.tsv"
+    fixture.write_bytes(_PRE_1978_HEADER.encode("utf-8") + b"\n" + _build_row("cafÃ©") + b"\n")
+    stats = NyplRenParseStats()
+    records = list(iter_nypl_ren_records(fixture, stats=stats))
+    assert len(records) == 1
+    assert records[0].title == "café"
+    assert stats.mojibake_fixed_count >= 1
+    assert stats.subfields_decoded_as_cp1255 == 0
+    assert stats.subfields_decoded_with_replacement == 0
+
+
+def test_iter_nypl_ren_records_falls_back_to_bytes_mode_for_cp1255_hebrew(
+    tmp_path: Path,
+) -> None:
+    fixture = tmp_path / "hebrew_cp1255.tsv"
+    title_cp1255 = "שלום".encode("cp1255")
+    fixture.write_bytes(_PRE_1978_HEADER.encode("utf-8") + b"\n" + _build_row(title_cp1255) + b"\n")
+    stats = NyplRenParseStats()
+    records = list(iter_nypl_ren_records(fixture, stats=stats))
+    assert len(records) == 1
+    assert records[0].title == "שלום"
+    assert stats.subfields_decoded_as_cp1255 >= 1
+    assert stats.subfields_decoded_with_replacement == 0
+
+
+def test_iter_nypl_ren_records_bytes_mode_counts_replacement_decodes(
+    tmp_path: Path,
+) -> None:
+    fixture = tmp_path / "junk_bytes.tsv"
+    fixture.write_bytes(
+        _PRE_1978_HEADER.encode("utf-8") + b"\n" + _build_row(b"junk\x80\x99cell") + b"\n"
+    )
+    stats = NyplRenParseStats()
+    records = list(iter_nypl_ren_records(fixture, stats=stats))
+    assert len(records) == 1
+    assert stats.subfields_decoded_with_replacement >= 1
+
+
+def test_iter_nypl_ren_records_bytes_mode_skips_blank_lines(tmp_path: Path) -> None:
+    fixture = tmp_path / "blank_line.tsv"
+    fixture.write_bytes(
+        _PRE_1978_HEADER.encode("utf-8") + b"\n\n" + _build_row("שלום".encode("cp1255")) + b"\n\n"
+    )
+    records = list(iter_nypl_ren_records(fixture))
+    assert len(records) == 1
+
+
+def test_iter_nypl_ren_records_bytes_mode_skips_short_data_rows(tmp_path: Path) -> None:
+    fixture = tmp_path / "short.tsv"
+    fixture.write_bytes(
+        _PRE_1978_HEADER.encode("utf-8")
+        + b"\n"
+        + _build_row("שלום".encode("cp1255"))
+        + b"\n"
+        + b"too\tshort\trow\n"
+    )
+    records = list(iter_nypl_ren_records(fixture))
+    assert len(records) == 1
+
+
+def test_iter_nypl_ren_records_bytes_mode_raises_on_unrecognized_header(tmp_path: Path) -> None:
+    fixture = tmp_path / "all_garbage.tsv"
+    fixture.write_bytes(b"\xff")
+    # _file_is_utf8 fails, so the bytes path takes over; the single garbage
+    # line is treated as an (unrecognized) header and raises.
+    with raises(NyplRenHeaderError):
+        list(iter_nypl_ren_records(fixture))
+
+
+def test_iter_nypl_ren_records_text_mode_accepts_caller_supplied_stats(
+    tmp_path: Path,
+) -> None:
+    fixture = tmp_path / "clean.tsv"
+    fixture.write_bytes(_PRE_1978_HEADER.encode("utf-8") + b"\n" + _build_row("Hello") + b"\n")
+    stats = NyplRenParseStats()
+    records = list(iter_nypl_ren_records(fixture, stats=stats))
+    assert stats.emitted == len(records) == 1
+    assert stats.mojibake_fixed_count == 0
+
+
+def test_iter_nypl_ren_directory_accepts_shared_stats(tmp_path: Path) -> None:
+    (tmp_path / "a.tsv").write_bytes(FIXTURE_PRE_1978.read_bytes())
+    (tmp_path / "b.tsv").write_bytes(FIXTURE_PRE_1978.read_bytes())
+    stats = NyplRenParseStats()
+    records = list(iter_nypl_ren_directory(tmp_path, stats=stats))
+    assert stats.emitted == len(records)

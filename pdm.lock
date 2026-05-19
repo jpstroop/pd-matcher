@@ -5,7 +5,7 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:4f3b5e7cf9009be810503fe41c2bb556deca4b95517663696eb281aeb9c511f6"
+content_hash = "sha256:a4da51fc1083b84492bf60e97ce2dfd3696c1947e4c2fe78eeb03f8ede9cd0ab"
 
 [[metadata.targets]]
 requires_python = ">=3.14"
@@ -215,6 +215,20 @@ groups = ["dev"]
 files = [
     {file = "filelock-3.29.0-py3-none-any.whl", hash = "sha256:96f5f6344709aa1572bbf631c640e4ebeeb519e08da902c39a001882f30ac258"},
     {file = "filelock-3.29.0.tar.gz", hash = "sha256:69974355e960702e789734cb4871f884ea6fe50bd8404051a3530bc07809cf90"},
+]
+
+[[package]]
+name = "ftfy"
+version = "6.3.1"
+requires_python = ">=3.9"
+summary = "Fixes mojibake and other problems with Unicode, after the fact"
+groups = ["default"]
+dependencies = [
+    "wcwidth",
+]
+files = [
+    {file = "ftfy-6.3.1-py3-none-any.whl", hash = "sha256:7c70eb532015cd2f9adb53f101fb6c7945988d023a085d127d1573dc49dd0083"},
+    {file = "ftfy-6.3.1.tar.gz", hash = "sha256:9b3c3d90f84fb267fe64d375a07b7f8912d817cf86009ae134aa03e1819506ec"},
 ]
 
 [[package]]
@@ -827,4 +841,15 @@ dependencies = [
 files = [
     {file = "virtualenv-21.3.3-py3-none-any.whl", hash = "sha256:7d5987d8369e098e41406efb780a3d4ca79280097293899e351a6407ee153ab3"},
     {file = "virtualenv-21.3.3.tar.gz", hash = "sha256:f5bda277e553b1c2b3c1a8debfc30496e1288cc93ce6b7b71b3280047e317328"},
+]
+
+[[package]]
+name = "wcwidth"
+version = "0.7.0"
+requires_python = ">=3.8"
+summary = "Measures the displayed width of unicode strings in a terminal"
+groups = ["default"]
+files = [
+    {file = "wcwidth-0.7.0-py3-none-any.whl", hash = "sha256:5d69154c429a82910e241c738cd0e2976fac8a2dd47a1a805f4afed1c0f136f2"},
+    {file = "wcwidth-0.7.0.tar.gz", hash = "sha256:90e3a7ea092341c44b99562e75d09e4d5160fe7a3974c6fb842a101a95e7eed0"},
 ]

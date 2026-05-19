@@ -3,6 +3,7 @@
 from datetime import date
 from pathlib import Path
 
+from pd_matcher.parsers.nypl_reg import NyplRegParseStats
 from pd_matcher.parsers.nypl_reg import iter_nypl_reg_directory
 from pd_matcher.parsers.nypl_reg import iter_nypl_reg_records
 
@@ -88,9 +89,27 @@ def test_iter_nypl_reg_directory_walks_nested_xml(tmp_path: Path) -> None:
     (year_dir / "first.xml").write_bytes(FIXTURE.read_bytes())
     (year_dir / "second.xml").write_bytes(FIXTURE.read_bytes())
     records = list(iter_nypl_reg_directory(tmp_path))
-    # Fixture has 10 entries; 2 (blank id, whitespace title) are skipped.
-    assert len(records) == 16
+    # Fixture has 11 entries; 2 (blank id, whitespace title) are skipped, so 9 per copy.
+    assert len(records) == 18
 
 
 def test_iter_nypl_reg_directory_handles_empty_root(tmp_path: Path) -> None:
     assert list(iter_nypl_reg_directory(tmp_path)) == []
+
+
+def test_iter_nypl_reg_records_repairs_mojibake_in_title_and_increments_counter() -> None:
+    stats = NyplRegParseStats()
+    records = {r.uuid: r for r in iter_nypl_reg_records(FIXTURE, stats=stats)}
+    eleventh = records["UUID-0011"]
+    assert eleventh.title == "Histoire de la folie à l'âge classique"
+    assert stats.mojibake_fixed_count >= 1
+    assert stats.emitted == len(records)
+
+
+def test_iter_nypl_reg_directory_accepts_shared_stats(tmp_path: Path) -> None:
+    (tmp_path / "a.xml").write_bytes(FIXTURE.read_bytes())
+    (tmp_path / "b.xml").write_bytes(FIXTURE.read_bytes())
+    stats = NyplRegParseStats()
+    records = list(iter_nypl_reg_directory(tmp_path, stats=stats))
+    assert stats.emitted == len(records)
+    assert stats.mojibake_fixed_count >= 2

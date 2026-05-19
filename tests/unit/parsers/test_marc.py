@@ -115,3 +115,12 @@ def test_iter_marc_records_ignores_repeated_single_value_fields() -> None:
     assert first.lccn == "40012345"
     assert first.main_author == "Alpha, Alice"
     assert first.publisher == "Acme Press"
+
+
+def test_iter_marc_records_repairs_mojibake_in_subfields_and_increments_counter() -> None:
+    stats = MarcParseStats()
+    records = list(iter_marc_records(FIXTURE, stats=stats))
+    by_id = {r.control_id: r for r in records}
+    mojibake = by_id["marc-013-mojibake"]
+    assert mojibake.title == "Histoire de la folie à l'âge classique"
+    assert stats.mojibake_fixed_count >= 1
