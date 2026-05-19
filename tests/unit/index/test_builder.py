@@ -32,7 +32,7 @@ def test_build_index_writes_records_year_buckets_and_meta(tmp_path: Path) -> Non
     report = build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
 
     assert report.skipped is False
-    assert report.registrations_written == 8
+    assert report.registrations_written == 9
     assert report.renewals_written == 4
     assert report.renewal_joins == 2
     assert report.year_buckets == 4
@@ -84,7 +84,7 @@ def test_build_index_force_rebuilds_existing_env(tmp_path: Path) -> None:
         force=True,
     )
     assert forced.skipped is False
-    assert forced.registrations_written == 8
+    assert forced.registrations_written == 9
 
 
 def test_build_index_rebuilds_when_schema_version_changes(tmp_path: Path) -> None:
@@ -99,7 +99,7 @@ def test_build_index_rebuilds_when_schema_version_changes(tmp_path: Path) -> Non
         schema_version=2,
     )
     assert rebuilt.skipped is False
-    assert rebuilt.registrations_written == 8
+    assert rebuilt.registrations_written == 9
 
 
 def test_build_index_rebuilds_when_source_files_change(tmp_path: Path) -> None:

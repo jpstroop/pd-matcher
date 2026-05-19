@@ -10,4 +10,5 @@
   <copyrightEntry regnum="A888888" id="UUID-0008"><author><authorName>Bad Date</authorName></author><title>Bad date attribute.</title><regDate date="not-a-date">unknown</regDate></copyrightEntry>
   <copyrightEntry regnum="A999999" id="UUID-0009"><author><authorName>No Reg Date Text</authorName></author><title>Blank regDate text.</title><regDate/></copyrightEntry>
   <copyrightEntry regnum="A000010" id="UUID-0010"><title>Publisher edge cases.</title><publisher><pubName claimant="yes"/><pubName>Real Name</pubName><pubPlace/><pubPlace>Real Place</pubPlace></publisher><claimant/></copyrightEntry>
+  <copyrightEntry regnum="A000011" id="UUID-0011"><author><authorName>Foucault, Michel</authorName></author><title>Histoire de la folie Ã  l'Ã¢ge classique</title><regDate date="1962-04-30">Apr. 30, 1962</regDate><publisher><pubName claimant="yes">Plon</pubName><pubPlace>Paris</pubPlace></publisher></copyrightEntry>
 </copyrightEntries>

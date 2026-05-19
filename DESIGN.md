@@ -60,7 +60,9 @@ src/pd_matcher/
 │   ├── numbers.py                # Roman/word/ordinal → digits, multilingual abbreviation expansion
 │   ├── stemming.py               # cached PyStemmer (Snowball) per language
 │   ├── stopwords.py              # language-tuned stopword sets shipped as package data
-│   └── stopwords_data/           # english/french/german/spanish/italian JSON sets
+│   ├── stopwords_data/           # english/french/german/spanish/italian JSON sets
+│   ├── encoding.py               # ftfy-backed mojibake / BOM / bidi-mark repair (clean_text)
+│   └── cp1255_fallback.py        # defensive UTF-8 / Windows-1255 / replace decode ladder
 │
 ├── index/
 │   ├── store.py                  # LMDB environment wrapper with named sub-DBs
@@ -198,6 +200,16 @@ Two `multiprocessing.Queue` instances thread the work:
 A third queue (stats, unbounded, lightweight) carries `RecordProcessed`, `WriterHeartbeat`, etc. events to the reporter thread. msgspec.msgpack is the cross-process codec — schema-compiled, no pickle.
 
 Graceful shutdown is a single `multiprocessing.Event` checked between batches. SIGINT in main flips the event; producer stops feeding, workers drain their current batch and exit, writer flushes and closes the CSV, reporter prints final stats. A second SIGINT short-circuits the cleanup with a hard exit.
+
+### ftfy for parse-time encoding hygiene
+
+The MARCXML and NYPL CCE transcriptions carry a long tail of encoding accidents that are invisible on inspection but disastrous downstream: classic mojibake from earlier double-encoding (``Ã©`` for ``é``, ``Â©`` for ``©``), inline byte-order marks (``U+FEFF``) embedded mid-string, and bidirectional formatting characters (``U+200E``, ``U+200F``, the ``U+202A``-``U+202E`` embedding/override family) that split otherwise-identical tokens for the downstream scorers.
+
+We delegate the heavy lifting to [ftfy](https://ftfy.readthedocs.io/), which handles mojibake repair, BOM removal, NFC normalization, and lossy-sequence replacement in a single `fix_text` call. A tiny `str.translate` postpass additionally drops the bidirectional formatting marks that ftfy preserves by design (they are semantically meaningful inside bidi-aware renderers, but in our data they only appear as transcription artifacts).
+
+`pd_matcher.normalize.encoding.clean_text` wraps this into a `CleanedText(text, mojibake_fixed)` result. Every parser routes each finalized subfield value through `clean_text` after its own punctuation strip. Per-parser stats counters (`MarcParseStats`, `NyplRegParseStats`, `NyplRenParseStats`) carry a `mojibake_fixed_count` so dataset quality can be surfaced in run reporting without re-walking the source files.
+
+For NYPL renewals (TSV, read as raw bytes rather than parsed as XML by lxml), we additionally probe each file at open time with a whole-file UTF-8 strict decode. The supplied corpus always passes the probe, so the hot path uses `csv.reader` directly. When the probe fails — possible if a future ingest mixes a Windows-1255-encoded Hebrew slice into the corpus — the parser switches to a bytes-level reader that routes every cell through `pd_matcher.normalize.cp1255_fallback.decode_subfield`. That decoder tries strict UTF-8, then strict Windows-1255 (accepted only if the result contains at least one Hebrew-block codepoint, to reject cp1255 decodings that succeed but produce garbage), then UTF-8 with `errors="replace"`. The two fallback counters (`subfields_decoded_as_cp1255`, `subfields_decoded_with_replacement`) are zero on the current corpus and exist to make a future quality regression visible the first time it appears.
 
 ### Pre-commit + ruff + mypy strict
 
