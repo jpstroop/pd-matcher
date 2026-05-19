@@ -10,8 +10,8 @@ relied on.
 
 The shipped Cornell ruleset is loaded once at import time from
 ``pd_matcher/config/defaults/copyright_rules.yaml`` and cached for the
-process lifetime. Tests and the (Phase 7) CLI ``--as-of`` flag may
-override the reference date.
+process lifetime. Tests and the CLI ``--as-of`` flag may override the
+reference year.
 """
 
 from datetime import date
@@ -50,7 +50,7 @@ def assess_record(
     marc: MarcRecord,
     match: MatchResult | None,
     *,
-    today: date | None = None,
+    as_of_year: int | None = None,
     matched_nypl: IndexedNyplRegRecord | None = None,
     ruleset: CopyrightRuleSet | None = None,
     enable_assumptions: bool = True,
@@ -61,9 +61,9 @@ def assess_record(
         marc: The MARC bibliographic record under evaluation.
         match: The matcher's verdict, or ``None`` when no matching pass
             has been run.
-        today: Reference date for age-sensitive predicates; defaults to
-            :meth:`date.today`. Pin a value for tests and reproducible
-            runs.
+        as_of_year: Reference year for age-sensitive predicates;
+            defaults to the current calendar year. Pin a value for
+            tests and reproducible runs.
         matched_nypl: The hydrated CCE registration corresponding to
             ``match.best`` (loaded from the NYPL-transcribed index).
             Optional; supply it to enable publisher-based inference
@@ -77,11 +77,11 @@ def assess_record(
     Returns:
         A frozen :class:`CopyrightAssessment`.
     """
-    reference_date = today if today is not None else date.today()
+    reference_year = as_of_year if as_of_year is not None else date.today().year
     facts = build_facts(
         marc,
         match,
-        today=reference_date,
+        as_of_year=reference_year,
         matched_nypl=matched_nypl,
     )
     active_ruleset = ruleset if ruleset is not None else _DEFAULT_RULESET

@@ -11,7 +11,6 @@ gates, and per-status breakdowns on top.
 from collections import Counter
 from collections import defaultdict
 from csv import DictReader
-from datetime import date
 from pathlib import Path
 from time import perf_counter
 
@@ -106,7 +105,7 @@ def run_eval(
     *,
     ground_truth_path: Path,
     index_path: Path,
-    today: date,
+    as_of_year: int,
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     limit: int | None = None,
@@ -117,7 +116,7 @@ def run_eval(
         ground_truth_path: CSV with the
             ``data/combined_ground_truth.csv`` schema.
         index_path: LMDB env produced by ``pd-matcher index build``.
-        today: Reference date for the moving wall and other
+        as_of_year: Reference year for the moving wall and other
             age-sensitive predicates.
         matching_config: Active :class:`MatchingConfig`.
         copyright_config: Active :class:`CopyrightAssessmentConfig`.
@@ -155,7 +154,7 @@ def run_eval(
                 if match.best is not None:
                     matched_nypl = lookup.get_registration(match.best.nypl_uuid)
                     predicted_id = match.best.nypl_uuid
-                facts = build_facts(marc, match, today=today, matched_nypl=matched_nypl)
+                facts = build_facts(marc, match, as_of_year=as_of_year, matched_nypl=matched_nypl)
                 assessment = assess(
                     facts,
                     ruleset,

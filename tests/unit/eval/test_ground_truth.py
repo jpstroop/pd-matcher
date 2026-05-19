@@ -1,6 +1,5 @@
 """Tests for :mod:`pd_matcher.eval.ground_truth`."""
 
-from datetime import date
 from pathlib import Path
 
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
@@ -136,9 +135,9 @@ def test_run_eval_returns_expected_aggregates(tmp_path: Path) -> None:
     report = run_eval(
         ground_truth_path=gt_path,
         index_path=index_path,
-        today=date(2026, 5, 18),
+        as_of_year=2026,
         matching_config=_matching_config(),
-        copyright_config=CopyrightAssessmentConfig(today=date(2026, 5, 18)),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
     )
     assert isinstance(report, EvalReport)
     assert report.rows_evaluated == 3
@@ -163,9 +162,9 @@ def test_run_eval_respects_limit(tmp_path: Path) -> None:
     report = run_eval(
         ground_truth_path=gt_path,
         index_path=index_path,
-        today=date(2026, 5, 18),
+        as_of_year=2026,
         matching_config=_matching_config(),
-        copyright_config=CopyrightAssessmentConfig(today=date(2026, 5, 18)),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
         limit=1,
     )
     assert report.rows_evaluated == 1
@@ -179,9 +178,9 @@ def test_run_eval_zero_rows_yields_zero_metrics(tmp_path: Path) -> None:
     report = run_eval(
         ground_truth_path=gt_path,
         index_path=index_path,
-        today=date(2026, 5, 18),
+        as_of_year=2026,
         matching_config=_matching_config(),
-        copyright_config=CopyrightAssessmentConfig(today=date(2026, 5, 18)),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
     )
     assert report.rows_evaluated == 0
     assert report.precision == 0.0
@@ -202,9 +201,9 @@ def test_run_eval_handles_unparseable_year(tmp_path: Path) -> None:
     report = run_eval(
         ground_truth_path=gt_path,
         index_path=index_path,
-        today=date(2026, 5, 18),
+        as_of_year=2026,
         matching_config=_matching_config(),
-        copyright_config=CopyrightAssessmentConfig(today=date(2026, 5, 18)),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
     )
     assert report.rows_evaluated == 1
     assert report.rows_with_predicted_match == 0
@@ -222,9 +221,9 @@ def test_run_eval_handles_empty_year(tmp_path: Path) -> None:
     report = run_eval(
         ground_truth_path=gt_path,
         index_path=index_path,
-        today=date(2026, 5, 18),
+        as_of_year=2026,
         matching_config=_matching_config(),
-        copyright_config=CopyrightAssessmentConfig(today=date(2026, 5, 18)),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
     )
     assert report.rows_evaluated == 1
     assert report.rows_with_predicted_match == 0

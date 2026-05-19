@@ -1,7 +1,6 @@
 """Tests for :mod:`pd_matcher.workers.pool` (non-spawn paths)."""
 
 from csv import DictReader
-from datetime import date
 from multiprocessing import Event
 from multiprocessing import get_context
 from multiprocessing.queues import Queue as MpQueue
@@ -181,7 +180,7 @@ def test_run_match_returns_run_report(
         min_combined_score=30.0,
         scorer="weighted_mean",
     )
-    copyright_config = CopyrightAssessmentConfig(today=date(2026, 5, 18))
+    copyright_config = CopyrightAssessmentConfig(as_of_year=2026)
     ruleset = load_copyright_rules(_DEFAULTS)
     output_path = tmp_path / "results.csv"
     report = run_match(

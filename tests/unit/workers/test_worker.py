@@ -202,20 +202,20 @@ def test_worker_main_with_unmatchable_record_emits_blank_match(
     assert event.candidates_considered == 0
 
 
-def test_worker_main_uses_default_today_when_assessment_config_unpinned(
+def test_worker_main_uses_default_year_when_assessment_config_unpinned(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
     ruleset: CopyrightRuleSet,
 ) -> None:
-    """When ``copyright_config.today is None`` the worker uses ``date.today()``."""
+    """When ``copyright_config.as_of_year is None`` the worker uses the current year."""
     outputs: list[bytes] = []
     stats: list[bytes] = []
     blobs: list[bytes | None] = [encode_batch((_make_marc(),)), None]
     processed = worker_main(
         index_path=tiny_index_path,
         matching_config=matching_config,
-        copyright_config=CopyrightAssessmentConfig(today=None),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=None),
         ruleset=ruleset,
         idf=tiny_idf,
         calibrator=None,

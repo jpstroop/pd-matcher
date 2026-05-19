@@ -9,7 +9,6 @@ suites can exercise the real pipeline without standing up the full
 package on their own.
 """
 
-from datetime import date
 from pathlib import Path
 
 from pytest import fixture
@@ -74,8 +73,8 @@ def matching_config() -> MatchingConfig:
 
 @fixture
 def copyright_config() -> CopyrightAssessmentConfig:
-    """Return a :class:`CopyrightAssessmentConfig` pinned to 2026-05-18."""
-    return CopyrightAssessmentConfig(today=date(2026, 5, 18))
+    """Return a :class:`CopyrightAssessmentConfig` pinned to year 2026."""
+    return CopyrightAssessmentConfig(as_of_year=2026)
 
 
 @fixture

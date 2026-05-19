@@ -64,8 +64,12 @@ def _process_record(
     matched_nypl = None
     if match.best is not None:
         matched_nypl = lookup.get_registration(match.best.nypl_uuid)
-    today = assessment_config.today if assessment_config.today is not None else date.today()
-    facts = build_facts(marc, match, today=today, matched_nypl=matched_nypl)
+    as_of_year = (
+        assessment_config.as_of_year
+        if assessment_config.as_of_year is not None
+        else date.today().year
+    )
+    facts = build_facts(marc, match, as_of_year=as_of_year, matched_nypl=matched_nypl)
     assessment = assess(
         facts,
         ruleset,

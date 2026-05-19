@@ -1,15 +1,17 @@
 """Tests for :mod:`pd_matcher.cli`."""
 
 from csv import DictReader
-from datetime import date
 from json import loads
 from pathlib import Path
 from typing import Self
 
 from msgspec.msgpack import Encoder
 from pytest import MonkeyPatch
+from pytest import raises
+from typer import BadParameter
 from typer.testing import CliRunner
 
+from pd_matcher.cli import _parse_as_of
 from pd_matcher.cli import app
 from pd_matcher.index.builder import build_index
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
@@ -37,7 +39,7 @@ def _build_index(tmp_path: Path) -> Path:
     return out_path
 
 
-def _write_ground_truth(path: Path, today: date) -> None:
+def _write_ground_truth(path: Path, as_of_year: int) -> None:
     """Write a small ground-truth CSV using fields known to the tiny index."""
     header = (
         "marc_id,marc_title_original,marc_title_normalized,marc_title_stemmed,"
@@ -54,9 +56,9 @@ def _write_ground_truth(path: Path, today: date) -> None:
         f"marc-aaa,A study of widgets,a study of widgets,studi widget,"
         f"by Smith,by smith,smith,Smith John,smith john,smith john,"
         f"Acme Press,acme press,acme press,"
-        f"{today.year - 80},,,xxu,eng,"
+        f"{as_of_year - 80},,,xxu,eng,"
         f"registration,A study of widgets,a study of widgets,smith john,smith john,"
-        f"acme press,acme press,{today.year - 80},UUID-0001,1940,100,80,90,90.0,0,"
+        f"acme press,acme press,{as_of_year - 80},UUID-0001,1940,100,80,90,90.0,0,"
         f"PD_REGISTERED_NOT_RENEWED\n"
     )
     bogus = (
@@ -305,7 +307,7 @@ def test_match_runs_against_tiny_fixtures(tmp_path: Path) -> None:
             "--min-score",
             "30.0",
             "--as-of",
-            "2026-05-18",
+            "2026",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -370,7 +372,7 @@ def test_match_with_default_workers(tmp_path: Path) -> None:
 
 
 def test_match_rejects_bad_as_of(tmp_path: Path) -> None:
-    """``match --as-of`` rejects malformed dates with exit 2 on stderr."""
+    """``match --as-of`` rejects non-integer values with exit 2 on stderr."""
     index_path = _build_index(tmp_path)
     result = _runner.invoke(
         app,
@@ -383,11 +385,11 @@ def test_match_rejects_bad_as_of(tmp_path: Path) -> None:
             "--out",
             str(tmp_path / "out.csv"),
             "--as-of",
-            "not-a-date",
+            "not-a-year",
         ],
     )
     assert result.exit_code == 2
-    assert "expected ISO date" in result.output
+    assert "four-digit year" in result.output
 
 
 def test_match_rejects_missing_marc(tmp_path: Path) -> None:
@@ -578,7 +580,7 @@ def test_eval_runs_against_tiny_index(tmp_path: Path) -> None:
     """``eval`` succeeds against the tiny index + a synthetic GT CSV."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, date(2026, 5, 18))
+    _write_ground_truth(gt_path, 2026)
     report_path = tmp_path / "report.json"
     result = _runner.invoke(
         app,
@@ -591,7 +593,7 @@ def test_eval_runs_against_tiny_index(tmp_path: Path) -> None:
             "--report",
             str(report_path),
             "--as-of",
-            "2026-05-18",
+            "2026",
             "--limit",
             "2",
         ],
@@ -607,7 +609,7 @@ def test_eval_without_report_does_not_write_file(tmp_path: Path) -> None:
     """When ``--report`` is omitted no JSON file is written."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, date(2026, 5, 18))
+    _write_ground_truth(gt_path, 2026)
     result = _runner.invoke(
         app,
         [
@@ -622,10 +624,10 @@ def test_eval_without_report_does_not_write_file(tmp_path: Path) -> None:
 
 
 def test_eval_rejects_bad_as_of(tmp_path: Path) -> None:
-    """``eval --as-of`` rejects malformed dates with exit 2."""
+    """``eval --as-of`` rejects non-integer values with exit 2."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, date(2026, 5, 18))
+    _write_ground_truth(gt_path, 2026)
     result = _runner.invoke(
         app,
         [
@@ -661,7 +663,7 @@ def test_eval_rejects_missing_ground_truth(tmp_path: Path) -> None:
 def test_eval_rejects_missing_index(tmp_path: Path) -> None:
     """``eval`` exits 1 when ``--index`` does not exist."""
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, date(2026, 5, 18))
+    _write_ground_truth(gt_path, 2026)
     result = _runner.invoke(
         app,
         [
@@ -683,7 +685,7 @@ def test_eval_surfaces_matching_config_error(
     """A ConfigError during matching-defaults load surfaces as exit 1."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, date(2026, 5, 18))
+    _write_ground_truth(gt_path, 2026)
     from pd_matcher.config.loader import ConfigError
 
     def _raise() -> object:
@@ -711,7 +713,7 @@ def test_eval_surfaces_run_eval_oserror(
     """An OSError from ``run_eval`` surfaces as exit 1."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, date(2026, 5, 18))
+    _write_ground_truth(gt_path, 2026)
 
     def _raise(**_kwargs: object) -> object:
         raise OSError("io error")
@@ -756,15 +758,15 @@ def test_root_callback_accepts_log_flags() -> None:
     assert result.exit_code == 1
 
 
-def test_as_of_past_date_affects_moving_wall(tmp_path: Path) -> None:
+def test_as_of_past_year_affects_moving_wall(tmp_path: Path) -> None:
     """``--as-of`` in the deep past short-circuits the moving wall.
 
-    The moving wall (Phase 5) fires when ``pub_year < today.year - 95``.
-    Setting ``--as-of 1950-01-01`` makes the cutoff 1855 — no record in
-    the tiny fixtures qualifies — so no row carries
-    ``PD_BY_AGE_PRE_95_YEARS``. With ``--as-of 2200-01-01`` the cutoff
-    is 2105, every record qualifies, and at least one row carries that
-    status.
+    The moving wall (Phase 5) fires when ``pub_year < as_of_year - 95``.
+    Setting ``--as-of 1950`` makes the cutoff 1855 — no record in the
+    tiny fixtures qualifies — so no row carries
+    ``PD_BY_AGE_PRE_95_YEARS``. With ``--as-of 2100`` the cutoff is
+    2005, the parseable-year records all qualify, and at least one row
+    carries that status.
     """
     index_path = _build_index(tmp_path)
     out_early = tmp_path / "early.csv"
@@ -783,7 +785,7 @@ def test_as_of_past_date_affects_moving_wall(tmp_path: Path) -> None:
             "--min-score",
             "1.0",
             "--as-of",
-            "1950-01-01",
+            "1950",
         ],
     )
     assert early.exit_code == 0, early.output
@@ -807,10 +809,46 @@ def test_as_of_past_date_affects_moving_wall(tmp_path: Path) -> None:
             "--min-score",
             "1.0",
             "--as-of",
-            "2200-01-01",
+            "2100",
         ],
     )
     assert late.exit_code == 0, late.output
     with out_late.open(encoding="utf-8") as fp:
         late_statuses = {row["copyright_status"] for row in DictReader(fp)}
     assert "PD_BY_AGE_PRE_95_YEARS" in late_statuses
+
+
+def test_parse_as_of_none_returns_current_year() -> None:
+    """``_parse_as_of(None)`` returns the current calendar year."""
+    from datetime import date as _date
+
+    assert _parse_as_of(None) == _date.today().year
+
+
+def test_parse_as_of_accepts_valid_year() -> None:
+    """``_parse_as_of('2026')`` returns the int ``2026``."""
+    assert _parse_as_of("2026") == 2026
+
+
+def test_parse_as_of_rejects_non_integer() -> None:
+    """Non-integer input raises :class:`typer.BadParameter`."""
+    with raises(BadParameter, match="four-digit year"):
+        _parse_as_of("not-a-number")
+
+
+def test_parse_as_of_rejects_below_lower_bound() -> None:
+    """Year below 1923 is rejected."""
+    with raises(BadParameter, match="between 1923 and 2100"):
+        _parse_as_of("1922")
+
+
+def test_parse_as_of_rejects_above_upper_bound() -> None:
+    """Year above 2100 is rejected."""
+    with raises(BadParameter, match="between 1923 and 2100"):
+        _parse_as_of("2101")
+
+
+def test_parse_as_of_rejects_typo_out_of_range() -> None:
+    """A five-digit typo like ``20270`` is rejected by the upper-bound check."""
+    with raises(BadParameter, match="between 1923 and 2100"):
+        _parse_as_of("20270")

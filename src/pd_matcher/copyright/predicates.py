@@ -8,7 +8,7 @@ inference wrapper in :mod:`pd_matcher.copyright.inference`).
 The first predicate evaluated for every record is :func:`in_pd_by_age`,
 the moving wall. The wall advances one year every 1 January because US
 copyright duration for pre-1978 works runs 95 years from publication;
-expressing that as ``today.year - 95`` rather than a hard-coded ``1929``
+expressing that as ``as_of_year - 95`` rather than a hard-coded ``1929``
 keeps the engine correct without a yearly code change.
 
 MARC 008 country codes are three-character. The US set is large because
@@ -104,15 +104,16 @@ _DELAYED_URAA_COUNTRY_CODES: frozenset[str] = frozenset(
 
 
 def in_pd_by_age(facts: Facts) -> bool:
-    """Return ``True`` when ``pub_year`` is more than 95 years before today.
+    """Return ``True`` when ``pub_year`` is more than 95 years before ``as_of_year``.
 
-    This is the moving-wall short-circuit. As of 18 May 2026 it fires
-    for every US-published work with ``pub_year <= 1930``. Every
-    1 January the wall advances one year automatically.
+    This is the moving-wall short-circuit. As of 2026 it fires for
+    every US-published work with ``pub_year <= 1930``. Every 1 January
+    the wall advances one year automatically once callers pass the new
+    ``as_of_year``.
     """
     if facts.pub_year is None:
         return False
-    return facts.pub_year < facts.today.year - 95
+    return facts.pub_year < facts.as_of_year - 95
 
 
 def published_between(facts: Facts, lo: int, hi: int) -> bool:

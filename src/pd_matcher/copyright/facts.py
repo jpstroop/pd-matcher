@@ -2,7 +2,7 @@
 
 The :class:`Facts` struct collects every datum the Cornell predicates need.
 It is the single seam between everything earlier phases produce (MARC
-record, the matcher's verdict, today's date) and everything Phase 5
+record, the matcher's verdict, the reference year) and everything Phase 5
 evaluates. Keeping it frozen and explicit means rules can be unit-tested
 without touching parsers or the index.
 
@@ -10,8 +10,6 @@ Scope: published books only (Cornell Categories 2 and 3). Unpublished-work
 fields (Category 1) and the sound-recording / architectural toggles
 (Categories 4 and 5) are intentionally absent.
 """
-
-from datetime import date
 
 from msgspec import Struct
 
@@ -21,7 +19,14 @@ from pd_matcher.models import MarcRecord
 
 
 class Facts(Struct, frozen=True, forbid_unknown_fields=True):
-    """Everything a predicate may inspect about a single record."""
+    """Everything a predicate may inspect about a single record.
+
+    ``as_of_year`` is the reference year used by every age-sensitive
+    predicate (the moving wall in particular). The CCE corpus and the
+    MARC publication info are year-granular, so a year is the natural
+    precision; tests and the ``--as-of`` CLI flag pin a value for
+    reproducibility.
+    """
 
     pub_year: int | None
     pub_country_code: str | None
@@ -30,7 +35,7 @@ class Facts(Struct, frozen=True, forbid_unknown_fields=True):
     was_registered: bool
     was_renewed: bool
     match_confidence: float
-    today: date
+    as_of_year: int
 
 
 def _join_publisher_text(
@@ -66,7 +71,7 @@ def build_facts(
     marc: MarcRecord,
     match: MatchResult | None,
     *,
-    today: date,
+    as_of_year: int,
     matched_nypl: IndexedNyplRegRecord | None = None,
 ) -> Facts:
     """Assemble a :class:`Facts` from a MARC record and its match verdict.
@@ -76,7 +81,8 @@ def build_facts(
         match: The matcher's :class:`MatchResult`, or ``None`` when no
             matching pass has been run yet (e.g. a record published
             after the registration window).
-        today: The reference date used by every age-sensitive predicate.
+        as_of_year: The reference year used by every age-sensitive
+            predicate (the moving wall in particular).
         matched_nypl: The hydrated CCE registration corresponding to
             ``match.best`` (loaded from the NYPL-transcribed index).
             Optional; when omitted the inference layer loses access to
@@ -102,7 +108,7 @@ def build_facts(
         was_registered=was_registered,
         was_renewed=was_renewed,
         match_confidence=confidence,
-        today=today,
+        as_of_year=as_of_year,
     )
 
 

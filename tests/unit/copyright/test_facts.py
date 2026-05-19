@@ -1,7 +1,5 @@
 """Tests for :mod:`pd_matcher.copyright.facts`."""
 
-from datetime import date
-
 from pytest import raises
 
 from pd_matcher.copyright.facts import Facts
@@ -75,7 +73,7 @@ def test_facts_is_frozen() -> None:
         was_registered=False,
         was_renewed=False,
         match_confidence=0.0,
-        today=date(2026, 5, 18),
+        as_of_year=2026,
     )
     with raises(AttributeError):
         setattr(facts, "pub_year", 1999)
@@ -91,7 +89,7 @@ def test_facts_has_no_unpublished_or_media_fields() -> None:
         was_registered=False,
         was_renewed=False,
         match_confidence=0.0,
-        today=date(2026, 5, 18),
+        as_of_year=2026,
     )
     for forbidden in (
         "author_death_year",
@@ -105,7 +103,7 @@ def test_facts_has_no_unpublished_or_media_fields() -> None:
 def test_build_facts_without_match() -> None:
     """``match=None`` results in unregistered, unrenewed, zero-confidence facts."""
     marc = _marc()
-    facts = build_facts(marc, None, today=date(2026, 5, 18))
+    facts = build_facts(marc, None, as_of_year=2026)
     assert facts.pub_year == 1950
     assert facts.pub_country_code == "nyu"
     assert facts.was_registered is False
@@ -118,7 +116,7 @@ def test_build_facts_with_match_but_no_hydrated_nypl() -> None:
     """A MatchResult without ``matched_nypl`` still flips ``was_registered``."""
     marc = _marc()
     match = _match_result(0.92)
-    facts = build_facts(marc, match, today=date(2026, 5, 18))
+    facts = build_facts(marc, match, as_of_year=2026)
     assert facts.was_registered is True
     assert facts.was_renewed is False
     assert facts.match_confidence == 0.92
@@ -129,7 +127,7 @@ def test_build_facts_with_match_and_hydrated_nypl() -> None:
     marc = _marc()
     match = _match_result(0.92)
     nypl = _indexed_nypl(was_renewed=True, claimants=("Estate of John Doe",))
-    facts = build_facts(marc, match, today=date(2026, 5, 18), matched_nypl=nypl)
+    facts = build_facts(marc, match, as_of_year=2026, matched_nypl=nypl)
     assert facts.was_registered is True
     assert facts.was_renewed is True
     assert facts.publisher_text is not None
@@ -141,7 +139,7 @@ def test_build_facts_with_match_and_hydrated_nypl() -> None:
 def test_build_facts_publisher_text_none_when_no_input() -> None:
     """No MARC publisher and no NYPL hydration -> ``publisher_text=None``."""
     marc = _marc(publisher=None)
-    facts = build_facts(marc, None, today=date(2026, 5, 18))
+    facts = build_facts(marc, None, as_of_year=2026)
     assert facts.publisher_text is None
 
 
@@ -153,6 +151,6 @@ def test_build_facts_match_with_no_best() -> None:
         alternates=(),
         candidates_considered=0,
     )
-    facts = build_facts(_marc(), empty_match, today=date(2026, 5, 18))
+    facts = build_facts(_marc(), empty_match, as_of_year=2026)
     assert facts.was_registered is False
     assert facts.match_confidence == 0.0

@@ -8,7 +8,6 @@ metaclass leaks no ``Any`` into our type checker, and it generates ``__slots__``
 by default, matching the project's memory-efficiency policy.
 """
 
-from datetime import date
 from pathlib import Path
 from typing import Annotated
 from typing import Literal
@@ -19,6 +18,8 @@ from msgspec import field
 
 _WEIGHT_SUM_TOLERANCE: float = 1e-3
 _DEFAULT_LMDB_MAP_SIZE_BYTES: int = 16 * 1024 * 1024 * 1024
+_AS_OF_MIN_YEAR: int = 1923
+_AS_OF_MAX_YEAR: int = 2100
 
 
 class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
@@ -112,18 +113,19 @@ class CopyrightAssessmentConfig(Struct, frozen=True, forbid_unknown_fields=True)
     """Runtime configuration for the copyright rule engine.
 
     Attributes:
-        today: Reference date for age-sensitive predicates. ``None``
-            means the engine uses :meth:`date.today` at call time so
-            the moving wall advances naturally every 1 January. Tests
-            and the (Phase 7) ``--as-of`` CLI flag pin a specific date
-            for reproducibility.
+        as_of_year: Reference year for age-sensitive predicates.
+            ``None`` means the engine uses the current calendar year at
+            call time so the moving wall advances naturally every
+            1 January. Tests and the ``--as-of`` CLI flag pin a specific
+            year for reproducibility. Validated to ``1923 <= year <=
+            2100`` when supplied.
         enable_assumptions: When ``False`` the engine refuses to honor
             inference predicates that would contribute an assumption,
             forcing every rule to depend only on directly-observed
             facts. Defaults to ``True``.
     """
 
-    today: date | None = None
+    as_of_year: Annotated[int, Meta(ge=_AS_OF_MIN_YEAR, le=_AS_OF_MAX_YEAR)] | None = None
     enable_assumptions: bool = True
 
 
