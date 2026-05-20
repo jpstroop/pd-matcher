@@ -15,7 +15,7 @@ from pd_matcher.workers.producer import run_producer
 
 
 def _make_records(n: int) -> list[MarcRecord]:
-    return [MarcRecord(control_id=f"m-{i}", title=f"t{i}") for i in range(n)]
+    return [MarcRecord(control_id=f"m-{i}", title=f"t{i}", title_main=f"t{i}") for i in range(n)]
 
 
 def test_encode_and_decode_batch_roundtrip() -> None:

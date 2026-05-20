@@ -188,7 +188,7 @@ The tool solves this in five layers:
 
 **2. Per-field scoring.** Each candidate is scored against the MARC record by a set of pure-function scorers — one per signal (title, author, publisher, year, LCCN, ISBN, edition). Each scorer emits a structured `Evidence` object containing its score and named sub-features. Skipped scorers (missing fields) contribute nothing rather than penalizing.
 
-**3. Field-pair permutations.** For known-confused field pairs (`marc.title` vs `nypl.series_titles`, `marc.publisher` vs `nypl.claimants`), the matcher runs both pairings and keeps the highest-scoring Evidence per scorer. The runners-up are preserved for audit.
+**3. Configurable field pairings.** Title, author, and publisher are transposable across the two sources (the work title stored as a series title, the publisher as the copyright claimant, the author present only in the 245 statement of responsibility). For each of these groups the matcher tries several `(MARC field, CCE field)` pairings and keeps the highest-scoring Evidence; the runners-up are preserved for audit. The pairing set is **configuration**, not code — see [`src/pd_matcher/config/defaults/field_pairings.yaml`](src/pd_matcher/config/defaults/field_pairings.yaml) and the [field-pairings study](docs/studies/field-pairings.md). Code surfaces raw subfields out of each record; a small closed vocabulary in YAML composes and pairs them, validated at load time.
 
 **4. Combination + calibration.** A weighted-mean combiner reduces the Evidence collection to a single raw score. A Platt-scaled logistic regression, trained against the project's 19,970-row ground-truth set, maps the raw score to a calibrated probability. A "75" in the published `combined_score` column means there's roughly a 75% chance the pair is a true match, not "I gave this 75 vibe points."
 
@@ -220,6 +220,7 @@ The matcher and the rule engine each ship with shippable-default YAML files:
 
 - `src/pd_matcher/config/defaults/matching.yaml` — scorer weights, year window, min combined score, scorer selection.
 - `src/pd_matcher/config/defaults/copyright_rules.yaml` — ordered Cornell rules with predicate calls, status mappings, and assumption notes.
+- `src/pd_matcher/config/defaults/field_pairings.yaml` — the `(MARC field, CCE field)` pairings tried for the title, author, and publisher scorer groups, composed from raw subfields via a closed combine vocabulary. Documented inline; see the [field-pairings study](docs/studies/field-pairings.md).
 
 Both load through `src/pd_matcher/config/loader.py` against `msgspec.Struct` schemas in `src/pd_matcher/config/schemas.py`. Schema-violating YAML fails loudly at load time. Future work will let a user-provided YAML override or merge with the defaults; for now, edit the defaults directly if you need to tune.
 

@@ -22,6 +22,7 @@ def _marc() -> MarcRecord:
     return MarcRecord(
         control_id="marc-1",
         title="A study of widgets",
+        title_main="A study of widgets",
         lccn="40012345",
         main_author="Alpha, Alice",
         statement_of_responsibility="by Alice Alpha",
@@ -146,7 +147,7 @@ def test_csv_writer_blanks_when_match_present_but_indexed_record_missing(
 
 def test_csv_writer_handles_none_normalized_value(tmp_path: Path) -> None:
     path = tmp_path / "out.csv"
-    marc = MarcRecord(control_id="m", title="X")
+    marc = MarcRecord(control_id="m", title="X", title_main="X")
     assessment = CopyrightAssessment(
         status=CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA,
         matched_rule_name=None,
@@ -164,7 +165,7 @@ def test_csv_writer_handles_none_normalized_value(tmp_path: Path) -> None:
 def test_csv_writer_handles_value_normalising_to_empty(tmp_path: Path) -> None:
     """A non-empty input that normalizes to empty (pure punctuation) is preserved."""
     path = tmp_path / "out.csv"
-    marc = MarcRecord(control_id="m", title="X", publisher="///")
+    marc = MarcRecord(control_id="m", title="X", title_main="X", publisher="///")
     assessment = CopyrightAssessment(
         status=CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA,
         matched_rule_name=None,

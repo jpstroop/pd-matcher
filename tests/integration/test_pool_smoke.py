@@ -9,6 +9,7 @@ from csv import DictReader
 from pathlib import Path
 
 from pd_matcher.config.loader import load_copyright_rules
+from pd_matcher.config.loader import load_pairing_config
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.index.builder import build_index
@@ -25,6 +26,14 @@ _DEFAULTS = (
     / "config"
     / "defaults"
     / "copyright_rules.yaml"
+)
+_PAIRINGS = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "pd_matcher"
+    / "config"
+    / "defaults"
+    / "field_pairings.yaml"
 )
 
 
@@ -61,6 +70,7 @@ def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
     )
     copyright_config = CopyrightAssessmentConfig(as_of_year=2026)
     ruleset = load_copyright_rules(_DEFAULTS)
+    pairing_config = load_pairing_config(_PAIRINGS)
     report = run_match(
         marc_path=marc_path,
         index_path=index_path,
@@ -68,6 +78,7 @@ def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
         matching_config=config,
         copyright_config=copyright_config,
         ruleset=ruleset,
+        pairing_config=pairing_config,
         idf=idf,
         workers=2,
         batch_size=2,

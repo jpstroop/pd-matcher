@@ -10,6 +10,7 @@ from pd_matcher.config.loader import ConfigError
 from pd_matcher.config.loader import load_copyright_rules
 from pd_matcher.config.loader import load_index_config
 from pd_matcher.config.loader import load_matching_config
+from pd_matcher.config.loader import load_pairing_config
 
 
 def test_load_shipped_matching_defaults() -> None:
@@ -112,3 +113,24 @@ def test_load_copyright_rules_raises_on_missing_file(tmp_path: Path) -> None:
     """A nonexistent path through ``load_copyright_rules`` must raise."""
     with raises(ConfigError, match="Cannot read"):
         load_copyright_rules(tmp_path / "missing.yaml")
+
+
+def test_load_shipped_pairing_defaults() -> None:
+    """The packaged ``field_pairings.yaml`` must validate cleanly."""
+    resource = files("pd_matcher.config.defaults") / "field_pairings.yaml"
+    with as_file(resource) as path:
+        cfg = load_pairing_config(path)
+    assert "title_main" in cfg.marc_fields
+    assert "publisher_names" in cfg.cce_fields
+    assert len(cfg.pairings) == 8
+
+
+def test_load_pairing_config_raises_on_schema_violation(tmp_path: Path) -> None:
+    """A schema-violating pairing YAML should raise :class:`ConfigError`."""
+    bad = tmp_path / "pairings.yaml"
+    bad.write_text(
+        "marc_fields: {}\ncce_fields: {}\npairings:\n  - {group: nope, marc: m, cce: c}\n",
+        encoding="utf-8",
+    )
+    with raises(ConfigError, match="Invalid pairing config"):
+        load_pairing_config(bad)

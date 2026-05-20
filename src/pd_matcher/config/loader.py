@@ -19,6 +19,7 @@ from yaml import safe_load
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import IndexConfig
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.config.schemas import PairingConfig
 
 
 class ConfigError(Exception):
@@ -111,9 +112,29 @@ def load_index_config(path: Path) -> IndexConfig:
         raise ConfigError(f"Invalid index config in {path}: {exc}") from exc
 
 
+def load_pairing_config(path: Path) -> PairingConfig:
+    """Load and validate a :class:`PairingConfig` from ``path``.
+
+    Args:
+        path: YAML file describing the field-pairing specification.
+
+    Returns:
+        A validated :class:`PairingConfig`.
+
+    Raises:
+        ConfigError: If the file cannot be read, parsed, or validated.
+    """
+    data = _read_yaml(path)
+    try:
+        return convert(data, type=PairingConfig, dec_hook=_path_dec_hook)
+    except (ValidationError, ValueError) as exc:
+        raise ConfigError(f"Invalid pairing config in {path}: {exc}") from exc
+
+
 __all__ = [
     "ConfigError",
     "load_copyright_rules",
     "load_index_config",
     "load_matching_config",
+    "load_pairing_config",
 ]

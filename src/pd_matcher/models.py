@@ -20,8 +20,11 @@ class MarcRecord(Struct, frozen=True, forbid_unknown_fields=True):
 
     control_id: str
     title: str
+    title_main: str
     lccn: str | None = None
     isbns: tuple[str, ...] = ()
+    title_part_number: str | None = None
+    title_part_name: str | None = None
     main_author: str | None = None
     added_authors: tuple[str, ...] = ()
     statement_of_responsibility: str | None = None

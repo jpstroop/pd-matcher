@@ -15,14 +15,16 @@ from pd_matcher.models import index_reg
 
 
 def test_marc_record_minimal_fields_default_optional_to_none() -> None:
-    record = MarcRecord(control_id="m1", title="Sample title")
+    record = MarcRecord(control_id="m1", title="Sample title", title_main="Sample title")
     assert record.lccn is None
     assert record.isbns == ()
     assert record.added_authors == ()
+    assert record.title_part_number is None
+    assert record.title_part_name is None
 
 
 def test_marc_record_is_frozen() -> None:
-    record = MarcRecord(control_id="m1", title="t")
+    record = MarcRecord(control_id="m1", title="t", title_main="t")
     with raises(AttributeError):
         setattr(record, "title", "other")
 
@@ -30,7 +32,7 @@ def test_marc_record_is_frozen() -> None:
 def test_marc_record_forbids_extra_fields() -> None:
     with raises(ValidationError):
         convert(
-            {"control_id": "m1", "title": "t", "unknown": 1},
+            {"control_id": "m1", "title": "t", "title_main": "t", "unknown": 1},
             type=MarcRecord,
         )
 
@@ -39,6 +41,7 @@ def test_marc_record_roundtrips_through_msgspec_builtins() -> None:
     original = MarcRecord(
         control_id="m1",
         title="Widgets",
+        title_main="Widgets",
         lccn="40012345",
         isbns=("9780000000000",),
         publication_year=1940,
