@@ -227,3 +227,177 @@ def test_run_eval_handles_empty_year(tmp_path: Path) -> None:
     )
     assert report.rows_evaluated == 1
     assert report.rows_with_predicted_match == 0
+
+
+def _write_many_distinct_rows(path: Path, count: int) -> None:
+    """Emit ``count`` distinct rows so a random sampler can shuffle them."""
+    header = ",".join(_HEADER_FIELDS) + "\n"
+    rows = "".join(
+        _row(
+            {
+                "marc_id": f"marc-{i:04d}",
+                "marc_title_original": f"Title {i}",
+                "marc_year": "1940",
+                "marc_country_code": "xxu",
+                "marc_language_code": "eng",
+                "copyright_status": "UNKNOWN_INSUFFICIENT_DATA",
+            }
+        )
+        for i in range(count)
+    )
+    path.write_text(header + rows, encoding="utf-8")
+
+
+def test_run_eval_sample_caps_row_count(tmp_path: Path) -> None:
+    """``sample=5`` reduces the evaluated row count to 5."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_many_distinct_rows(gt_path, 20)
+    report = run_eval(
+        ground_truth_path=gt_path,
+        index_path=index_path,
+        as_of_year=2026,
+        matching_config=_matching_config(),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        sample=5,
+        seed=42,
+    )
+    assert report.rows_evaluated == 5
+
+
+def test_run_eval_sample_larger_than_corpus_evaluates_all(tmp_path: Path) -> None:
+    """``sample > len(rows)`` evaluates every row, no error raised."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_many_distinct_rows(gt_path, 4)
+    report = run_eval(
+        ground_truth_path=gt_path,
+        index_path=index_path,
+        as_of_year=2026,
+        matching_config=_matching_config(),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        sample=100,
+        seed=0,
+    )
+    assert report.rows_evaluated == 4
+
+
+def test_run_eval_same_seed_picks_same_rows(tmp_path: Path) -> None:
+    """Two runs with the same seed select identical rows (deterministic)."""
+    from pd_matcher.eval.ground_truth import _load_rows
+
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_many_distinct_rows(gt_path, 50)
+    first = _load_rows(gt_path, sample=10, seed=7)
+    second = _load_rows(gt_path, sample=10, seed=7)
+    assert [row["marc_id"] for row in first] == [row["marc_id"] for row in second]
+    report = run_eval(
+        ground_truth_path=gt_path,
+        index_path=index_path,
+        as_of_year=2026,
+        matching_config=_matching_config(),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        sample=10,
+        seed=7,
+    )
+    assert report.rows_evaluated == 10
+
+
+def test_run_eval_different_seeds_pick_different_rows(tmp_path: Path) -> None:
+    """Different seeds yield different selections on a 50-row corpus."""
+    from pd_matcher.eval.ground_truth import _load_rows
+
+    gt_path = tmp_path / "gt.csv"
+    _write_many_distinct_rows(gt_path, 50)
+    first = _load_rows(gt_path, sample=25, seed=1)
+    second = _load_rows(gt_path, sample=25, seed=2)
+    assert [row["marc_id"] for row in first] != [row["marc_id"] for row in second]
+
+
+def test_load_rows_without_sample_preserves_file_order(tmp_path: Path) -> None:
+    """``sample=None`` returns rows in file order — no shuffling, no surprises."""
+    from pd_matcher.eval.ground_truth import _load_rows
+
+    gt_path = tmp_path / "gt.csv"
+    _write_many_distinct_rows(gt_path, 5)
+    rows = _load_rows(gt_path, sample=None, seed=99)
+    assert [row["marc_id"] for row in rows] == [f"marc-{i:04d}" for i in range(5)]
+
+
+def _write_year_drift_row(path: Path) -> None:
+    """Emit a single GT row whose MARC year is ``5`` off from the indexed reg year.
+
+    The tiny fixtures register UUID-0001 in 1940; this row claims 1945.
+    With ``year_window=0`` no candidate is returned (year_diff exceeds the
+    window); with ``year_window=5`` the registration is in-bucket.
+    """
+    header = ",".join(_HEADER_FIELDS) + "\n"
+    body = _row(
+        {
+            "marc_id": "marc-drift",
+            "marc_title_original": "A study of widgets",
+            "marc_main_author_original": "Smith John",
+            "marc_publisher_original": "Acme Press",
+            "marc_year": "1945",
+            "marc_country_code": "xxu",
+            "marc_language_code": "eng",
+            "match_source_id": "UUID-0001",
+            "copyright_status": "PD_REGISTERED_NOT_RENEWED",
+        }
+    )
+    path.write_text(header + body, encoding="utf-8")
+
+
+def test_run_eval_year_window_zero_yields_no_predicted_match(tmp_path: Path) -> None:
+    """``year_window=0`` blocks the year-drifted candidate from matching."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_year_drift_row(gt_path)
+    narrow = MatchingConfig(
+        title_weight=0.40,
+        author_weight=0.20,
+        publisher_weight=0.10,
+        year_weight=0.10,
+        edition_weight=0.05,
+        lccn_weight=0.10,
+        isbn_weight=0.05,
+        year_window=0,
+        min_combined_score=1.0,
+        scorer="weighted_mean",
+    )
+    report = run_eval(
+        ground_truth_path=gt_path,
+        index_path=index_path,
+        as_of_year=2026,
+        matching_config=narrow,
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+    )
+    assert report.rows_with_predicted_match == 0
+
+
+def test_run_eval_year_window_five_admits_year_drifted_match(tmp_path: Path) -> None:
+    """``year_window=5`` admits the same drifted candidate as a match."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_year_drift_row(gt_path)
+    wide = MatchingConfig(
+        title_weight=0.40,
+        author_weight=0.20,
+        publisher_weight=0.10,
+        year_weight=0.10,
+        edition_weight=0.05,
+        lccn_weight=0.10,
+        isbn_weight=0.05,
+        year_window=5,
+        min_combined_score=1.0,
+        scorer="weighted_mean",
+    )
+    report = run_eval(
+        ground_truth_path=gt_path,
+        index_path=index_path,
+        as_of_year=2026,
+        matching_config=wide,
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+    )
+    assert report.rows_with_predicted_match == 1

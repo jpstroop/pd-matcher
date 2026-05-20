@@ -121,11 +121,16 @@ pd-matcher eval \
   --index caches/cce.lmdb \
   [--report eval.json] \
   [--limit N] \
+  [--sample N [--seed S]] \
+  [--year-window N] \
   [--as-of YYYY]
 ```
 
 - `--report PATH` — write the full `EvalReport` as JSON.
 - `--limit N` — evaluate only the first `N` rows; useful for fast smoke testing.
+- `--sample N` — randomly sample `N` rows from the ground-truth CSV. Mutually exclusive with `--limit`. Sample sizes larger than the file evaluate every row.
+- `--seed S` — integer seed for `--sample`'s random selection (default `0`). Same seed → same selection, run after run. Ignored when `--sample` is not set.
+- `--year-window N` — override the matching config's year window (default 2) for this eval run. Accepted range is 0–100. Useful when sweeping the window to study recall-at-window curves.
 
 The eval reconstructs a `MarcRecord` from each ground-truth row, runs the full match + assessment pipeline, and compares the predicted best match's `match_source_id` against the ground-truth `match_source_id`.
 

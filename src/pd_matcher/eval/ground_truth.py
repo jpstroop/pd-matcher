@@ -12,6 +12,7 @@ from collections import Counter
 from collections import defaultdict
 from csv import DictReader
 from pathlib import Path
+from random import Random
 from time import perf_counter
 
 from msgspec import Struct
@@ -101,6 +102,27 @@ def _f1(precision: float, recall: float) -> float:
     return 2.0 * precision * recall / total
 
 
+def _load_rows(
+    ground_truth_path: Path,
+    *,
+    sample: int | None,
+    seed: int,
+) -> list[dict[str, str]]:
+    """Load CSV rows, optionally drawing a deterministic random sample.
+
+    When ``sample`` is ``None`` the full row sequence is returned in file
+    order. When ``sample`` is set, ``Random(seed).sample`` selects
+    ``min(sample, len(rows))`` rows — passing a sample size larger than
+    the file is a no-op (every row is returned).
+    """
+    with ground_truth_path.open(encoding="utf-8", newline="") as fp:
+        rows = list(DictReader(fp))
+    if sample is None:
+        return rows
+    k = min(sample, len(rows))
+    return Random(seed).sample(rows, k=k)
+
+
 def run_eval(
     *,
     ground_truth_path: Path,
@@ -109,6 +131,8 @@ def run_eval(
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     limit: int | None = None,
+    sample: int | None = None,
+    seed: int = 0,
 ) -> EvalReport:
     """Evaluate the matcher pipeline against ``ground_truth_path``.
 
@@ -121,7 +145,13 @@ def run_eval(
         matching_config: Active :class:`MatchingConfig`.
         copyright_config: Active :class:`CopyrightAssessmentConfig`.
         limit: Optional maximum number of rows to evaluate. ``None``
-            evaluates every row.
+            evaluates every row. Mutually exclusive with ``sample`` at
+            the CLI layer.
+        sample: Optional random sample size. When set, exactly
+            ``min(sample, len(rows))`` rows are drawn using
+            ``Random(seed)`` and evaluated.
+        seed: Seed for the random sampler. Only meaningful when
+            ``sample`` is set; ignored otherwise.
 
     Returns:
         A populated :class:`EvalReport`.
@@ -134,42 +164,42 @@ def run_eval(
     rows_with_ground_truth_match = 0
     rows_agreeing = 0
     confusion: dict[str, Counter[str]] = defaultdict(Counter)
+    rows = _load_rows(ground_truth_path, sample=sample, seed=seed)
     with NyplIndexLookup(index_path) as lookup:
         idf: IdfTable = build_idf_table(lookup)
-        with ground_truth_path.open(encoding="utf-8", newline="") as fp:
-            for row in DictReader(fp):
-                if limit is not None and rows_evaluated >= limit:
-                    break
-                marc = _marc_from_row(row)
-                match = match_record(
-                    marc,
-                    lookup=lookup,
-                    config=matching_config,
-                    idf=idf,
-                    calibrator=None,
-                    combiner=combiner,
-                )
-                matched_nypl = None
-                predicted_id: str | None = None
-                if match.best is not None:
-                    matched_nypl = lookup.get_registration(match.best.nypl_uuid)
-                    predicted_id = match.best.nypl_uuid
-                facts = build_facts(marc, match, as_of_year=as_of_year, matched_nypl=matched_nypl)
-                assessment = assess(
-                    facts,
-                    ruleset,
-                    enable_assumptions=copyright_config.enable_assumptions,
-                )
-                gt_id = _maybe(row.get("match_source_id", ""))
-                gt_status = _classify_gt_status(row.get("copyright_status", ""))
-                rows_evaluated += 1
-                if predicted_id is not None:
-                    rows_with_predicted_match += 1
-                if gt_id is not None:
-                    rows_with_ground_truth_match += 1
-                if predicted_id is not None and gt_id is not None and predicted_id == gt_id:
-                    rows_agreeing += 1
-                confusion[assessment.status.value][gt_status] += 1
+        for row in rows:
+            if limit is not None and rows_evaluated >= limit:
+                break
+            marc = _marc_from_row(row)
+            match = match_record(
+                marc,
+                lookup=lookup,
+                config=matching_config,
+                idf=idf,
+                calibrator=None,
+                combiner=combiner,
+            )
+            matched_nypl = None
+            predicted_id: str | None = None
+            if match.best is not None:
+                matched_nypl = lookup.get_registration(match.best.nypl_uuid)
+                predicted_id = match.best.nypl_uuid
+            facts = build_facts(marc, match, as_of_year=as_of_year, matched_nypl=matched_nypl)
+            assessment = assess(
+                facts,
+                ruleset,
+                enable_assumptions=copyright_config.enable_assumptions,
+            )
+            gt_id = _maybe(row.get("match_source_id", ""))
+            gt_status = _classify_gt_status(row.get("copyright_status", ""))
+            rows_evaluated += 1
+            if predicted_id is not None:
+                rows_with_predicted_match += 1
+            if gt_id is not None:
+                rows_with_ground_truth_match += 1
+            if predicted_id is not None and gt_id is not None and predicted_id == gt_id:
+                rows_agreeing += 1
+            confusion[assessment.status.value][gt_status] += 1
     precision = _safe_division(rows_agreeing, rows_with_predicted_match)
     recall = _safe_division(rows_agreeing, rows_with_ground_truth_match)
     f1 = _f1(precision, recall)
