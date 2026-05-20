@@ -15,6 +15,7 @@ from importlib.resources import as_file
 from importlib.resources import files
 from json import dumps
 from logging import WARNING
+from os import cpu_count
 from pathlib import Path
 from typing import Annotated
 
@@ -55,6 +56,8 @@ _AS_OF_MAX_YEAR: int = 2100
 
 _YEAR_WINDOW_MIN: int = 0
 _YEAR_WINDOW_MAX: int = 100
+
+_EVAL_WORKERS_MIN: int = 1
 
 
 app: Typer = Typer(
@@ -151,6 +154,27 @@ def _validate_sample(value: int | None) -> int | None:
     if value < 1:
         raise BadParameter(
             f"--sample: must be a positive integer (got {value})",
+        )
+    return value
+
+
+def _eval_workers_upper_bound() -> int:
+    """Return the inclusive upper bound for ``--workers`` on ``eval``.
+
+    Capped at ``cpu_count() * 2`` so over-subscription stays modest even
+    on hosts where ``cpu_count`` underreports (containers, hyperthreaded
+    CI runners). Defaults to ``2`` when ``cpu_count`` returns ``None``.
+    """
+    cpus = cpu_count() or 1
+    return max(_EVAL_WORKERS_MIN, cpus * 2)
+
+
+def _validate_eval_workers(value: int) -> int:
+    """Return ``value`` unchanged when it lies in ``[1, cpu_count*2]``; raise otherwise."""
+    upper = _eval_workers_upper_bound()
+    if value < _EVAL_WORKERS_MIN or value > upper:
+        raise BadParameter(
+            f"--workers: must be between {_EVAL_WORKERS_MIN} and {upper} (got {value})",
         )
     return value
 
@@ -439,6 +463,17 @@ def eval_(
             help="Override the matching config's year_window for this eval run.",
         ),
     ] = None,
+    workers: Annotated[
+        int,
+        Option(
+            "--workers",
+            help=(
+                "Number of worker processes (default: 1, single-process)."
+                " Use --workers N to fan out across a spawn pool; N is"
+                " capped at cpu_count() * 2."
+            ),
+        ),
+    ] = 1,
 ) -> None:
     """Evaluate the matcher against the ground-truth pairs.
 
@@ -446,11 +481,13 @@ def eval_(
         pd-matcher eval \\
             --ground-truth data/combined_ground_truth.csv \\
             --index caches/nypl.lmdb \\
-            --report /tmp/eval.json
+            --report /tmp/eval.json \\
+            --workers 8
     """
     as_of_year = _parse_as_of(as_of)
     year_window = _validate_year_window(year_window)
     sample = _validate_sample(sample)
+    workers = _validate_eval_workers(workers)
     if seed < 0:
         raise BadParameter(f"--seed: must be a non-negative integer (got {seed})")
     if sample is not None and limit is not None:
@@ -487,6 +524,7 @@ def eval_(
             limit=limit,
             sample=sample,
             seed=seed,
+            workers=workers,
         )
     except OSError as exc:
         raise _fail(f"eval run failed: {exc}") from exc

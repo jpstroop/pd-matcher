@@ -123,6 +123,7 @@ pd-matcher eval \
   [--limit N] \
   [--sample N [--seed S]] \
   [--year-window N] \
+  [--workers N] \
   [--as-of YYYY]
 ```
 
@@ -131,6 +132,7 @@ pd-matcher eval \
 - `--sample N` — randomly sample `N` rows from the ground-truth CSV. Mutually exclusive with `--limit`. Sample sizes larger than the file evaluate every row.
 - `--seed S` — integer seed for `--sample`'s random selection (default `0`). Same seed → same selection, run after run. Ignored when `--sample` is not set.
 - `--year-window N` — override the matching config's year window (default 2) for this eval run. Accepted range is 0–100. Useful when sweeping the window to study recall-at-window curves.
+- `--workers N` — number of worker processes (default `1`, single-process). With `N >= 2` the per-row work is fanned out across a `spawn` pool; each worker opens the LMDB index read-only (mmap-shared across workers) and reuses one IDF table per process. Accepted range is `1` to `cpu_count() * 2`. The single-process default keeps results bit-for-bit reproducible; opt into parallelism explicitly when sweeping configs over large samples.
 
 The eval reconstructs a `MarcRecord` from each ground-truth row, runs the full match + assessment pipeline, and compares the predicted best match's `match_source_id` against the ground-truth `match_source_id`.
 

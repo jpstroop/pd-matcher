@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from pytest import raises
+
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.eval.ground_truth import UNRECOGNIZED_GT_STATUS
@@ -401,3 +403,209 @@ def test_run_eval_year_window_five_admits_year_drifted_match(tmp_path: Path) -> 
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
     )
     assert report.rows_with_predicted_match == 1
+
+
+def test_run_eval_rejects_workers_below_one(tmp_path: Path) -> None:
+    """``workers=0`` is rejected by the public API with :class:`ValueError`."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path)
+    with raises(ValueError, match="workers must be >= 1"):
+        run_eval(
+            ground_truth_path=gt_path,
+            index_path=index_path,
+            as_of_year=2026,
+            matching_config=_matching_config(),
+            copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+            workers=0,
+        )
+
+
+def test_run_eval_workers_one_matches_default_path(tmp_path: Path) -> None:
+    """``workers=1`` produces the same report as the default invocation."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path)
+    default_report = run_eval(
+        ground_truth_path=gt_path,
+        index_path=index_path,
+        as_of_year=2026,
+        matching_config=_matching_config(),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+    )
+    explicit_report = run_eval(
+        ground_truth_path=gt_path,
+        index_path=index_path,
+        as_of_year=2026,
+        matching_config=_matching_config(),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        workers=1,
+    )
+    assert default_report.rows_evaluated == explicit_report.rows_evaluated
+    assert default_report.rows_with_predicted_match == explicit_report.rows_with_predicted_match
+    assert (
+        default_report.rows_with_ground_truth_match == explicit_report.rows_with_ground_truth_match
+    )
+    assert default_report.rows_agreeing == explicit_report.rows_agreeing
+    assert default_report.status_confusion == explicit_report.status_confusion
+
+
+def test_run_eval_workers_two_matches_workers_one(tmp_path: Path) -> None:
+    """``workers=2`` (spawn pool) yields the identical aggregate as ``workers=1``."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path)
+    serial_report = run_eval(
+        ground_truth_path=gt_path,
+        index_path=index_path,
+        as_of_year=2026,
+        matching_config=_matching_config(),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        workers=1,
+    )
+    parallel_report = run_eval(
+        ground_truth_path=gt_path,
+        index_path=index_path,
+        as_of_year=2026,
+        matching_config=_matching_config(),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        workers=2,
+    )
+    assert parallel_report.rows_evaluated == serial_report.rows_evaluated
+    assert parallel_report.rows_with_predicted_match == serial_report.rows_with_predicted_match
+    assert (
+        parallel_report.rows_with_ground_truth_match == serial_report.rows_with_ground_truth_match
+    )
+    assert parallel_report.rows_agreeing == serial_report.rows_agreeing
+    assert parallel_report.precision == serial_report.precision
+    assert parallel_report.recall == serial_report.recall
+    assert parallel_report.f1 == serial_report.f1
+    assert parallel_report.status_confusion == serial_report.status_confusion
+
+
+def test_run_eval_workers_two_respects_limit(tmp_path: Path) -> None:
+    """``--limit`` truncates the row list before fanning out to the pool."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_many_distinct_rows(gt_path, 12)
+    report = run_eval(
+        ground_truth_path=gt_path,
+        index_path=index_path,
+        as_of_year=2026,
+        matching_config=_matching_config(),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        limit=4,
+        workers=2,
+    )
+    assert report.rows_evaluated == 4
+
+
+def test_run_eval_workers_two_empty_corpus_yields_zero_metrics(tmp_path: Path) -> None:
+    """An empty CSV under ``workers=2`` short-circuits before spawning a pool."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    gt_path.write_text("marc_id,marc_year,match_source_id,copyright_status\n", encoding="utf-8")
+    report = run_eval(
+        ground_truth_path=gt_path,
+        index_path=index_path,
+        as_of_year=2026,
+        matching_config=_matching_config(),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        workers=2,
+    )
+    assert report.rows_evaluated == 0
+    assert report.status_confusion == {}
+
+
+def test_eval_one_row_is_a_pure_function(tmp_path: Path) -> None:
+    """``_eval_one_row`` is callable directly with a constructed ``_WorkerState``.
+
+    Exercising the per-row helper without spawning processes keeps the unit
+    fast and lets us assert the structured outcome shape without IPC.
+    """
+    from pd_matcher.eval.ground_truth import _eval_one_row
+    from pd_matcher.eval.ground_truth import _WorkerState
+
+    index_path = _build_index(tmp_path)
+    state = _WorkerState(
+        index_path=index_path,
+        matching_config=_matching_config(),
+        copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        as_of_year=2026,
+    )
+    try:
+        row = {
+            "marc_id": "marc-aaa",
+            "marc_title_original": "A study of widgets",
+            "marc_main_author_original": "Smith John",
+            "marc_publisher_original": "Acme Press",
+            "marc_year": "1940",
+            "marc_country_code": "xxu",
+            "marc_language_code": "eng",
+            "match_source_id": "UUID-0001",
+            "copyright_status": "PD_REGISTERED_NOT_RENEWED",
+        }
+        outcome = _eval_one_row(row, state=state)
+    finally:
+        state.lookup.close()
+    assert outcome.has_predicted_match is True
+    assert outcome.has_ground_truth_match is True
+    assert outcome.agrees is True
+
+
+def test_pool_eval_row_raises_when_initializer_skipped() -> None:
+    """``_pool_eval_row`` fails fast when the module-global state is unset.
+
+    The initializer always runs inside the spawn pool, so this guard
+    only fires when a caller misuses the worker function directly; the
+    explicit ``RuntimeError`` is preferable to an opaque ``AttributeError``.
+    """
+    from pd_matcher.eval import ground_truth as gt_module
+
+    saved = gt_module._WORKER_STATE
+    gt_module._WORKER_STATE = None
+    try:
+        with raises(RuntimeError, match="_pool_initializer"):
+            gt_module._pool_eval_row({"marc_id": "x"})
+    finally:
+        gt_module._WORKER_STATE = saved
+
+
+def test_pool_initializer_and_pool_eval_row_round_trip(tmp_path: Path) -> None:
+    """``_pool_initializer`` populates the module global so ``_pool_eval_row`` works.
+
+    Exercises the spawn-pool entry points in-process so coverage reaches
+    the lines that ``multiprocessing.Pool`` would normally execute
+    inside a separate interpreter (where pytest-cov can't see).
+    """
+    from pd_matcher.eval import ground_truth as gt_module
+
+    index_path = _build_index(tmp_path)
+    saved = gt_module._WORKER_STATE
+    try:
+        gt_module._pool_initializer(
+            index_path,
+            _matching_config(),
+            CopyrightAssessmentConfig(as_of_year=2026),
+            2026,
+        )
+        assert gt_module._WORKER_STATE is not None
+        outcome = gt_module._pool_eval_row(
+            {
+                "marc_id": "marc-aaa",
+                "marc_title_original": "A study of widgets",
+                "marc_main_author_original": "Smith John",
+                "marc_publisher_original": "Acme Press",
+                "marc_year": "1940",
+                "marc_country_code": "xxu",
+                "marc_language_code": "eng",
+                "match_source_id": "UUID-0001",
+                "copyright_status": "PD_REGISTERED_NOT_RENEWED",
+            }
+        )
+        assert outcome.has_predicted_match is True
+        assert outcome.agrees is True
+    finally:
+        if gt_module._WORKER_STATE is not None:
+            gt_module._WORKER_STATE.lookup.close()
+        gt_module._WORKER_STATE = saved

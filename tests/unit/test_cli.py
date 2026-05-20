@@ -11,7 +11,9 @@ from pytest import raises
 from typer import BadParameter
 from typer.testing import CliRunner
 
+from pd_matcher.cli import _eval_workers_upper_bound
 from pd_matcher.cli import _parse_as_of
+from pd_matcher.cli import _validate_eval_workers
 from pd_matcher.cli import _validate_sample
 from pd_matcher.cli import _validate_year_window
 from pd_matcher.cli import app
@@ -1131,6 +1133,173 @@ def test_validate_sample_rejects_negative() -> None:
     """``_validate_sample(-1)`` raises :class:`typer.BadParameter`."""
     with raises(BadParameter, match="sample"):
         _validate_sample(-1)
+
+
+def test_validate_eval_workers_accepts_default_one() -> None:
+    """``_validate_eval_workers(1)`` is the lower bound and is accepted."""
+    assert _validate_eval_workers(1) == 1
+
+
+def test_validate_eval_workers_accepts_upper_bound() -> None:
+    """``_validate_eval_workers`` accepts ``cpu_count() * 2`` (the upper bound)."""
+    upper = _eval_workers_upper_bound()
+    assert _validate_eval_workers(upper) == upper
+
+
+def test_validate_eval_workers_rejects_zero() -> None:
+    """``_validate_eval_workers(0)`` raises :class:`typer.BadParameter`."""
+    with raises(BadParameter, match="workers"):
+        _validate_eval_workers(0)
+
+
+def test_validate_eval_workers_rejects_negative() -> None:
+    """``_validate_eval_workers(-1)`` raises :class:`typer.BadParameter`."""
+    with raises(BadParameter, match="workers"):
+        _validate_eval_workers(-1)
+
+
+def test_validate_eval_workers_rejects_above_upper_bound() -> None:
+    """``_validate_eval_workers(cpu_count*2 + 1)`` raises :class:`typer.BadParameter`."""
+    with raises(BadParameter, match="workers"):
+        _validate_eval_workers(_eval_workers_upper_bound() + 1)
+
+
+def test_eval_workers_upper_bound_falls_back_when_cpu_count_returns_none(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """When ``os.cpu_count`` returns ``None`` the upper bound falls back to ``2``."""
+    monkeypatch.setattr("pd_matcher.cli.cpu_count", lambda: None)
+    assert _eval_workers_upper_bound() == 2
+
+
+def test_eval_workers_flag_threads_through(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``--workers N`` is forwarded to ``run_eval`` unchanged."""
+    from pd_matcher.eval.ground_truth import EvalReport
+
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path, 2026)
+    captured: dict[str, int] = {}
+
+    def _fake_run_eval(**kwargs: object) -> EvalReport:
+        workers = kwargs["workers"]
+        assert isinstance(workers, int)
+        captured["workers"] = workers
+        return EvalReport(
+            rows_evaluated=0,
+            rows_with_predicted_match=0,
+            rows_with_ground_truth_match=0,
+            rows_agreeing=0,
+            precision=0.0,
+            recall=0.0,
+            f1=0.0,
+            status_confusion={},
+            elapsed_seconds=0.0,
+        )
+
+    monkeypatch.setattr("pd_matcher.cli.run_eval", _fake_run_eval)
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--ground-truth",
+            str(gt_path),
+            "--index",
+            str(index_path),
+            "--workers",
+            "2",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["workers"] == 2
+
+
+def test_eval_default_workers_is_one(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Omitting ``--workers`` defaults to ``1`` (single-process)."""
+    from pd_matcher.eval.ground_truth import EvalReport
+
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path, 2026)
+    captured: dict[str, int] = {}
+
+    def _fake_run_eval(**kwargs: object) -> EvalReport:
+        workers = kwargs["workers"]
+        assert isinstance(workers, int)
+        captured["workers"] = workers
+        return EvalReport(
+            rows_evaluated=0,
+            rows_with_predicted_match=0,
+            rows_with_ground_truth_match=0,
+            rows_agreeing=0,
+            precision=0.0,
+            recall=0.0,
+            f1=0.0,
+            status_confusion={},
+            elapsed_seconds=0.0,
+        )
+
+    monkeypatch.setattr("pd_matcher.cli.run_eval", _fake_run_eval)
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--ground-truth",
+            str(gt_path),
+            "--index",
+            str(index_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["workers"] == 1
+
+
+def test_eval_rejects_workers_zero(tmp_path: Path) -> None:
+    """``eval --workers 0`` is rejected with exit 2."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path, 2026)
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--ground-truth",
+            str(gt_path),
+            "--index",
+            str(index_path),
+            "--workers",
+            "0",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "workers" in result.output
+
+
+def test_eval_rejects_workers_above_upper_bound(tmp_path: Path) -> None:
+    """``eval --workers <cpu_count*2 + 1>`` is rejected with exit 2."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path, 2026)
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--ground-truth",
+            str(gt_path),
+            "--index",
+            str(index_path),
+            "--workers",
+            str(_eval_workers_upper_bound() + 1),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "workers" in result.output
 
 
 def test_train_scorer_returns_phase_9_stub() -> None:
