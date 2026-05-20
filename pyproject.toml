@@ -37,6 +37,8 @@ lint = "ruff check src tests"
 lint-fix = "ruff check --fix src tests"
 typecheck = "mypy src tests"
 test = "pytest"
+regression = "pytest -m regression --no-cov tests/regression"
+regression-baseline = "python tests/regression/update_baseline.py"
 gates = {composite = ["fmt", "lint", "typecheck", "test"]}
 
 [tool.pdm.build]
@@ -104,9 +106,10 @@ line-ending = "lf"
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-addopts = "--cov=src/pd_matcher --cov-branch --cov-fail-under=100 --cov-report=term-missing -m 'not slow'"
+addopts = "--cov=src/pd_matcher --cov-branch --cov-fail-under=100 --cov-report=term-missing -m 'not slow and not regression'"
 markers = [
     "slow: long-running integration tests (excluded from default run)",
+    "regression: index-dependent end-to-end eval gate (excluded from default run)",
 ]
 
 [tool.coverage.run]

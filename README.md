@@ -234,8 +234,10 @@ pdm run fmt            # ruff format
 pdm run lint           # ruff check
 pdm run lint-fix       # ruff check --fix (autofix where safe)
 pdm run typecheck      # mypy
-pdm run test           # pytest (excludes the slow integration test by default)
+pdm run test           # pytest (excludes the slow and regression tests by default)
 pdm run pytest -m slow # run only the slow tests
+pdm run regression     # index-dependent eval gate vs tests/regression/baseline.json (fails on >2pp precision/recall drop; skips if the index is absent)
+pdm run regression-baseline # refresh tests/regression/baseline.json after an intentional pipeline change
 ```
 
 The pre-commit hook runs `ruff format`, `ruff check --fix`, end-of-file fixer, trailing-whitespace fixer, and merge-conflict detection on every `git commit`. The heavier gates (mypy, pytest) are deliberately *not* in the pre-commit chain — they run via `pdm run gates` and (eventually) CI.
