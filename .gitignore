@@ -13,3 +13,6 @@ build/
 
 # Large data files (not versioned; future: download apparatus)
 data/candidate_marc_file.marcxml
+
+# Throwaway one-off measurement scripts and their JSON outputs
+scripts/

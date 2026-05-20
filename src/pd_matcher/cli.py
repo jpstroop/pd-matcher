@@ -15,6 +15,7 @@ from importlib.resources import as_file
 from importlib.resources import files
 from json import dumps
 from logging import WARNING
+from os import cpu_count
 from pathlib import Path
 from typing import Annotated
 
@@ -52,6 +53,11 @@ _CALIBRATOR_NAME: str = "calibrator.msgpack"
 
 _AS_OF_MIN_YEAR: int = 1923
 _AS_OF_MAX_YEAR: int = 2100
+
+_YEAR_WINDOW_MIN: int = 0
+_YEAR_WINDOW_MAX: int = 100
+
+_EVAL_WORKERS_MIN: int = 1
 
 
 app: Typer = Typer(
@@ -123,6 +129,54 @@ def _parse_as_of(value: str | None) -> int:
             f"--as-of: year must be between {_AS_OF_MIN_YEAR} and {_AS_OF_MAX_YEAR} (got {year})",
         )
     return year
+
+
+def _validate_year_window(value: int | None) -> int | None:
+    """Return ``value`` unchanged when it lies in ``[0, 100]``; raise otherwise.
+
+    ``None`` (the flag was omitted) passes through unchanged so callers can
+    fall back to the matching config's default.
+    """
+    if value is None:
+        return None
+    if value < _YEAR_WINDOW_MIN or value > _YEAR_WINDOW_MAX:
+        raise BadParameter(
+            f"--year-window: must be between {_YEAR_WINDOW_MIN} and "
+            f"{_YEAR_WINDOW_MAX} (got {value})",
+        )
+    return value
+
+
+def _validate_sample(value: int | None) -> int | None:
+    """Return ``value`` unchanged when it is ``None`` or ``>= 1``; raise otherwise."""
+    if value is None:
+        return None
+    if value < 1:
+        raise BadParameter(
+            f"--sample: must be a positive integer (got {value})",
+        )
+    return value
+
+
+def _eval_workers_upper_bound() -> int:
+    """Return the inclusive upper bound for ``--workers`` on ``eval``.
+
+    Capped at ``cpu_count() * 2`` so over-subscription stays modest even
+    on hosts where ``cpu_count`` underreports (containers, hyperthreaded
+    CI runners). Defaults to ``2`` when ``cpu_count`` returns ``None``.
+    """
+    cpus = cpu_count() or 1
+    return max(_EVAL_WORKERS_MIN, cpus * 2)
+
+
+def _validate_eval_workers(value: int) -> int:
+    """Return ``value`` unchanged when it lies in ``[1, cpu_count*2]``; raise otherwise."""
+    upper = _eval_workers_upper_bound()
+    if value < _EVAL_WORKERS_MIN or value > upper:
+        raise BadParameter(
+            f"--workers: must be between {_EVAL_WORKERS_MIN} and {upper} (got {value})",
+        )
+    return value
 
 
 def _load_default_matching_config() -> MatchingConfig:
@@ -386,6 +440,40 @@ def eval_(
         int | None,
         Option("--limit", help="Evaluate at most this many rows."),
     ] = None,
+    sample: Annotated[
+        int | None,
+        Option(
+            "--sample",
+            help=(
+                "Randomly sample N rows from the ground-truth CSV. Mutually exclusive with --limit."
+            ),
+        ),
+    ] = None,
+    seed: Annotated[
+        int,
+        Option(
+            "--seed",
+            help="Seed for --sample's random selection (default: 0).",
+        ),
+    ] = 0,
+    year_window: Annotated[
+        int | None,
+        Option(
+            "--year-window",
+            help="Override the matching config's year_window for this eval run.",
+        ),
+    ] = None,
+    workers: Annotated[
+        int,
+        Option(
+            "--workers",
+            help=(
+                "Number of worker processes (default: 1, single-process)."
+                " Use --workers N to fan out across a spawn pool; N is"
+                " capped at cpu_count() * 2."
+            ),
+        ),
+    ] = 1,
 ) -> None:
     """Evaluate the matcher against the ground-truth pairs.
 
@@ -393,9 +481,17 @@ def eval_(
         pd-matcher eval \\
             --ground-truth data/combined_ground_truth.csv \\
             --index caches/nypl.lmdb \\
-            --report /tmp/eval.json
+            --report /tmp/eval.json \\
+            --workers 8
     """
     as_of_year = _parse_as_of(as_of)
+    year_window = _validate_year_window(year_window)
+    sample = _validate_sample(sample)
+    workers = _validate_eval_workers(workers)
+    if seed < 0:
+        raise BadParameter(f"--seed: must be a non-negative integer (got {seed})")
+    if sample is not None and limit is not None:
+        raise BadParameter("--sample and --limit are mutually exclusive")
     if not ground_truth.is_file():
         raise _fail(f"--ground-truth does not exist or is not a file: {ground_truth}")
     if not index.exists():
@@ -404,6 +500,19 @@ def eval_(
         matching_config = _load_default_matching_config()
     except ConfigError as exc:
         raise _fail(f"failed to load matching defaults: {exc}") from exc
+    if year_window is not None:
+        matching_config = MatchingConfig(
+            title_weight=matching_config.title_weight,
+            author_weight=matching_config.author_weight,
+            publisher_weight=matching_config.publisher_weight,
+            year_weight=matching_config.year_weight,
+            edition_weight=matching_config.edition_weight,
+            lccn_weight=matching_config.lccn_weight,
+            isbn_weight=matching_config.isbn_weight,
+            year_window=year_window,
+            min_combined_score=matching_config.min_combined_score,
+            scorer=matching_config.scorer,
+        )
     copyright_config = CopyrightAssessmentConfig(as_of_year=as_of_year)
     try:
         eval_report = run_eval(
@@ -413,6 +522,9 @@ def eval_(
             matching_config=matching_config,
             copyright_config=copyright_config,
             limit=limit,
+            sample=sample,
+            seed=seed,
+            workers=workers,
         )
     except OSError as exc:
         raise _fail(f"eval run failed: {exc}") from exc
