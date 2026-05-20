@@ -1,4 +1,4 @@
-# DESIGN.md
+# Design
 
 How `pd-matcher` is built, why, and what the algorithm is actually doing under the hood.
 
@@ -516,7 +516,7 @@ Pre-commit runs fast on every commit. Gates run slow, manually or in CI. The spl
 
 Easier to hold at 100% than to climb back to it from 85%. Every new module is born with full coverage. Allowed `pragma: no cover` is narrow and reviewable. This is paired with a strong regression-eval discipline (Phase 8) — line coverage proves every line *executed*; the regression eval proves it produced the right *answer*.
 
-### DESIGN.md and git history as the durable design record
+### design.md and git history as the durable design record
 
 Every meaningful design decision in this codebase is documented in two places: this file and the git commit log. Commit messages describe when and why each piece landed; this document captures the broader rationale and ties decisions together across modules.
 
