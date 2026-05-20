@@ -13,6 +13,7 @@ is intentionally small:
    top result plus up to ``top_k - 1`` runners-up.
 """
 
+from collections.abc import Callable
 from collections.abc import Sequence
 
 from pd_matcher.config.schemas import MatchingConfig
@@ -23,8 +24,8 @@ from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.calibrator import calibrate
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.idf import IdfTable
-from pd_matcher.match.pairings import publisher_pairings
-from pd_matcher.match.pairings import title_pairings
+from pd_matcher.match.pairing_compiler import CompiledPairing
+from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.result import CandidateMatch
 from pd_matcher.match.result import MatchResult
 from pd_matcher.match.scorers.context import ScorerContext
@@ -68,12 +69,48 @@ def _select_best(evidences: Sequence[Evidence]) -> tuple[Evidence, tuple[Evidenc
     return evidences[best_index], losers
 
 
+_GroupScorer = Callable[[str | None, str | None, ScorerContext], Evidence]
+
+_GROUP_SCORERS: dict[str, _GroupScorer] = {
+    "title": score_title,
+    "author": score_author,
+    "publisher": score_publisher,
+}
+
+
+def _score_group(
+    pairings: tuple[CompiledPairing, ...],
+    marc: MarcRecord,
+    candidate: IndexedNyplRegRecord,
+    ctx: ScorerContext,
+    winning: list[Evidence],
+    losing: list[Evidence],
+) -> None:
+    """Score every pairing in one group and append best/losers to the lists.
+
+    The combiner keys on exactly one Evidence per scorer tag, so the best
+    Evidence (the highest-scoring pairing) is appended to ``winning`` and
+    the rest to ``losing`` for audit.
+    """
+    if not pairings:
+        return
+    scorer = _GROUP_SCORERS[pairings[0].group]
+    evidences = tuple(
+        scorer(pairing.marc_accessor(marc), pairing.cce_accessor(candidate), ctx)
+        for pairing in pairings
+    )
+    best, losers = _select_best(evidences)
+    winning.append(best)
+    losing.extend(losers)
+
+
 def _score_candidate(
     marc: MarcRecord,
     candidate: IndexedNyplRegRecord,
     ctx: ScorerContext,
     combiner: Combiner,
     calibrator: PlattCalibrator | None,
+    pairings: CompiledPairings,
 ) -> CandidateMatch:
     winning: list[Evidence] = []
     losing: list[Evidence] = []
@@ -81,23 +118,9 @@ def _score_candidate(
     winning.append(score_lccn(marc.lccn, candidate, ctx))
     winning.append(score_isbn(marc.isbns, candidate, ctx))
 
-    title_evidences = tuple(
-        score_title(marc_value, nypl_value, ctx)
-        for marc_value, nypl_value in title_pairings(marc, candidate)
-    )
-    title_best, title_losers = _select_best(title_evidences)
-    winning.append(title_best)
-    losing.extend(title_losers)
-
-    winning.append(score_author(marc.main_author, candidate.author_name, ctx))
-
-    publisher_evidences = tuple(
-        score_publisher(marc_value, nypl_value, ctx)
-        for marc_value, nypl_value in publisher_pairings(marc, candidate)
-    )
-    publisher_best, publisher_losers = _select_best(publisher_evidences)
-    winning.append(publisher_best)
-    losing.extend(publisher_losers)
+    _score_group(pairings.title, marc, candidate, ctx, winning, losing)
+    _score_group(pairings.author, marc, candidate, ctx, winning, losing)
+    _score_group(pairings.publisher, marc, candidate, ctx, winning, losing)
 
     winning.append(score_year(marc.publication_year, candidate.reg_year, ctx))
     winning.append(score_edition(marc.edition, candidate.edition, ctx))
@@ -123,6 +146,7 @@ def match_record(
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
     combiner: Combiner,
+    pairings: CompiledPairings,
     top_k: int = 3,
 ) -> MatchResult:
     """Match a MARC record against the indexed NYPL corpus.
@@ -137,6 +161,8 @@ def match_record(
             ``None``, ``calibrated = raw / 100``.
         combiner: Concrete :class:`Combiner` (Phase 4 default is
             :class:`WeightedMeanCombiner`).
+        pairings: Compiled field pairings driving the title/author/
+            publisher scorer groups.
         top_k: Total number of candidates to retain (best + alternates).
 
     Returns:
@@ -159,7 +185,8 @@ def match_record(
         )
     ctx = _build_context(marc, idf, config)
     scored = [
-        _score_candidate(marc, candidate, ctx, combiner, calibrator) for candidate in candidates
+        _score_candidate(marc, candidate, ctx, combiner, calibrator, pairings)
+        for candidate in candidates
     ]
     scored.sort(key=lambda match: match.combined.calibrated, reverse=True)
     floor = config.min_combined_score / 100.0

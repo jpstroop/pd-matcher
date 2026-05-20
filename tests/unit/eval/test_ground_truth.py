@@ -4,14 +4,29 @@ from pathlib import Path
 
 from pytest import raises
 
+from pd_matcher.config.loader import load_pairing_config
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.eval.ground_truth import UNRECOGNIZED_GT_STATUS
 from pd_matcher.eval.ground_truth import EvalReport
 from pd_matcher.eval.ground_truth import run_eval
 from pd_matcher.index.builder import build_index
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
+_PAIRINGS = (
+    Path(__file__).resolve().parents[3]
+    / "src"
+    / "pd_matcher"
+    / "config"
+    / "defaults"
+    / "field_pairings.yaml"
+)
+
+
+def _pairing_config() -> PairingConfig:
+    """Return the shipped default field-pairing configuration."""
+    return load_pairing_config(_PAIRINGS)
 
 
 def _build_index(tmp_path: Path) -> Path:
@@ -140,6 +155,7 @@ def test_run_eval_returns_expected_aggregates(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
     )
     assert isinstance(report, EvalReport)
     assert report.rows_evaluated == 3
@@ -167,6 +183,7 @@ def test_run_eval_respects_limit(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
         limit=1,
     )
     assert report.rows_evaluated == 1
@@ -183,6 +200,7 @@ def test_run_eval_zero_rows_yields_zero_metrics(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
     )
     assert report.rows_evaluated == 0
     assert report.precision == 0.0
@@ -206,6 +224,7 @@ def test_run_eval_handles_unparseable_year(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
     )
     assert report.rows_evaluated == 1
     assert report.rows_with_predicted_match == 0
@@ -226,6 +245,7 @@ def test_run_eval_handles_empty_year(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
     )
     assert report.rows_evaluated == 1
     assert report.rows_with_predicted_match == 0
@@ -261,6 +281,7 @@ def test_run_eval_sample_caps_row_count(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
         sample=5,
         seed=42,
     )
@@ -278,6 +299,7 @@ def test_run_eval_sample_larger_than_corpus_evaluates_all(tmp_path: Path) -> Non
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
         sample=100,
         seed=0,
     )
@@ -300,6 +322,7 @@ def test_run_eval_same_seed_picks_same_rows(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
         sample=10,
         seed=7,
     )
@@ -374,6 +397,7 @@ def test_run_eval_year_window_zero_yields_no_predicted_match(tmp_path: Path) -> 
         as_of_year=2026,
         matching_config=narrow,
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
     )
     assert report.rows_with_predicted_match == 0
 
@@ -401,6 +425,7 @@ def test_run_eval_year_window_five_admits_year_drifted_match(tmp_path: Path) -> 
         as_of_year=2026,
         matching_config=wide,
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
     )
     assert report.rows_with_predicted_match == 1
 
@@ -417,6 +442,7 @@ def test_run_eval_rejects_workers_below_one(tmp_path: Path) -> None:
             as_of_year=2026,
             matching_config=_matching_config(),
             copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+            pairing_config=_pairing_config(),
             workers=0,
         )
 
@@ -432,6 +458,7 @@ def test_run_eval_workers_one_matches_default_path(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
     )
     explicit_report = run_eval(
         ground_truth_path=gt_path,
@@ -439,6 +466,7 @@ def test_run_eval_workers_one_matches_default_path(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
         workers=1,
     )
     assert default_report.rows_evaluated == explicit_report.rows_evaluated
@@ -461,6 +489,7 @@ def test_run_eval_workers_two_matches_workers_one(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
         workers=1,
     )
     parallel_report = run_eval(
@@ -469,6 +498,7 @@ def test_run_eval_workers_two_matches_workers_one(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
         workers=2,
     )
     assert parallel_report.rows_evaluated == serial_report.rows_evaluated
@@ -494,6 +524,7 @@ def test_run_eval_workers_two_respects_limit(tmp_path: Path) -> None:
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
         limit=4,
         workers=2,
     )
@@ -511,6 +542,7 @@ def test_run_eval_workers_two_empty_corpus_yields_zero_metrics(tmp_path: Path) -
         as_of_year=2026,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
         workers=2,
     )
     assert report.rows_evaluated == 0
@@ -531,6 +563,7 @@ def test_eval_one_row_is_a_pure_function(tmp_path: Path) -> None:
         index_path=index_path,
         matching_config=_matching_config(),
         copyright_config=CopyrightAssessmentConfig(as_of_year=2026),
+        pairing_config=_pairing_config(),
         as_of_year=2026,
     )
     try:
@@ -587,6 +620,7 @@ def test_pool_initializer_and_pool_eval_row_round_trip(tmp_path: Path) -> None:
             index_path,
             _matching_config(),
             CopyrightAssessmentConfig(as_of_year=2026),
+            _pairing_config(),
             2026,
         )
         assert gt_module._WORKER_STATE is not None

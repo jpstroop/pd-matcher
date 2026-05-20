@@ -29,8 +29,10 @@ from typer import echo
 from pd_matcher.config.loader import ConfigError
 from pd_matcher.config.loader import load_copyright_rules
 from pd_matcher.config.loader import load_matching_config
+from pd_matcher.config.loader import load_pairing_config
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.eval.ground_truth import EvalReport
 from pd_matcher.eval.ground_truth import run_eval
 from pd_matcher.index.builder import BuildReport
@@ -184,6 +186,13 @@ def _load_default_matching_config() -> MatchingConfig:
     resource = files("pd_matcher.config.defaults") / "matching.yaml"
     with as_file(resource) as path:
         return load_matching_config(path)
+
+
+def _load_default_pairing_config() -> PairingConfig:
+    """Load the shipped ``field_pairings.yaml`` defaults."""
+    resource = files("pd_matcher.config.defaults") / "field_pairings.yaml"
+    with as_file(resource) as path:
+        return load_pairing_config(path)
 
 
 def _load_default_ruleset_path() -> Path:
@@ -387,6 +396,10 @@ def match(
         ruleset = load_copyright_rules(ruleset_path)
     except ConfigError as exc:
         raise _fail(f"failed to load copyright rules: {exc}") from exc
+    try:
+        pairing_config = _load_default_pairing_config()
+    except ConfigError as exc:
+        raise _fail(f"failed to load pairing defaults: {exc}") from exc
     copyright_config = CopyrightAssessmentConfig(as_of_year=as_of_year)
     idf_cache_path = index.parent / _IDF_CACHE_NAME
     try:
@@ -402,6 +415,7 @@ def match(
             matching_config=matching_config,
             copyright_config=copyright_config,
             ruleset=ruleset,
+            pairing_config=pairing_config,
             idf=idf,
             calibrator=calibrator,
             workers=workers,
@@ -513,6 +527,10 @@ def eval_(
             min_combined_score=matching_config.min_combined_score,
             scorer=matching_config.scorer,
         )
+    try:
+        pairing_config = _load_default_pairing_config()
+    except ConfigError as exc:
+        raise _fail(f"failed to load pairing defaults: {exc}") from exc
     copyright_config = CopyrightAssessmentConfig(as_of_year=as_of_year)
     try:
         eval_report = run_eval(
@@ -521,6 +539,7 @@ def eval_(
             as_of_year=as_of_year,
             matching_config=matching_config,
             copyright_config=copyright_config,
+            pairing_config=pairing_config,
             limit=limit,
             sample=sample,
             seed=seed,

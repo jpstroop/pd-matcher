@@ -590,6 +590,34 @@ def test_match_surfaces_ruleset_error(
     assert "copyright rules" in result.output
 
 
+def test_match_surfaces_pairing_config_error(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A ConfigError during pairing-defaults load surfaces as exit 1."""
+    index_path = _build_index(tmp_path)
+    from pd_matcher.config.loader import ConfigError
+
+    def _raise() -> object:
+        raise ConfigError("pairings corrupt")
+
+    monkeypatch.setattr("pd_matcher.cli._load_default_pairing_config", _raise)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.csv"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "pairing defaults" in result.output
+
+
 def test_eval_runs_against_tiny_index(tmp_path: Path) -> None:
     """``eval`` succeeds against the tiny index + a synthetic GT CSV."""
     index_path = _build_index(tmp_path)
@@ -718,6 +746,34 @@ def test_eval_surfaces_matching_config_error(
     )
     assert result.exit_code == 1
     assert "matching defaults" in result.output
+
+
+def test_eval_surfaces_pairing_config_error(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A ConfigError during pairing-defaults load surfaces as exit 1."""
+    index_path = _build_index(tmp_path)
+    gt_path = tmp_path / "gt.csv"
+    _write_ground_truth(gt_path, 2026)
+    from pd_matcher.config.loader import ConfigError
+
+    def _raise() -> object:
+        raise ConfigError("pairings corrupt")
+
+    monkeypatch.setattr("pd_matcher.cli._load_default_pairing_config", _raise)
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--ground-truth",
+            str(gt_path),
+            "--index",
+            str(index_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "pairing defaults" in result.output
 
 
 def test_eval_surfaces_run_eval_oserror(

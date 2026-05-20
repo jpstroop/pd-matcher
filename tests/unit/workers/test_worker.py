@@ -7,8 +7,10 @@ from pathlib import Path
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.models import MarcRecord
 from pd_matcher.workers.events import RecordProcessed
 from pd_matcher.workers.events import decode_stats_event
@@ -22,6 +24,7 @@ def _make_marc() -> MarcRecord:
     return MarcRecord(
         control_id="m-1",
         title="A study of widgets",
+        title_main="A study of widgets",
         main_author="Smith, John",
         publisher="Acme Press",
         edition="1st ed.",
@@ -51,6 +54,7 @@ def test_worker_loop_processes_one_batch_and_stops_on_poison_pill(
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
+    compiled_pairings: CompiledPairings,
 ) -> None:
     outputs: list[bytes] = []
     stats: list[bytes] = []
@@ -64,6 +68,7 @@ def test_worker_loop_processes_one_batch_and_stops_on_poison_pill(
             config=matching_config,
             idf=tiny_idf,
             calibrator=None,
+            pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
             input_get=_build_input_get(blobs),
@@ -90,6 +95,7 @@ def test_worker_loop_stops_when_shutdown_before_processing(
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
+    compiled_pairings: CompiledPairings,
 ) -> None:
     outputs: list[bytes] = []
     stats: list[bytes] = []
@@ -99,6 +105,7 @@ def test_worker_loop_stops_when_shutdown_before_processing(
             config=matching_config,
             idf=tiny_idf,
             calibrator=None,
+            pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
             input_get=_build_input_get([encode_batch((_make_marc(),))]),
@@ -116,6 +123,7 @@ def test_worker_loop_stops_between_records_when_shutdown_fires(
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
+    compiled_pairings: CompiledPairings,
 ) -> None:
     """A multi-record batch is aborted mid-batch when ``is_shutdown`` flips True."""
     outputs: list[bytes] = []
@@ -134,6 +142,7 @@ def test_worker_loop_stops_between_records_when_shutdown_fires(
             config=matching_config,
             idf=tiny_idf,
             calibrator=None,
+            pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
             input_get=_build_input_get([batch, None]),
@@ -150,6 +159,7 @@ def test_worker_main_opens_lookup_and_runs_loop(
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
+    pairing_config: PairingConfig,
 ) -> None:
     outputs: list[bytes] = []
     stats: list[bytes] = []
@@ -159,6 +169,7 @@ def test_worker_main_opens_lookup_and_runs_loop(
         matching_config=matching_config,
         copyright_config=copyright_config,
         ruleset=ruleset,
+        pairing_config=pairing_config,
         idf=tiny_idf,
         calibrator=None,
         input_get=_build_input_get(blobs),
@@ -175,16 +186,18 @@ def test_worker_main_with_unmatchable_record_emits_blank_match(
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
+    pairing_config: PairingConfig,
 ) -> None:
     outputs: list[bytes] = []
     stats: list[bytes] = []
-    marc = MarcRecord(control_id="orphan", title="nothing relevant")
+    marc = MarcRecord(control_id="orphan", title="nothing relevant", title_main="nothing relevant")
     blobs: list[bytes | None] = [encode_batch((marc,)), None]
     processed = worker_main(
         index_path=tiny_index_path,
         matching_config=matching_config,
         copyright_config=copyright_config,
         ruleset=ruleset,
+        pairing_config=pairing_config,
         idf=tiny_idf,
         calibrator=None,
         input_get=_build_input_get(blobs),
@@ -207,6 +220,7 @@ def test_worker_main_uses_default_year_when_assessment_config_unpinned(
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
     ruleset: CopyrightRuleSet,
+    pairing_config: PairingConfig,
 ) -> None:
     """When ``copyright_config.as_of_year is None`` the worker uses the current year."""
     outputs: list[bytes] = []
@@ -217,6 +231,7 @@ def test_worker_main_uses_default_year_when_assessment_config_unpinned(
         matching_config=matching_config,
         copyright_config=CopyrightAssessmentConfig(as_of_year=None),
         ruleset=ruleset,
+        pairing_config=pairing_config,
         idf=tiny_idf,
         calibrator=None,
         input_get=_build_input_get(blobs),

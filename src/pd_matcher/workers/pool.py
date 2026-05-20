@@ -29,6 +29,7 @@ from structlog import get_logger
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.output.csv_writer import CsvResultWriter
@@ -79,6 +80,7 @@ def _spawn_workers(
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
+    pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
     input_queue: MpQueue[bytes | None],
@@ -97,6 +99,7 @@ def _spawn_workers(
                 "matching_config": matching_config,
                 "copyright_config": copyright_config,
                 "ruleset": ruleset,
+                "pairing_config": pairing_config,
                 "idf": idf,
                 "calibrator": calibrator,
                 "input_queue": input_queue,
@@ -116,6 +119,7 @@ def _worker_entry(
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
+    pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
     input_queue: MpQueue[bytes | None],
@@ -135,6 +139,7 @@ def _worker_entry(
         matching_config=matching_config,
         copyright_config=copyright_config,
         ruleset=ruleset,
+        pairing_config=pairing_config,
         idf=idf,
         calibrator=calibrator,
         input_get=input_queue.get,
@@ -180,6 +185,7 @@ def run_match(
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
+    pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None = None,
     workers: int | None = None,
@@ -197,6 +203,8 @@ def run_match(
         matching_config: Loaded :class:`MatchingConfig`.
         copyright_config: Loaded :class:`CopyrightAssessmentConfig`.
         ruleset: Loaded :class:`CopyrightRuleSet`.
+        pairing_config: Loaded :class:`PairingConfig`; each worker compiles
+            it into :class:`CompiledPairings` once at init.
         idf: Pre-built :class:`IdfTable` (workers load it once at init).
         calibrator: Optional Platt calibrator.
         workers: Number of worker processes. ``None`` uses ``cpu_count - 1``.
@@ -232,6 +240,7 @@ def run_match(
             matching_config=matching_config,
             copyright_config=copyright_config,
             ruleset=ruleset,
+            pairing_config=pairing_config,
             idf=idf,
             calibrator=calibrator,
             input_queue=input_queue,

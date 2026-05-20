@@ -22,6 +22,7 @@ def _marc(
     return MarcRecord(
         control_id="marc-1",
         title="T",
+        title_main="T",
         publication_year=publication_year,
         country_code=country_code,
         language_code="eng",

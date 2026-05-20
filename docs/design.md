@@ -288,14 +288,37 @@ class Evidence(Struct, frozen=True):
 
 Skipped is the key invariant: a scorer with missing inputs returns `Evidence(skipped=True, score=0, max=100)` instead of throwing or scoring 0. The combiner excludes skipped Evidence from both the numerator and denominator of the weighted mean — a record with no author field doesn't get penalized as if "author scored 0."
 
-### Step 3: Bounded field-pair permutations
+### Step 3: Configurable field pairings
 
-For known-confused field pairs, the matcher tries multiple pairings and keeps the best Evidence per scorer:
+Title, author, and publisher are *transposable*: a publisher records the series title where the work title belongs, or the publisher name lands in NYPL's `claimant` element instead of `publisher`. For these fields the matcher tries several `(MARC field, CCE field)` pairings, scores each through the field's scorer, and keeps the best Evidence per scorer group; the losers are preserved in `CandidateMatch.losing_evidence` so a human auditor can see "we also tried these pairings and they scored lower."
 
-- **Title**: `marc.title ↔ nypl.title` AND `marc.series_titles[i] ↔ nypl.title` (catches the case where MARC put the work title in the series field or vice versa). Cap at 3 pairings.
-- **Publisher**: `marc.publisher ↔ joined(nypl.publisher_names)` AND `marc.publisher ↔ joined(nypl.claimants)` (catches the case where the publisher appears in NYPL's `claimant` element instead of `publisher`). Cap at 2 pairings.
+Which pairings to try is **configuration**, not code. The pairing set lives in `src/pd_matcher/config/defaults/field_pairings.yaml`, so tuning it is a config edit and a re-eval, not a code change.
 
-The losers are preserved in `CandidateMatch.losing_evidence` so a human auditor can see "we also tried these pairings and they scored lower."
+#### Code surfaces raw subfields; config composes and pairs them
+
+This is the deliberate boundary that keeps the subsystem fully typed and bounded:
+
+- The MARC parser emits a fixed, typed `MarcRecord` of **raw subfields** (it now keeps `245$a` as `title_main` distinct from the fused `title`, and extracts `245$n`/`$p`). The CCE side already exposes `title`, `author_name`, `publisher_names`, `claimants`.
+- A finite **raw-field registry** in `match/pairing_compiler.py` (`MARC_FIELDS`, `CCE_FIELDS`) exposes each raw subfield by name through an explicit, typed accessor returning `tuple[str, ...]` (scalar fields wrap to a 0/1-tuple; list fields pass through). There is no `getattr` — that would leak `Any`; every accessor is written out.
+- YAML composes registry entries via a **closed combine vocabulary**: `first` (first non-empty value), `concat`/`join` (join non-empty values by a separator). That is the *entire* expressive surface — composing already-extracted subfields. Config cannot express arbitrary logic *by design*: the scoring stays in tested code, and a typo or unknown field name cannot silently produce a degraded matcher.
+- `compile_pairings(cfg)` resolves every field name against the registries and every pairing against the named field maps **once, at load time**, raising `ConfigError` on any unknown name. Typos fail at startup, not silently at match time. The result is a `CompiledPairings` of plain typed callables, bucketed by scorer group, ready for the hot loop. This mirrors the established library pattern for MARC→index mapping (cf. Traject).
+
+#### Default pairings
+
+| Group | MARC field | CCE field | Catches |
+|---|---|---|---|
+| title | `title` (fused $a+$b) | `title` | the normal case |
+| title | `title_main` ($a only) | `title` | $b is subtitle noise the CCE title lacks |
+| title | first `series_titles` | `title` | work title stored as series |
+| author | `main_author` | `author_name` | the normal case |
+| author | `statement_of_responsibility` | `author_name` | no 1xx; author only in 245$c |
+| author | `main_author` | `claimants` | author recorded as the claimant |
+| publisher | `publisher` | `publisher_names` | the normal case |
+| publisher | `publisher` | `author_name` | self-published / author-as-publisher |
+
+The combiner keys on one Evidence per group tag (`title.token_set`, `name.author`, `name.publisher`), so best-per-group selection yields exactly one Evidence per tag — the combiner is unchanged.
+
+The hard-signal scorers (`lccn`, `isbn`, `year`, `edition`) compare specific typed scalars, are not transposable, and stay hard-wired in the pipeline — they are deliberately *not* part of the pairing subsystem.
 
 ### Step 4: Combine + calibrate
 

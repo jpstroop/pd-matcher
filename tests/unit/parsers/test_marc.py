@@ -29,6 +29,28 @@ def test_iter_marc_records_returns_expected_first_record() -> None:
     assert first.country_code == "nyu"
 
 
+def test_iter_marc_records_keeps_title_main_separate_from_fused_title() -> None:
+    """245$a is preserved as ``title_main`` even when $b fuses into ``title``."""
+    records = list(iter_marc_records(FIXTURE))
+    by_id = {r.control_id: r for r in records}
+    first = by_id["marc-001"]
+    assert first.title == "A study of widgets and other small parts"
+    assert first.title_main == "A study of widgets"
+    assert first.title_part_number is None
+    assert first.title_part_name is None
+
+
+def test_iter_marc_records_extracts_245_part_number_and_name() -> None:
+    """245$n and $p are surfaced as ``title_part_number`` / ``title_part_name``."""
+    records = list(iter_marc_records(FIXTURE))
+    by_id = {r.control_id: r for r in records}
+    parts = by_id["marc-014-title-parts"]
+    assert parts.title == "Collected works essays and letters"
+    assert parts.title_main == "Collected works"
+    assert parts.title_part_number == "Part 2"
+    assert parts.title_part_name == "The later years"
+
+
 def test_iter_marc_records_handles_264_field() -> None:
     records = list(iter_marc_records(FIXTURE))
     by_id = {r.control_id: r for r in records}

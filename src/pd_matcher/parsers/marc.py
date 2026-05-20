@@ -148,6 +148,8 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
     added_authors: list[str] = []
     title_a: str | None = None
     title_b: str | None = None
+    title_n: str | None = None
+    title_p: str | None = None
     sor: str | None = None
     edition: str | None = None
     pub_place: str | None = None
@@ -180,6 +182,8 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
             if title_a is None:
                 title_a = _first_subfield(child, "a")
                 title_b = _first_subfield(child, "b")
+                title_n = _first_subfield(child, "n")
+                title_p = _first_subfield(child, "p")
                 sor = _first_subfield(child, "c")
         elif tag == "250":
             if edition is None:
@@ -219,6 +223,9 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
     return MarcRecord(
         control_id=control_id,
         title=full_title,
+        title_main=cleaned_title_a,
+        title_part_number=_clean(title_n, stats),
+        title_part_name=_clean(title_p, stats),
         lccn=_clean(lccn, stats),
         isbns=tuple(
             cleaned for cleaned in (_clean(v, stats) for v in isbns) if cleaned is not None

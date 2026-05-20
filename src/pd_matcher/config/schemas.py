@@ -137,11 +137,65 @@ class IndexConfig(Struct, frozen=True, forbid_unknown_fields=True):
     schema_version: Annotated[int, Meta(ge=1)] = 1
 
 
+class FieldSpec(Struct, frozen=True, forbid_unknown_fields=True):
+    """A named composition of one or more raw record subfields.
+
+    ``fields`` lists raw-field-registry names (resolved at compile time
+    against :data:`pd_matcher.match.pairing_compiler.MARC_FIELDS` or
+    ``CCE_FIELDS`` depending on the section). ``combine`` selects the
+    closed-vocabulary operation applied to the concatenated raw values:
+
+    * ``first`` — the first non-empty value, else ``None``.
+    * ``concat`` / ``join`` — every non-empty value joined by
+      ``separator`` (synonyms; both drop empties and yield ``None`` when
+      all values are empty).
+
+    The vocabulary is deliberately finite so configuration can compose
+    already-extracted subfields without expressing arbitrary logic.
+    """
+
+    fields: tuple[str, ...]
+    combine: Literal["first", "concat", "join"]
+    separator: str = " "
+
+
+class PairingSpec(Struct, frozen=True, forbid_unknown_fields=True):
+    """One ``(MARC field, CCE field)`` pairing routed to a scorer group.
+
+    ``group`` selects the scorer family (``title``, ``author``, or
+    ``publisher``) and therefore the combiner weight bucket. ``marc`` and
+    ``cce`` name :class:`FieldSpec` entries in the enclosing
+    :class:`PairingConfig`'s ``marc_fields`` / ``cce_fields`` maps.
+    """
+
+    group: Literal["title", "author", "publisher"]
+    marc: str
+    cce: str
+
+
+class PairingConfig(Struct, frozen=True, forbid_unknown_fields=True):
+    """The full configurable field-pairing specification.
+
+    ``marc_fields`` and ``cce_fields`` define named compositions of raw
+    subfields; ``pairings`` lists which composed MARC field is compared
+    against which composed CCE field, and under which scorer group. Every
+    name is validated at compile time
+    (:func:`pd_matcher.match.pairing_compiler.compile_pairings`).
+    """
+
+    marc_fields: dict[str, FieldSpec]
+    cce_fields: dict[str, FieldSpec]
+    pairings: tuple[PairingSpec, ...]
+
+
 __all__ = [
     "CopyrightAssessmentConfig",
     "CopyrightRule",
     "CopyrightRuleSet",
+    "FieldSpec",
     "IndexConfig",
     "MatchingConfig",
+    "PairingConfig",
+    "PairingSpec",
     "PredicateCall",
 ]

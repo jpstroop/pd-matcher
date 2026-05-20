@@ -7,14 +7,33 @@ stemmer, and the project default :class:`MatchingConfig`.
 """
 
 from collections.abc import Callable
+from pathlib import Path
 
 from pytest import fixture
 
+from pd_matcher.config.loader import load_pairing_config
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.pairing_compiler import CompiledPairings
+from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.scorers.context import ScorerContext
 from pd_matcher.normalize.stemming import stemmer_for
 from pd_matcher.normalize.stopwords import load_stopwords
+
+_PAIRINGS = (
+    Path(__file__).resolve().parents[3]
+    / "src"
+    / "pd_matcher"
+    / "config"
+    / "defaults"
+    / "field_pairings.yaml"
+)
+
+
+@fixture
+def compiled_pairings() -> CompiledPairings:
+    """Return the shipped default pairings compiled for the pipeline."""
+    return compile_pairings(load_pairing_config(_PAIRINGS))
 
 
 @fixture

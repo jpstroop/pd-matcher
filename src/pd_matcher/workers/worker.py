@@ -24,12 +24,15 @@ from structlog.contextvars import unbind_contextvars
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.copyright.facts import build_facts
 from pd_matcher.copyright.rules import assess
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
 from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.pairing_compiler import CompiledPairings
+from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import match_record
 from pd_matcher.models import MarcRecord
 from pd_matcher.workers.events import RecordProcessed
@@ -49,6 +52,7 @@ def _process_record(
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
     combiner: WeightedMeanCombiner,
+    pairings: CompiledPairings,
     ruleset: CopyrightRuleSet,
     assessment_config: CopyrightAssessmentConfig,
 ) -> WorkerOutput:
@@ -60,6 +64,7 @@ def _process_record(
         idf=idf,
         calibrator=calibrator,
         combiner=combiner,
+        pairings=pairings,
     )
     matched_nypl = None
     if match.best is not None:
@@ -103,6 +108,7 @@ def run_worker_loop(
     config: MatchingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
+    pairings: CompiledPairings,
     ruleset: CopyrightRuleSet,
     assessment_config: CopyrightAssessmentConfig,
     input_get: Callable[[], bytes | None],
@@ -117,6 +123,7 @@ def run_worker_loop(
         config: Active :class:`MatchingConfig`.
         idf: Pre-built :class:`IdfTable`.
         calibrator: Optional Platt calibrator.
+        pairings: Compiled field pairings shared across all records.
         ruleset: Loaded :class:`CopyrightRuleSet`.
         assessment_config: Runtime configuration for the rule engine.
         input_get: Zero-arg callable returning the next encoded batch
@@ -154,6 +161,7 @@ def run_worker_loop(
                     idf=idf,
                     calibrator=calibrator,
                     combiner=combiner,
+                    pairings=pairings,
                     ruleset=ruleset,
                     assessment_config=assessment_config,
                 )
@@ -171,6 +179,7 @@ def worker_main(
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
+    pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
     input_get: Callable[[], bytes | None],
@@ -180,15 +189,18 @@ def worker_main(
 ) -> int:
     """Top-level worker entry point.
 
-    Opens the LMDB lookup and runs the consume loop until exhaustion or
-    shutdown. Returns the count of processed records.
+    Opens the LMDB lookup, compiles the pairing config once, and runs the
+    consume loop until exhaustion or shutdown. Returns the count of
+    processed records.
     """
+    pairings = compile_pairings(pairing_config)
     with NyplIndexLookup(index_path) as lookup:
         return run_worker_loop(
             lookup=lookup,
             config=matching_config,
             idf=idf,
             calibrator=calibrator,
+            pairings=pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
             input_get=input_get,

@@ -1,0 +1,54 @@
+# Configurable field-pairing specification for the matching pipeline.
+#
+# The matcher compares (MARC field, CCE field) pairs through fuzzy text
+# scorers. This file declares WHICH composed fields are compared and under
+# which scorer group, without touching code. The boundary is deliberate:
+#
+#   Code surfaces raw subfields out of each record; config composes and
+#   pairs them.
+#
+# Three sections:
+#
+#   marc_fields / cce_fields
+#     name -> {fields: [...], combine: <op>, separator?: " "}
+#     Each entry composes one or more RAW fields (resolved against the
+#     finite registries in match/pairing_compiler.py) into a single string.
+#     combine vocabulary (closed by design):
+#       first        first non-empty raw value, else absent
+#       concat/join  every non-empty raw value joined by `separator`
+#                    (synonyms; default separator is a single space)
+#     Unknown raw field names fail at load time (compile_pairings).
+#
+#   pairings
+#     A list of {group, marc, cce}. `group` selects the scorer family
+#     (title -> title scorer, author/publisher -> name scorer) and the
+#     combiner weight bucket. `marc`/`cce` reference entries above. The
+#     pipeline scores every pairing in a group and keeps the best Evidence
+#     per group; the losers are retained for audit.
+#
+# This format cannot express arbitrary logic — only composition of
+# already-extracted subfields and routing to a fixed set of scorers. That
+# is intentional: tuning the pairing set stays a config edit, while the
+# scoring logic stays in fully-typed, tested code.
+
+marc_fields:
+  title_full:  {fields: [title],        combine: first}
+  title_main:  {fields: [title_main],   combine: first}
+  main_author: {fields: [main_author],  combine: first}
+  sor:         {fields: [statement_of_responsibility], combine: first}
+  publisher:   {fields: [publisher],    combine: first}
+  series_lead: {fields: [series_titles], combine: first}
+cce_fields:
+  title:           {fields: [title],           combine: first}
+  author_name:     {fields: [author_name],     combine: first}
+  publisher_names: {fields: [publisher_names], combine: join}
+  claimants:       {fields: [claimants],       combine: join}
+pairings:
+  - {group: title,     marc: title_full,  cce: title}
+  - {group: title,     marc: title_main,  cce: title}
+  - {group: title,     marc: series_lead, cce: title}
+  - {group: author,    marc: main_author, cce: author_name}
+  - {group: author,    marc: sor,         cce: author_name}
+  - {group: author,    marc: main_author, cce: claimants}
+  - {group: publisher, marc: publisher,   cce: publisher_names}
+  - {group: publisher, marc: publisher,   cce: author_name}

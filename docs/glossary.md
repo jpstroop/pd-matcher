@@ -142,8 +142,32 @@ overall match score (currently a weighted average, then calibrated).
 
 **Pairing.** A decision about *which* MARC field is compared against *which* CCE
 field. Most are obvious (title↔title), but some are cross-field (a MARC series
-title vs. a CCE title), because the data is sometimes transposed. Issue #1 adds
-data-derived pairings.
+title vs. a CCE title), because the data is sometimes transposed.
+
+**Field pairing.** The configurable subsystem (Issue #1) that declares the set of
+`(MARC field, CCE field)` pairs the matcher tries for each transposable scorer
+group (title, author, publisher). The pairings live in
+`config/defaults/field_pairings.yaml`; the pipeline scores every pairing in a
+group and keeps the best Evidence. Tuning the set is a config edit, not a code
+change.
+
+**Transposition.** The data quirk that motivates field pairing: a value lands in
+the "wrong" field across the two sources — the work title recorded as a series
+title, the publisher recorded as the copyright claimant, the author present only
+in the 245 statement of responsibility rather than a 1xx author field. Field
+pairings recover the signal by also comparing the cross-field combinations.
+
+**Combine op.** One operation from the closed vocabulary a `FieldSpec` may use to
+compose raw subfields into a single string: `first` (first non-empty value) or
+`concat`/`join` (non-empty values joined by a separator). The vocabulary is
+finite by design so configuration composes data but cannot express arbitrary
+logic — that stays in tested code.
+
+**Raw-field registry.** The finite, fully-typed map (`MARC_FIELDS`, `CCE_FIELDS`
+in `match/pairing_compiler.py`) from a raw subfield name to an explicit accessor
+returning its value(s). It is the *only* surface configuration can name; an
+unknown name fails at load time. Using explicit accessors instead of `getattr`
+keeps the code free of `Any`.
 
 ---
 

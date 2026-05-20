@@ -16,7 +16,7 @@ from pd_matcher.workers.messages import encode_worker_output
 
 
 def test_worker_output_roundtrip_with_full_match() -> None:
-    marc = MarcRecord(control_id="m", title="t", publication_year=1940)
+    marc = MarcRecord(control_id="m", title="t", title_main="t", publication_year=1940)
     nypl = IndexedNyplRegRecord(
         uuid="UUID-1",
         title="t",
@@ -58,7 +58,7 @@ def test_worker_output_roundtrip_with_full_match() -> None:
 
 def test_worker_output_roundtrip_with_empty_match() -> None:
     """A MatchResult with ``best=None`` is the empty-match signal on the wire."""
-    marc = MarcRecord(control_id="m", title="t")
+    marc = MarcRecord(control_id="m", title="t", title_main="t")
     empty_match = MatchResult(
         marc_control_id="m",
         best=None,

@@ -12,6 +12,7 @@ from pd_matcher.config.loader import load_copyright_rules
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.copyright.assessment import CopyrightAssessment
 from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.index.lookup import NyplIndexLookup
@@ -66,6 +67,7 @@ def test_worker_entry_runs_in_process_against_real_queues(
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
+    pairing_config: PairingConfig,
 ) -> None:
     """``_worker_entry`` is reachable in-process via real spawn-context queues."""
     ctx = get_context("spawn")
@@ -73,7 +75,7 @@ def test_worker_entry_runs_in_process_against_real_queues(
     output_queue: MpQueue[bytes | None] = ctx.Queue()
     stats_queue: MpQueue[bytes] = ctx.Queue()
     event = ctx.Event()
-    marc = MarcRecord(control_id="m", title="t", publication_year=1940)
+    marc = MarcRecord(control_id="m", title="t", title_main="t", publication_year=1940)
     input_queue.put(encode_batch((marc,)))
     input_queue.put(None)
     _worker_entry(
@@ -81,6 +83,7 @@ def test_worker_entry_runs_in_process_against_real_queues(
         matching_config=matching_config,
         copyright_config=copyright_config,
         ruleset=ruleset,
+        pairing_config=pairing_config,
         idf=tiny_idf,
         calibrator=None,
         input_queue=input_queue,
@@ -100,7 +103,7 @@ def test_writer_entry_runs_in_process_against_real_queues(tmp_path: Path) -> Non
     output_queue: MpQueue[bytes | None] = ctx.Queue()
     stats_queue: MpQueue[bytes] = ctx.Queue()
     event = ctx.Event()
-    marc = MarcRecord(control_id="m", title="t")
+    marc = MarcRecord(control_id="m", title="t", title_main="t")
     payload = WorkerOutput(
         marc=marc,
         match=MatchResult(
@@ -136,6 +139,7 @@ def test_run_match_rejects_zero_workers(
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
+    pairing_config: PairingConfig,
     tmp_path: Path,
 ) -> None:
     ruleset = load_copyright_rules(_DEFAULTS)
@@ -147,12 +151,14 @@ def test_run_match_rejects_zero_workers(
             matching_config=matching_config,
             copyright_config=copyright_config,
             ruleset=ruleset,
+            pairing_config=pairing_config,
             idf=tiny_idf,
             workers=0,
         )
 
 
 def test_run_match_returns_run_report(
+    pairing_config: PairingConfig,
     tmp_path: Path,
 ) -> None:
     """End-to-end run with default args returns a populated :class:`RunReport`."""
@@ -190,6 +196,7 @@ def test_run_match_returns_run_report(
         matching_config=config,
         copyright_config=copyright_config,
         ruleset=ruleset,
+        pairing_config=pairing_config,
         idf=idf,
         workers=1,
         batch_size=2,

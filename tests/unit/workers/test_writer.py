@@ -19,7 +19,7 @@ from pd_matcher.workers.writer import writer_main
 
 
 def _make_payload(control_id: str) -> bytes:
-    marc = MarcRecord(control_id=control_id, title="t", publication_year=1940)
+    marc = MarcRecord(control_id=control_id, title="t", title_main="t", publication_year=1940)
     assessment = CopyrightAssessment(
         status=CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA,
         matched_rule_name=None,

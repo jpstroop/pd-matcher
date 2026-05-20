@@ -37,6 +37,7 @@ from msgspec import Struct
 
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.copyright import default_ruleset
 from pd_matcher.copyright.facts import build_facts
 from pd_matcher.copyright.rules import assess
@@ -45,6 +46,7 @@ from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import match_record
 from pd_matcher.models import MarcRecord
 
@@ -95,6 +97,7 @@ class _WorkerState:
         "idf",
         "lookup",
         "matching_config",
+        "pairings",
         "ruleset",
     )
 
@@ -104,6 +107,7 @@ class _WorkerState:
         index_path: Path,
         matching_config: MatchingConfig,
         copyright_config: CopyrightAssessmentConfig,
+        pairing_config: PairingConfig,
         as_of_year: int,
     ) -> None:
         self.lookup = NyplIndexLookup(index_path)
@@ -112,6 +116,7 @@ class _WorkerState:
         self.ruleset = default_ruleset()
         self.matching_config = matching_config
         self.copyright_config = copyright_config
+        self.pairings = compile_pairings(pairing_config)
         self.as_of_year = as_of_year
 
 
@@ -135,9 +140,11 @@ def _maybe(value: str) -> str | None:
 
 def _marc_from_row(row: dict[str, str]) -> MarcRecord:
     """Reconstruct a minimal :class:`MarcRecord` from a ground-truth CSV row."""
+    title = row.get("marc_title_original", "")
     return MarcRecord(
         control_id=row.get("marc_id", ""),
-        title=row.get("marc_title_original", ""),
+        title=title,
+        title_main=title,
         lccn=_maybe(row.get("marc_lccn", "")),
         main_author=_maybe(row.get("marc_main_author_original", "")),
         statement_of_responsibility=_maybe(row.get("marc_author_original", "")),
@@ -213,6 +220,7 @@ def _eval_one_row(
         idf=state.idf,
         calibrator=None,
         combiner=state.combiner,
+        pairings=state.pairings,
     )
     matched_nypl = None
     predicted_id: str | None = None
@@ -241,6 +249,7 @@ def _pool_initializer(
     index_path: Path,
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
+    pairing_config: PairingConfig,
     as_of_year: int,
 ) -> None:
     """Spawn-pool initializer: build the per-worker :class:`_WorkerState`.
@@ -255,6 +264,7 @@ def _pool_initializer(
         index_path=index_path,
         matching_config=matching_config,
         copyright_config=copyright_config,
+        pairing_config=pairing_config,
         as_of_year=as_of_year,
     )
 
@@ -273,6 +283,7 @@ def _iter_outcomes_sequential(
     index_path: Path,
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
+    pairing_config: PairingConfig,
     as_of_year: int,
     limit: int | None,
 ) -> Iterator[_RowOutcome]:
@@ -281,6 +292,7 @@ def _iter_outcomes_sequential(
         index_path=index_path,
         matching_config=matching_config,
         copyright_config=copyright_config,
+        pairing_config=pairing_config,
         as_of_year=as_of_year,
     )
     try:
@@ -298,6 +310,7 @@ def _iter_outcomes_parallel(
     index_path: Path,
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
+    pairing_config: PairingConfig,
     as_of_year: int,
     limit: int | None,
     workers: int,
@@ -308,7 +321,7 @@ def _iter_outcomes_parallel(
         return
     chunksize = max(1, len(target_rows) // (workers * _CHUNK_DIVISOR))
     ctx = get_context("spawn")
-    init_args = (index_path, matching_config, copyright_config, as_of_year)
+    init_args = (index_path, matching_config, copyright_config, pairing_config, as_of_year)
     with ctx.Pool(
         processes=workers,
         initializer=_pool_initializer,
@@ -364,6 +377,7 @@ def run_eval(
     as_of_year: int,
     matching_config: MatchingConfig,
     copyright_config: CopyrightAssessmentConfig,
+    pairing_config: PairingConfig,
     limit: int | None = None,
     sample: int | None = None,
     seed: int = 0,
@@ -379,6 +393,8 @@ def run_eval(
             age-sensitive predicates.
         matching_config: Active :class:`MatchingConfig`.
         copyright_config: Active :class:`CopyrightAssessmentConfig`.
+        pairing_config: Active :class:`PairingConfig`; compiled once per
+            worker into :class:`CompiledPairings`.
         limit: Optional maximum number of rows to evaluate. ``None``
             evaluates every row. Mutually exclusive with ``sample`` at
             the CLI layer.
@@ -404,6 +420,7 @@ def run_eval(
             index_path=index_path,
             matching_config=matching_config,
             copyright_config=copyright_config,
+            pairing_config=pairing_config,
             as_of_year=as_of_year,
             limit=limit,
         )
@@ -413,6 +430,7 @@ def run_eval(
             index_path=index_path,
             matching_config=matching_config,
             copyright_config=copyright_config,
+            pairing_config=pairing_config,
             as_of_year=as_of_year,
             limit=limit,
             workers=workers,
