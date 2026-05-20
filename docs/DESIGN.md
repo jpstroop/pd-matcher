@@ -2,7 +2,7 @@
 
 How `pd-matcher` is built, why, and what the algorithm is actually doing under the hood.
 
-This document is for developers and reviewers who need to understand the codebase, the technology choices, the matching pipeline, and the underlying science. For user-facing instructions and command examples, see [README.md](../README.md).
+This document is for developers and reviewers who need to understand the codebase, the technology choices, the matching pipeline, and the underlying science. For user-facing instructions and command examples, see [README.md](../README.md). Unfamiliar statistics, matching, or tooling terms are defined in the [glossary](glossary.md).
 
 ---
 

@@ -247,4 +247,4 @@ Project standards:
 - msgspec `Struct` for typed records throughout.
 - 100% line + branch test coverage enforced.
 
-See [DESIGN.md](docs/DESIGN.md) for the technology decisions and what motivates them.
+See [DESIGN.md](docs/DESIGN.md) for the technology decisions and what motivates them, and the [glossary](docs/glossary.md) for definitions of the statistics, matching, and tooling terms used throughout.
