@@ -224,7 +224,7 @@ def test_index_config_defaults_and_roundtrip() -> None:
     cfg = convert({"lmdb_path": "caches/nypl.lmdb"}, type=IndexConfig, dec_hook=_path_dec_hook)
     assert cfg.lmdb_path == Path("caches/nypl.lmdb")
     assert cfg.map_size_bytes == 16 * 1024 * 1024 * 1024
-    assert cfg.schema_version == 1
+    assert cfg.schema_version == 2
     again = convert(to_builtins(cfg, enc_hook=str), type=IndexConfig, dec_hook=_path_dec_hook)
     assert again == cfg
 

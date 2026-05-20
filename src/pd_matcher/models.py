@@ -47,6 +47,11 @@ class NyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     regnum: str | None = None
     reg_date: date | None = None
     reg_year: int | None = None
+    """The registration year, or the best-available copyright/publication
+    year (``copyDate`` then ``pubDate``) when no registration date is
+    present. ``reg_date`` remains strictly the registration date and stays
+    ``None`` when no ``<regDate>`` exists; ``reg_year`` may still be set
+    from the fallback chain so the record lands in a year bucket."""
     author_name: str | None = None
     edition: str | None = None
     publisher_names: tuple[str, ...] = ()
@@ -84,6 +89,10 @@ class IndexedNyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     regnum: str | None = None
     reg_date: date | None = None
     reg_year: int | None = None
+    """The registration year, or the best-available copyright/publication
+    year (``copyDate`` then ``pubDate``) when no registration date is
+    present. Mirrors :attr:`NyplRegRecord.reg_year`; ``reg_date`` remains
+    strictly the registration date."""
     author_name: str | None = None
     edition: str | None = None
     publisher_names: tuple[str, ...] = ()

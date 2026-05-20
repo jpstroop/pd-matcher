@@ -116,7 +116,7 @@ def test_stats_reflect_build_report(tmp_path: Path) -> None:
     out_path = _build_tiny_index(tmp_path)
     with NyplIndexLookup(out_path) as lookup:
         stats = lookup.stats()
-    assert stats.schema_version == 1
+    assert stats.schema_version == 2
     assert stats.registrations_written == 9
     assert stats.renewals_written == 4
     assert stats.renewal_joins == 2
