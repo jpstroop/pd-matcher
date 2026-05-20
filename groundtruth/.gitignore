@@ -1,0 +1,14 @@
+data/
+.venv/
+__pycache__/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.pyc
+dist/
+build/
+.pdm-python
+.pdm-build/

@@ -16,3 +16,7 @@ data/candidate_marc_file.marcxml
 
 # Throwaway one-off measurement scripts and their JSON outputs
 scripts/
+
+# pd-groundtruth subproject local artifacts (its MARCXML output and venv)
+groundtruth/data/
+groundtruth/.venv/
