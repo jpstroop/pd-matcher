@@ -15,6 +15,14 @@ The canonical registration number is the ``regnum`` attribute on the
 spaces ("A 125487" vs "A125487") and is therefore preferred only as a
 fallback when the attribute is absent.
 
+``reg_date`` is sourced strictly from ``<regDate>``. ``reg_year`` uses a
+``regDate → copyDate → pubDate`` fallback chain so entries with no
+registration date (notably *ad interim* registrations) still land in a
+year bucket and stay reachable by the year-blocked matcher;
+``affDate``/``noticeDate`` are excluded because they are procedural
+(affidavit/notice) rather than registration, copyright, or publication
+events. See :func:`_derive_reg_year` for the rationale.
+
 A :class:`NyplRegParseStats` counter tracks how many subfield values were
 repaired by the encoding-hygiene pass (see
 :mod:`pd_matcher.normalize.encoding`). Callers wanting visibility supply
@@ -73,7 +81,15 @@ def _parse_date(raw: str | None) -> date | None:
 
 
 def _extract_reg_date(entry: _Element) -> date | None:
-    """Read the ``date`` attribute of the first ``<regDate>`` child."""
+    """Read the ``date`` attribute of the first ``<regDate>`` child.
+
+    This stays strictly the registration date: it is sourced ONLY from
+    ``<regDate>`` and is left ``None`` when that element is absent. We do
+    NOT fill it from ``copyDate``/``pubDate`` (the year fallback chain in
+    :func:`_derive_reg_year`) because those are different events — a
+    copyright (©) or publication date is not a registration date, and
+    conflating them would misrepresent the record's provenance.
+    """
     reg_date_elem = entry.find("regDate")
     if reg_date_elem is None:
         return None
@@ -88,6 +104,76 @@ def _year_from_text(value: str | None) -> int | None:
     if match is None:
         return None
     return int(match.group(1))
+
+
+def _year_from_date_element(elem: _Element | None, stats: NyplRegParseStats) -> int | None:
+    """Return the best-available 4-digit year from a CCE date element.
+
+    The CCE date elements (``regDate``, ``copyDate``, ``pubDate``) carry a
+    normalized ``date`` attribute that is either ``YYYY`` or ``YYYY-MM-DD``
+    per the CopyrightEntries DTD/guide; both forms start with the year, so
+    we read the leading 4-digit run from the attribute first. When the
+    attribute is missing or malformed we fall back to the same 4-digit
+    scan over the element's display text.
+    """
+    if elem is None:
+        return None
+    from_attr = _year_from_text(elem.get("date"))
+    if from_attr is not None:
+        return from_attr
+    return _year_from_text(_text(elem, stats))
+
+
+def _derive_reg_year(entry: _Element, stats: NyplRegParseStats) -> int | None:
+    """Resolve a registration year via the ``regDate → copyDate → pubDate`` chain.
+
+    Many entries — notably *ad interim* registrations (``regnum`` like
+    "AI…") — carry no ``<regDate>`` at all; their date lives in
+    ``<copyDate>`` (the copyright © event) and/or ``<pubDate>`` (the
+    imprint/publication date). Without a fallback those records get
+    ``reg_year=None``, fall into no year bucket, and become unreachable by
+    the year-blocked matcher.
+
+    The chain is ordered by semantic closeness to a registration event:
+
+    * ``regDate`` — the registration date itself (canonical).
+    * ``copyDate`` — the copyright (©) date; the closest analog to
+      registration when no ``regDate`` exists.
+    * ``pubDate`` — the publication/imprint date; most aligned with the
+      MARC publication year we block against.
+
+    ``affDate`` (affidavit — a procedural printing/manufacture date) and
+    ``noticeDate`` are deliberately EXCLUDED: neither is a registration,
+    copyright, or publication event, so using them as a year source would
+    introduce dates unrelated to the registration we are matching.
+
+    For ``pubDate`` we prefer a direct child or a publisher-level child of
+    this entry over any ``pubDate`` buried in nested ``additionalEntry`` /
+    ``prevPub`` blocks, so the recovered year reflects this entry's own
+    publication rather than a referenced one.
+    """
+    for tag in ("regDate", "copyDate"):
+        year = _year_from_date_element(entry.find(tag), stats)
+        if year is not None:
+            return year
+    return _year_from_date_element(_find_entry_pub_date(entry), stats)
+
+
+def _find_entry_pub_date(entry: _Element) -> _Element | None:
+    """Return this entry's own ``<pubDate>``, ignoring nested-entry copies.
+
+    A direct child is preferred, then a publisher-level child; both belong
+    to the entry itself. ``pubDate`` elements inside ``additionalEntry`` or
+    ``prevPub`` describe a different (referenced) work and are skipped.
+    """
+    direct = entry.find("pubDate")
+    if direct is not None:
+        return direct
+    for publisher in entry.iterfind("publisher"):
+        publisher_pub_date = publisher.find("pubDate")
+        if publisher_pub_date is not None:
+            return publisher_pub_date
+    return None
 
 
 def _collect_publisher_names(
@@ -145,14 +231,7 @@ def _build_record(entry: _Element, stats: NyplRegParseStats) -> NyplRegRecord | 
 
     regnum = entry.get("regnum") or _text(entry.find("regNum"), stats)
     reg_date = _extract_reg_date(entry)
-    reg_year: int | None
-    if reg_date is not None:
-        reg_year = reg_date.year
-    else:
-        reg_date_elem = entry.find("regDate")
-        reg_year = (
-            _year_from_text(_text(reg_date_elem, stats)) if reg_date_elem is not None else None
-        )
+    reg_year = _derive_reg_year(entry, stats)
 
     author_name = _text(entry.find("author/authorName"), stats)
     edition = _text(entry.find("edition"), stats)
