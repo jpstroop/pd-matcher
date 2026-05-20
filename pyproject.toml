@@ -7,7 +7,7 @@ authors = [
 ]
 requires-python = ">=3.14"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "AGPL-3.0-or-later"}
 dependencies = [
     "lxml>=5.3.0",
     "rapidfuzz>=3.10.0",

@@ -248,3 +248,23 @@ Project standards:
 - 100% line + branch test coverage enforced.
 
 See [design.md](docs/design.md) for the technology decisions and what motivates them, and the [glossary](docs/glossary.md) for definitions of the statistics, matching, and tooling terms used throughout.
+
+---
+
+## License
+
+The `pd-matcher` source code is licensed under the **GNU Affero General Public
+License v3.0 or later** (AGPL-3.0-or-later); see [LICENSE](LICENSE). In short:
+you may use, modify, and redistribute it, including commercially, but any
+distributed or network-deployed modifications must be released under the same
+license — closed-source forks and proprietary hosted services are not
+permitted.
+
+This license covers the code only, **not the bundled data**:
+
+- The NYPL registration and renewal datasets are git submodules under
+  `data/nypl-reg/` and `data/nypl-ren/` and carry their own licenses from NYPL.
+- The underlying Catalog of Copyright Entries is a work of the U.S. Copyright
+  Office (Library of Congress) and is in the public domain in the United States.
+- Any MARC catalog you match against, and the ground-truth pairings, are your
+  own data under your own terms.
