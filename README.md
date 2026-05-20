@@ -198,7 +198,7 @@ The matching pipeline is parallelized via Python's `multiprocessing` with the `s
 
 Subfield values from MARC, NYPL registrations, and NYPL renewals are routed through [ftfy](https://ftfy.readthedocs.io/) at parse time to repair mojibake (``cafÃ©`` → ``café``, ``Â© 2020`` → ``© 2020``), strip stray BOMs, and remove bidirectional formatting marks that would otherwise split tokens. NYPL renewals (read as raw bytes) additionally have a Windows-1255 fallback decoder for any Hebrew content that fails strict UTF-8 — currently unused in the supplied corpus but present for future ingests. Per-parser counters (``MarcParseStats``, ``NyplRegParseStats``, ``NyplRenParseStats``) expose how many cells were repaired or routed through each fallback.
 
-For a deep dive into the algorithm, scoring math, and design rationale, see [DESIGN.md](DESIGN.md).
+For a deep dive into the algorithm, scoring math, and design rationale, see [DESIGN.md](docs/DESIGN.md).
 
 ---
 
@@ -247,4 +247,4 @@ Project standards:
 - msgspec `Struct` for typed records throughout.
 - 100% line + branch test coverage enforced.
 
-See [DESIGN.md](DESIGN.md) for the technology decisions and what motivates them.
+See [DESIGN.md](docs/DESIGN.md) for the technology decisions and what motivates them.
