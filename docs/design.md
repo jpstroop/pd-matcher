@@ -539,6 +539,18 @@ Pre-commit runs fast on every commit. Gates run slow, manually or in CI. The spl
 
 Easier to hold at 100% than to climb back to it from 85%. Every new module is born with full coverage. Allowed `pragma: no cover` is narrow and reviewable. This is paired with a strong regression-eval discipline (Phase 8) — line coverage proves every line *executed*; the regression eval proves it produced the right *answer*.
 
+### Regression baseline + local gate (Phase 8)
+
+Line coverage proves code *ran*; it says nothing about whether the matcher still produces the *right answers*. The regression gate closes that gap by locking the current eval scores into a checked-in artifact and failing when a change degrades them.
+
+The baseline lives at `tests/regression/baseline.json` (schema: `pd_matcher.eval.regression.Baseline`). It records the eval invocation params (`--sample 1000 --seed 42 --year-window 0 --as-of 2026` over `combined_ground_truth.csv`), the locked precision/recall/F1, the row counts, and the tolerance. The gate (`tests/regression/test_regression.py`) re-runs that exact eval against the local LMDB index and calls `compare(...)`: it **fails if precision OR recall drops more than 2 percentage points below the baseline**. Improvements, and drops within tolerance, pass. F1 is reported for context but is not itself gated, since precision and recall fully determine it.
+
+The gate is local-only — **CI is deferred** until the code is published. It is excluded from the default `pdm run pytest` run (and from coverage) by the `regression` marker, and it **skips gracefully** when `caches/nypl.lmdb` or `data/combined_ground_truth.csv` is absent, so a fresh clone without the built index still passes the default suite. All of `regression.py` reaches 100% coverage through fast unit tests that fabricate `EvalReport` instances, never touching the index.
+
+Run the gate with `pdm run regression` (re-runs the ~1000-row eval, a few minutes). Refresh the baseline after an intentional pipeline change with `pdm run regression-baseline`, which reruns the canonical eval and rewrites the JSON.
+
+Two caveats are recorded in the baseline's `notes`. The eval uses **thin records** reconstructed from the ground-truth CSV columns rather than full MARC, so the absolute scores are a floor, not the production ceiling. And **per-status confusion is not gated**: the ground-truth status labels predate the current `CopyrightStatus` enum, so only the precision/recall of the *match* (predicted vs. ground-truth `match_source_id`) is locked. The baseline is slated for a refresh after #19 (registration-date parsing) lands.
+
 ### design.md and git history as the durable design record
 
 Every meaningful design decision in this codebase is documented in two places: this file and the git commit log. Commit messages describe when and why each piece landed; this document captures the broader rationale and ties decisions together across modules.
@@ -550,7 +562,7 @@ If a future contributor reads this file and asks "why msgspec?", the answer is h
 ## 7. Open questions and future work
 
 - **Learned scorer (Phase 9)**: replace the weighted mean + Platt calibrator with a LightGBM model trained on the same Evidence features. Plan calls for an A/B with the current pipeline and a ≥2 F1-point threshold for adoption.
-- **Baselined regression eval (Phase 8)**: lock the current eval scores into a JSON file checked into the repo; PRs that regress precision or recall by >2pp fail CI.
+- **Baselined regression eval (Phase 8)**: built — see §6, "Regression baseline + local gate". The gate is local-only for now; wiring it into CI is deferred until the code is published.
 - **HTML report viewer (Phase 7 follow-up)**: a tiny static-site generator over the CSV that lets a human auditor click into individual matches and see the per-scorer Evidence with its sub-features. Mocked up; not yet built.
 - **Delayed-URAA accession dates**: Cornell's matrix references country-specific Berne / WTO accession dates that replace the 1996 baseline. Phase 5 punts these to `UNKNOWN_INSUFFICIENT_DATA`. Could be tabulated if the corpus contains enough such works to justify it.
 - **MARC field richness**: the parser currently extracts ~15 MARC fields. Adding 6xx (subject), 5xx (notes) could improve title disambiguation in the IDF-weighted Jaccard, at the cost of more noisy tokens.
