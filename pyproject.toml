@@ -44,14 +44,11 @@ gates = {composite = ["fmt", "lint", "typecheck", "test"]}
 [tool.pdm.build]
 includes = [
     "src/pd_matcher",
+    "src/pd_matcher/py.typed",
     "src/pd_matcher/config/defaults/*.yaml",
     "src/pd_matcher/normalize/stopwords_data/*.json",
 ]
 package-dir = "src"
-source-includes = [
-    "src/pd_matcher/config/defaults/*.yaml",
-    "src/pd_matcher/normalize/stopwords_data/*.json",
-]
 
 [tool.mypy]
 strict = true

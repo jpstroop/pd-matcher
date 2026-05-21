@@ -5,17 +5,25 @@ from logging import basicConfig
 from pathlib import Path
 from typing import Annotated
 
+from pd_matcher.cli import _load_default_matching_config
+from pd_matcher.cli import _load_default_pairing_config
 from typer import Option
 from typer import Typer
 from typer import echo
 
 from pd_groundtruth.acquire import acquire
 from pd_groundtruth.acquire import default_min_year
+from pd_groundtruth.build_queue import build_queue
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
+from pd_groundtruth.sampling import default_budget
+from pd_groundtruth.sampling import scale_budget
 
 app = Typer(add_completion=False, help="Acquire Princeton MARC ground-truth candidates.")
 
 _DEFAULT_PER_DECADE_CAP = 20000
+_DEFAULT_SEED = 42
+_DEFAULT_WORKERS = 8
+_DEFAULT_SAMPLE_PER_LANG = 3000
 
 
 @app.callback()
@@ -66,4 +74,50 @@ def acquire_command(
         f"kept_by_language=[{kept}] "
         f"shards_written={report.shards_written} "
         f"stopped_reason={report.stopped_reason}"
+    )
+
+
+@app.command(name="build-queue")
+def build_queue_command(
+    pool: Annotated[
+        Path,
+        Option("--pool", help="Root dir whose <lang>/*.xml shards form the candidate pool."),
+    ],
+    index: Annotated[
+        Path, Option("--index", help="LMDB env produced by `pd-matcher index build`.")
+    ],
+    out: Annotated[Path, Option("--out", help="Destination SQLite review database.")],
+    budget: Annotated[
+        int | None,
+        Option("--budget", help="Target total pairs; scales the default caps proportionally."),
+    ] = None,
+    seed: Annotated[int, Option("--seed", help="Seed for the reservoir samplers.")] = _DEFAULT_SEED,
+    workers: Annotated[
+        int, Option("--workers", help="Number of spawn-pool worker processes.")
+    ] = _DEFAULT_WORKERS,
+    sample_per_lang: Annotated[
+        int,
+        Option("--sample-per-lang", help="Reservoir size per language directory."),
+    ] = _DEFAULT_SAMPLE_PER_LANG,
+) -> None:
+    """Match a stratified pool sample and write a SQLite review queue."""
+    basicConfig(level=INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    resolved_budget = default_budget() if budget is None else scale_budget(default_budget(), budget)
+    summary = build_queue(
+        pool=pool,
+        index_path=index,
+        out_path=out,
+        budget=resolved_budget,
+        matching_config=_load_default_matching_config(),
+        pairing_config=_load_default_pairing_config(),
+        seed=seed,
+        workers=workers,
+        sample_per_lang=sample_per_lang,
+    )
+    strata = " ".join(f"{label}={count}" for label, count in sorted(summary.stratum_counts.items()))
+    echo(
+        f"records_sampled={summary.records_sampled} "
+        f"records_matched={summary.records_matched} "
+        f"pairs_written={summary.pairs_written} "
+        f"strata=[{strata}]"
     )
