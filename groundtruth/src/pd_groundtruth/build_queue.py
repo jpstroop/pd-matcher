@@ -25,6 +25,7 @@ from collections.abc import Iterator
 from logging import getLogger
 from multiprocessing import get_context
 from pathlib import Path
+from time import monotonic
 from typing import Protocol
 
 from msgspec import Struct
@@ -45,12 +46,15 @@ from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 from pd_matcher.parsers.marc import iter_marc_records
 
+from pd_groundtruth.progress import ProgressReporter
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
+from pd_groundtruth.sampling import BAND_BELOW
 from pd_groundtruth.sampling import AcceptedPair
 from pd_groundtruth.sampling import BudgetModel
 from pd_groundtruth.sampling import Stratifier
 from pd_groundtruth.sampling import StratumOutcome
+from pd_groundtruth.sampling import band_of
 from pd_groundtruth.sampling import reservoir_sample
 
 _LOGGER = getLogger(__name__)
@@ -314,6 +318,29 @@ def _stratum_label(language: str, band: str) -> str:
     return f"{language}/{band}"
 
 
+def _tally_kept(
+    kept_by_stratum: dict[tuple[str, str], int],
+    outcome: WorkerOutcome,
+    accepted: AcceptedPair | None,
+    budget: BudgetModel,
+) -> None:
+    """Update the live kept-per-stratum tally for the progress readout.
+
+    Banded acceptances increment their exact ``(language, band)``. Below-0.7
+    outcomes are buffered by the :class:`Stratifier` (its reservoir draws at
+    finalize), so their running count is tracked here and clamped to the
+    ``below`` cap to mirror the eventual accepted count.
+    """
+    if accepted is not None:
+        key = (accepted.language, accepted.band)
+        kept_by_stratum[key] = kept_by_stratum.get(key, 0) + 1
+        return
+    if band_of(outcome.score) == BAND_BELOW:
+        key = (outcome.language, BAND_BELOW)
+        cap = budget.cap_for(outcome.language, BAND_BELOW)
+        kept_by_stratum[key] = min(cap, kept_by_stratum.get(key, 0) + 1)
+
+
 def build_queue(
     *,
     pool: Path,
@@ -360,7 +387,15 @@ def build_queue(
 
     stratifier = Stratifier(budget, seed=seed)
     outcomes_by_key: dict[str, WorkerOutcome] = {}
+    kept_by_stratum: dict[tuple[str, str], int] = {}
     records_matched = 0
+    _LOGGER.info("matching start: total=%d workers=%d", len(tasks), workers)
+    reporter = ProgressReporter(
+        logger=_LOGGER,
+        total=len(tasks),
+        budget=budget,
+        clock=monotonic,
+    )
     for outcome in _run_pool(
         tasks,
         index_path=index_path,
@@ -371,13 +406,15 @@ def build_queue(
     ):
         records_matched += 1
         outcomes_by_key[outcome.marc_control_id] = outcome
-        stratifier.offer(
+        accepted_pair = stratifier.offer(
             StratumOutcome(
                 key=outcome.marc_control_id,
                 language=outcome.language,
                 score=outcome.score,
             )
         )
+        _tally_kept(kept_by_stratum, outcome, accepted_pair, budget)
+        reporter.update(records_matched, kept_by_stratum)
 
     accepted = stratifier.finalize()
     pairs_written = _persist(out_path, accepted, outcomes_by_key, index_path)
