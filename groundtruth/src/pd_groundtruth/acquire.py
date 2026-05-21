@@ -188,16 +188,20 @@ def _all_full(kept: dict[str, dict[int, int]], per_decade_cap: int) -> bool:
 
 
 def _format_progress(kept: dict[str, dict[int, int]], per_decade_cap: int) -> str:
-    """Render English's per-decade fill plus per-language totals for the rest."""
-    eng_decades = " ".join(
-        f"[{decade}]={count}/{per_decade_cap}" for decade, count in kept["eng"].items()
-    )
-    others = " ".join(
-        f"{language} total={sum(kept[language].values())}"
+    """Render every target language's per-decade fill on one line.
+
+    Each language is shown with its per-decade buckets (not just a running
+    total), since all languages are decade-bucketed identically; segments
+    are separated by ``|`` to keep the single-line dump-progress readable.
+    """
+    segments = [
+        f"{language} "
+        + " ".join(
+            f"[{decade}]={count}/{per_decade_cap}" for decade, count in kept[language].items()
+        )
         for language in _TARGET_LANGUAGES
-        if language != "eng"
-    )
-    return f"eng {eng_decades} | {others}"
+    ]
+    return " | ".join(segments)
 
 
 def _format_summary(kept: dict[str, dict[int, int]], per_decade_cap: int) -> str:
