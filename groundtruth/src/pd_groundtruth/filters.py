@@ -29,7 +29,6 @@ _YEAR_START = 7
 _YEAR_END = 11
 _GOVERNMENT_PUBLICATION_POSITION = 28
 
-_CCE_MIN_YEAR = 1923
 _CCE_MAX_YEAR = 1977
 _SUPPORTED_LANGUAGES = frozenset({"eng", "fre", "ger", "spa", "ita"})
 _NON_GOVERNMENT_CODES = frozenset({" ", "|"})
@@ -123,8 +122,38 @@ def language_of(record: _Element) -> str | None:
     return text[_LANGUAGE_START:_LANGUAGE_END]
 
 
-def check_language_and_year(record: _Element) -> Ineligibility:
-    """Validate the 008 language (35:38), year (7:11), and gov-publication (28)."""
+def year_of(record: _Element) -> int | None:
+    """Return the 008 publication year (positions 7:11), or ``None``.
+
+    Args:
+        record: A raw MARCXML ``<record>`` element (namespaced or not).
+
+    Returns:
+        The four-digit publication year as an integer, or ``None`` when the 008
+        control field is missing, too short, or the year is not four digits.
+    """
+    text = _control_008_text(record)
+    if text is None:
+        return None
+    year_text = text[_YEAR_START:_YEAR_END]
+    if not year_text.isdigit():
+        return None
+    return int(year_text)
+
+
+def check_language_and_year(record: _Element, min_year: int) -> Ineligibility:
+    """Validate the 008 language (35:38), year (7:11), and gov-publication (28).
+
+    Args:
+        record: A raw MARCXML ``<record>`` element (namespaced or not).
+        min_year: Inclusive lower bound for the publication year (the moving
+            wall). Records before this year are public domain by age and carry
+            no matching signal.
+
+    Returns:
+        ``Ineligibility.ELIGIBLE`` when the language, year, and gov-publication
+        checks all pass, otherwise the first criterion that fails.
+    """
     text = _control_008_text(record)
     if text is None:
         return Ineligibility.MISSING_008
@@ -135,7 +164,7 @@ def check_language_and_year(record: _Element) -> Ineligibility:
     if not year_text.isdigit():
         return Ineligibility.INVALID_YEAR
     year = int(year_text)
-    if year < _CCE_MIN_YEAR or year > _CCE_MAX_YEAR:
+    if year < min_year or year > _CCE_MAX_YEAR:
         return Ineligibility.YEAR_OUT_OF_RANGE
     if text[_GOVERNMENT_PUBLICATION_POSITION] not in _NON_GOVERNMENT_CODES:
         return Ineligibility.GOVERNMENT_PUBLICATION
@@ -158,11 +187,13 @@ def has_title(record: _Element) -> Ineligibility:
     return Ineligibility.MISSING_TITLE
 
 
-def classify(record: _Element) -> Ineligibility:
+def classify(record: _Element, min_year: int) -> Ineligibility:
     """Return the first failing criterion, or ``ELIGIBLE`` when all pass.
 
     Args:
         record: A raw MARCXML ``<record>`` element (namespaced or not).
+        min_year: Inclusive lower bound for the publication year (the moving
+            wall).
 
     Returns:
         ``Ineligibility.ELIGIBLE`` if every criterion holds, otherwise the
@@ -171,12 +202,21 @@ def classify(record: _Element) -> Ineligibility:
     monograph = is_monograph(record)
     if monograph is not Ineligibility.ELIGIBLE:
         return monograph
-    language_and_year = check_language_and_year(record)
+    language_and_year = check_language_and_year(record, min_year)
     if language_and_year is not Ineligibility.ELIGIBLE:
         return language_and_year
     return has_title(record)
 
 
-def is_eligible(record: _Element) -> bool:
-    """Return whether a record satisfies every eligibility criterion."""
-    return classify(record) is Ineligibility.ELIGIBLE
+def is_eligible(record: _Element, min_year: int) -> bool:
+    """Return whether a record satisfies every eligibility criterion.
+
+    Args:
+        record: A raw MARCXML ``<record>`` element (namespaced or not).
+        min_year: Inclusive lower bound for the publication year (the moving
+            wall).
+
+    Returns:
+        ``True`` when every eligibility criterion holds, otherwise ``False``.
+    """
+    return classify(record, min_year) is Ineligibility.ELIGIBLE

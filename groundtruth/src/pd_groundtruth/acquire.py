@@ -5,11 +5,13 @@ against the manifest), opened in streaming gzip mode, and its single MARCXML
 member is parsed incrementally with ``iterparse`` so that neither the
 compressed archive nor the multi-hundred-megabyte member is ever fully
 materialized in memory. Eligible records are routed by 008 language code to a
-per-language shard writer until every configured language has reached its cap.
+per-language shard writer, but sampling is constrained by a per-(language,
+decade) quota so that no single decade can dominate a language's slice of the
+corpus.
 """
 
 from collections.abc import Iterator
-from collections.abc import Mapping
+from datetime import date
 from hashlib import md5
 from logging import getLogger
 from pathlib import Path
@@ -22,8 +24,10 @@ from lxml.etree import iterparse
 from msgspec import Struct
 from requests import get
 
+from pd_groundtruth.filters import _CCE_MAX_YEAR
 from pd_groundtruth.filters import is_eligible
 from pd_groundtruth.filters import language_of
+from pd_groundtruth.filters import year_of
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.manifest import DumpEntry
 from pd_groundtruth.manifest import fetch_manifest
@@ -34,12 +38,33 @@ _LOGGER = getLogger(__name__)
 _DOWNLOAD_CHUNK_BYTES = 1 << 20
 _REQUEST_TIMEOUT_SECONDS = 300
 
+_TARGET_LANGUAGES = ("eng", "fre", "ger", "spa", "ita")
+_MOVING_WALL_AGE = 95
+
+
+def default_min_year() -> int:
+    """Return the moving-wall lower bound (``today.year - 95``)."""
+    return date.today().year - _MOVING_WALL_AGE
+
+
+def _decade_of(year: int) -> int:
+    """Return the decade bucket for a year (e.g. 1953 -> 1950)."""
+    return (year // 10) * 10
+
+
+def _decade_buckets(min_year: int) -> tuple[int, ...]:
+    """Return the ascending decade buckets spanned by ``min_year..1977``."""
+    first = _decade_of(min_year)
+    last = _decade_of(_CCE_MAX_YEAR)
+    return tuple(range(first, last + 10, 10))
+
 
 class AcquireReport(Struct, frozen=True):
     """Outcome of an acquisition run."""
 
     dumps_processed: int
     records_scanned: int
+    kept_by_language_decade: dict[str, dict[int, int]]
     kept_by_language: dict[str, int]
     shards_written: int
     stopped_reason: str
@@ -52,7 +77,8 @@ class Md5MismatchError(RuntimeError):
 def acquire(
     *,
     out_dir: Path,
-    caps: Mapping[str, int],
+    per_decade_cap: int,
+    min_year: int,
     manifest_url: str = DEFAULT_MANIFEST_URL,
     max_dumps: int | None = None,
 ) -> AcquireReport:
@@ -60,20 +86,25 @@ def acquire(
 
     Args:
         out_dir: Root directory; each language writes into ``out_dir/<lang>/``.
-        caps: Mapping of 008 language code to the maximum records to keep for
-            that language. Languages absent from this mapping are never kept.
+        per_decade_cap: Maximum records to keep per (target language, decade)
+            bucket. A record is kept only while its ``(language, decade)`` bucket
+            is below this quota.
+        min_year: Inclusive lower bound for the publication year (the moving
+            wall). Also fixes the set of decade buckets (``min_year``..1977).
         manifest_url: Absolute URL of the dump manifest JSON.
         max_dumps: Optional cap on the number of dumps processed.
 
     Returns:
-        A report of dumps processed, records scanned, records kept per language,
-        total shards written, and why the run stopped.
+        A report of dumps processed, records scanned, records kept per
+        (language, decade) and per language, total shards written, and why the
+        run stopped.
     """
     entries = fetch_manifest(manifest_url)
     return _acquire_entries(
         entries,
         out_dir=out_dir,
-        caps=caps,
+        per_decade_cap=per_decade_cap,
+        min_year=min_year,
         max_dumps=max_dumps,
     )
 
@@ -82,44 +113,48 @@ def _acquire_entries(
     entries: tuple[DumpEntry, ...],
     *,
     out_dir: Path,
-    caps: Mapping[str, int],
+    per_decade_cap: int,
+    min_year: int,
     max_dumps: int | None,
 ) -> AcquireReport:
     """Run acquisition over an already-resolved set of dump entries."""
+    decades = _decade_buckets(min_year)
+    kept: dict[str, dict[int, int]] = {
+        language: dict.fromkeys(decades, 0) for language in _TARGET_LANGUAGES
+    }
+    full_buckets: set[tuple[str, int]] = set()
     dumps_processed = 0
     records_scanned = 0
-    kept_by_language: dict[str, int] = dict.fromkeys(caps, 0)
-    full_languages: set[str] = set()
     stopped_reason = "dumps_exhausted"
 
-    writers = {language: MarcxmlShardWriter(out_dir / language) for language in caps}
+    writers = {language: MarcxmlShardWriter(out_dir / language) for language in _TARGET_LANGUAGES}
     try:
         for entry in entries:
             if max_dumps is not None and dumps_processed >= max_dumps:
                 stopped_reason = "max_dumps"
                 break
-            if _all_full(kept_by_language, caps):
-                stopped_reason = "caps_reached"
+            if _all_full(kept, per_decade_cap):
+                stopped_reason = "quotas_reached"
                 break
 
             scanned = _process_dump(
                 entry,
                 writers=writers,
-                caps=caps,
-                kept_by_language=kept_by_language,
+                kept=kept,
+                per_decade_cap=per_decade_cap,
+                min_year=min_year,
             )
             dumps_processed += 1
             records_scanned += scanned
-            _log_newly_full(kept_by_language, caps, full_languages)
+            _log_newly_full(kept, per_decade_cap, full_buckets)
             _LOGGER.info(
-                "dump done: scanned=%d running_total=%d %s%s",
+                "dump done: scanned=%d running_total=%d %s",
                 scanned,
                 records_scanned,
-                _format_progress(kept_by_language, caps),
-                _format_full(full_languages),
+                _format_progress(kept, per_decade_cap),
             )
-            if _all_full(kept_by_language, caps):
-                stopped_reason = "caps_reached"
+            if _all_full(kept, per_decade_cap):
+                stopped_reason = "quotas_reached"
                 break
     finally:
         shards_written = 0
@@ -127,61 +162,78 @@ def _acquire_entries(
             writer.close()
             shards_written += writer.shards_written
 
+    kept_by_language = {language: sum(buckets.values()) for language, buckets in kept.items()}
     _LOGGER.info(
-        "acquisition complete: dumps=%d scanned=%d shards=%d reason=%s %s",
+        "acquisition complete: dumps=%d scanned=%d shards=%d reason=%s\n%s",
         dumps_processed,
         records_scanned,
         shards_written,
         stopped_reason,
-        _format_progress(kept_by_language, caps),
+        _format_summary(kept, per_decade_cap),
     )
 
     return AcquireReport(
         dumps_processed=dumps_processed,
         records_scanned=records_scanned,
+        kept_by_language_decade=kept,
         kept_by_language=kept_by_language,
         shards_written=shards_written,
         stopped_reason=stopped_reason,
     )
 
 
-def _all_full(kept_by_language: Mapping[str, int], caps: Mapping[str, int]) -> bool:
-    """Return whether every configured language has reached its cap."""
-    return all(kept_by_language[language] >= cap for language, cap in caps.items())
+def _all_full(kept: dict[str, dict[int, int]], per_decade_cap: int) -> bool:
+    """Return whether every (target language, decade) bucket is at the quota."""
+    return all(count >= per_decade_cap for buckets in kept.values() for count in buckets.values())
 
 
-def _format_progress(kept_by_language: Mapping[str, int], caps: Mapping[str, int]) -> str:
-    """Render ``lang=kept/cap`` pairs for every configured language."""
-    return " ".join(
-        f"{language}={kept_by_language[language]}/{caps[language]}" for language in caps
+def _format_progress(kept: dict[str, dict[int, int]], per_decade_cap: int) -> str:
+    """Render English's per-decade fill plus per-language totals for the rest."""
+    eng_decades = " ".join(
+        f"[{decade}]={count}/{per_decade_cap}" for decade, count in kept["eng"].items()
     )
+    others = " ".join(
+        f"{language} total={sum(kept[language].values())}"
+        for language in _TARGET_LANGUAGES
+        if language != "eng"
+    )
+    return f"eng {eng_decades} | {others}"
 
 
-def _format_full(full_languages: set[str]) -> str:
-    """Render a trailing ``full=[...]`` segment when any language is full."""
-    if not full_languages:
-        return ""
-    return " full=[" + ",".join(sorted(full_languages)) + "]"
+def _format_summary(kept: dict[str, dict[int, int]], per_decade_cap: int) -> str:
+    """Render a per-language, per-decade fill table."""
+    lines: list[str] = []
+    for language in _TARGET_LANGUAGES:
+        cells = " ".join(
+            f"[{decade}]={count}/{per_decade_cap}" for decade, count in kept[language].items()
+        )
+        lines.append(f"  {language}: {cells} total={sum(kept[language].values())}")
+    return "\n".join(lines)
 
 
 def _log_newly_full(
-    kept_by_language: Mapping[str, int],
-    caps: Mapping[str, int],
-    full_languages: set[str],
+    kept: dict[str, dict[int, int]],
+    per_decade_cap: int,
+    full_buckets: set[tuple[str, int]],
 ) -> None:
-    """Log each language that newly reached its cap since the last check."""
-    for language, cap in caps.items():
-        if language not in full_languages and kept_by_language[language] >= cap:
-            full_languages.add(language)
-            _LOGGER.info("language full: %s reached cap %d", language, cap)
+    """Log each (language, decade) bucket that newly reached the quota."""
+    for language, buckets in kept.items():
+        for decade, count in buckets.items():
+            key = (language, decade)
+            if key not in full_buckets and count >= per_decade_cap:
+                full_buckets.add(key)
+                _LOGGER.info(
+                    "bucket full: %s[%d] reached quota %d", language, decade, per_decade_cap
+                )
 
 
 def _process_dump(
     entry: DumpEntry,
     *,
-    writers: Mapping[str, MarcxmlShardWriter],
-    caps: Mapping[str, int],
-    kept_by_language: dict[str, int],
+    writers: dict[str, MarcxmlShardWriter],
+    kept: dict[str, dict[int, int]],
+    per_decade_cap: int,
+    min_year: int,
 ) -> int:
     """Download, verify, and scan a single dump, returning the records scanned."""
     temp_path = _download_and_verify(entry)
@@ -189,15 +241,14 @@ def _process_dump(
         scanned = 0
         for record in _iter_records(temp_path):
             scanned += 1
-            if is_eligible(record):
+            if is_eligible(record, min_year):
                 language = language_of(record)
-                if (
-                    language is not None
-                    and language in caps
-                    and kept_by_language[language] < caps[language]
-                ):
-                    writers[language].write(record)
-                    kept_by_language[language] += 1
+                year = year_of(record)
+                if language is not None and language in kept and year is not None:
+                    decade = _decade_of(year)
+                    if kept[language][decade] < per_decade_cap:
+                        writers[language].write(record)
+                        kept[language][decade] += 1
             record.clear()
         return scanned
     finally:

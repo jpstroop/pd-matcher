@@ -10,12 +10,12 @@ from typer import Typer
 from typer import echo
 
 from pd_groundtruth.acquire import acquire
+from pd_groundtruth.acquire import default_min_year
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 
 app = Typer(add_completion=False, help="Acquire Princeton MARC ground-truth candidates.")
 
-_DEFAULT_CAP_ENG = 40000
-_DEFAULT_CAP_OTHER = 2500
+_DEFAULT_PER_DECADE_CAP = 20000
 
 
 @app.callback()
@@ -31,37 +31,31 @@ def acquire_command(
     manifest_url: Annotated[
         str, Option("--manifest-url", help="Dump manifest JSON URL.")
     ] = DEFAULT_MANIFEST_URL,
-    cap_eng: Annotated[
-        int, Option("--cap-eng", help="Maximum English (eng) records to keep.")
-    ] = _DEFAULT_CAP_ENG,
-    cap_fre: Annotated[
-        int, Option("--cap-fre", help="Maximum French (fre) records to keep.")
-    ] = _DEFAULT_CAP_OTHER,
-    cap_ger: Annotated[
-        int, Option("--cap-ger", help="Maximum German (ger) records to keep.")
-    ] = _DEFAULT_CAP_OTHER,
-    cap_spa: Annotated[
-        int, Option("--cap-spa", help="Maximum Spanish (spa) records to keep.")
-    ] = _DEFAULT_CAP_OTHER,
-    cap_ita: Annotated[
-        int, Option("--cap-ita", help="Maximum Italian (ita) records to keep.")
-    ] = _DEFAULT_CAP_OTHER,
+    per_decade_cap: Annotated[
+        int,
+        Option(
+            "--per-decade-cap",
+            help="Maximum records to keep per (language, decade) bucket.",
+        ),
+    ] = _DEFAULT_PER_DECADE_CAP,
+    min_year: Annotated[
+        int | None,
+        Option(
+            "--min-year",
+            help="Lower bound for publication year (the moving wall, today.year - 95).",
+        ),
+    ] = None,
     max_dumps: Annotated[
         int | None, Option("--max-dumps", help="Cap the number of dumps processed.")
     ] = None,
 ) -> None:
     """Stream dumps and write eligible records as per-language MARCXML shards."""
     basicConfig(level=INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    caps = {
-        "eng": cap_eng,
-        "fre": cap_fre,
-        "ger": cap_ger,
-        "spa": cap_spa,
-        "ita": cap_ita,
-    }
+    resolved_min_year = default_min_year() if min_year is None else min_year
     report = acquire(
         out_dir=out_dir,
-        caps=caps,
+        per_decade_cap=per_decade_cap,
+        min_year=resolved_min_year,
         manifest_url=manifest_url,
         max_dumps=max_dumps,
     )
