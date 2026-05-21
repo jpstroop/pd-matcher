@@ -7,6 +7,7 @@ from pytest import mark
 from pd_groundtruth.filters import Ineligibility
 from pd_groundtruth.filters import classify
 from pd_groundtruth.filters import is_eligible
+from pd_groundtruth.filters import language_of
 
 _MARC_NS = "http://www.loc.gov/MARC21/slim"
 
@@ -149,3 +150,39 @@ def test_245a_with_no_text_node_fails() -> None:
         b'<datafield tag="245"><subfield code="a"/></datafield></record>'
     )
     assert classify(record) is Ineligibility.MISSING_TITLE
+
+
+def _field_008_with_gov(code: str) -> str:
+    """Return a valid 1950/eng 008 string with ``code`` at position 28."""
+    base = "750101s1950    xxu           000 0 eng d"
+    return base[:28] + code + base[29:]
+
+
+@mark.parametrize("code", list("acfilmosuz"))
+def test_government_publication_codes_fail(code: str) -> None:
+    record = _build_record(field_008=_field_008_with_gov(code))
+    assert classify(record) is Ineligibility.GOVERNMENT_PUBLICATION
+
+
+@mark.parametrize("code", [" ", "|"])
+def test_blank_and_pipe_government_codes_pass(code: str) -> None:
+    record = _build_record(field_008=_field_008_with_gov(code))
+    assert is_eligible(record) is True
+    assert classify(record) is Ineligibility.ELIGIBLE
+
+
+@mark.parametrize("language", ["eng", "fre", "ger", "spa", "ita", "lat"])
+def test_language_of_returns_code(language: str) -> None:
+    field = f"750101s1950    xxu           000 0 {language} d"
+    record = _build_record(field_008=field)
+    assert language_of(record) == language
+
+
+def test_language_of_missing_008_returns_none() -> None:
+    record = _build_record(field_008=None)
+    assert language_of(record) is None
+
+
+def test_language_of_short_008_returns_none() -> None:
+    record = _build_record(field_008="750101s1950")
+    assert language_of(record) is None
