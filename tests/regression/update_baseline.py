@@ -37,9 +37,10 @@ _WORKERS = 8
 _NOTES = (
     "Thin-record eval (records reconstructed from GT CSV columns). Gate is "
     "precision/recall only; per-status confusion is not validated because GT "
-    "status labels predate the current CopyrightStatus enum. Refreshed 2026-05-20 "
-    "after #19 (reg-date fallback: reg_year now falls back regDate->copyDate->"
-    f"pubDate) landed and recall improved. Generated: sample={_SAMPLE} seed={_SEED} "
+    "status labels predate the current CopyrightStatus enum. Refreshed 2026-05-21 "
+    "after #22 (inverted-index candidate retrieval) landed: matching now scores "
+    "only token-sharing candidates, which raised precision and recall. Generated: "
+    f"sample={_SAMPLE} seed={_SEED} "
     f"year_window={_YEAR_WINDOW} as_of={_AS_OF_YEAR}."
 )
 
