@@ -27,10 +27,12 @@ _LANGUAGE_START = 35
 _LANGUAGE_END = 38
 _YEAR_START = 7
 _YEAR_END = 11
+_GOVERNMENT_PUBLICATION_POSITION = 28
 
 _CCE_MIN_YEAR = 1923
 _CCE_MAX_YEAR = 1977
 _SUPPORTED_LANGUAGES = frozenset({"eng", "fre", "ger", "spa", "ita"})
+_NON_GOVERNMENT_CODES = frozenset({" ", "|"})
 
 
 class Ineligibility(Enum):
@@ -44,6 +46,7 @@ class Ineligibility(Enum):
     UNSUPPORTED_LANGUAGE = "unsupported_language"
     YEAR_OUT_OF_RANGE = "year_out_of_range"
     INVALID_YEAR = "invalid_year"
+    GOVERNMENT_PUBLICATION = "government_publication"
     MISSING_TITLE = "missing_title"
 
 
@@ -96,12 +99,35 @@ def is_monograph(record: _Element) -> Ineligibility:
     return Ineligibility.ELIGIBLE
 
 
-def check_language_and_year(record: _Element) -> Ineligibility:
-    """Validate the 008 language (35:38) and publication year (7:11)."""
+def _control_008_text(record: _Element) -> str | None:
+    """Return the 008 control field text, or ``None`` if absent or too short."""
     field = _find_controlfield(record, "008")
     if field is None or field.text is None or len(field.text) < _CONTROLFIELD_008_MIN_LENGTH:
+        return None
+    return field.text
+
+
+def language_of(record: _Element) -> str | None:
+    """Return the 008 language code (positions 35:38), or ``None`` if unavailable.
+
+    Args:
+        record: A raw MARCXML ``<record>`` element (namespaced or not).
+
+    Returns:
+        The three-character language code, or ``None`` when the 008 control
+        field is missing or shorter than the minimum length.
+    """
+    text = _control_008_text(record)
+    if text is None:
+        return None
+    return text[_LANGUAGE_START:_LANGUAGE_END]
+
+
+def check_language_and_year(record: _Element) -> Ineligibility:
+    """Validate the 008 language (35:38), year (7:11), and gov-publication (28)."""
+    text = _control_008_text(record)
+    if text is None:
         return Ineligibility.MISSING_008
-    text = field.text
     language = text[_LANGUAGE_START:_LANGUAGE_END]
     if language not in _SUPPORTED_LANGUAGES:
         return Ineligibility.UNSUPPORTED_LANGUAGE
@@ -111,6 +137,8 @@ def check_language_and_year(record: _Element) -> Ineligibility:
     year = int(year_text)
     if year < _CCE_MIN_YEAR or year > _CCE_MAX_YEAR:
         return Ineligibility.YEAR_OUT_OF_RANGE
+    if text[_GOVERNMENT_PUBLICATION_POSITION] not in _NON_GOVERNMENT_CODES:
+        return Ineligibility.GOVERNMENT_PUBLICATION
     return Ineligibility.ELIGIBLE
 
 
