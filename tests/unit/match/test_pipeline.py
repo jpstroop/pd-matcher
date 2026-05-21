@@ -136,15 +136,20 @@ def test_match_record_picks_uuid_0001_for_widget_study(
 def test_match_record_returns_no_best_when_below_floor(
     tmp_path: Path, compiled_pairings: CompiledPairings
 ) -> None:
-    """A high min_combined_score floor filters all candidates out."""
+    """A high min_combined_score floor filters all candidates out.
+
+    The title shares the ``study`` token with UUID-0001 so the record is
+    retrieved (candidates_considered >= 1), but the overall similarity is
+    far below the 99.0 floor so no best match survives.
+    """
     out_path = _build_tiny_index(tmp_path)
     with NyplIndexLookup(out_path) as lookup:
         idf = _idf(lookup)
         config = _config(min_score=99.0)
         marc = MarcRecord(
             control_id="m",
-            title="Completely unrelated title",
-            title_main="Completely unrelated title",
+            title="A study of unrelated matters",
+            title_main="A study of unrelated matters",
             publication_year=1940,
         )
         result = match_record(
@@ -231,16 +236,21 @@ def test_match_record_returns_alternates_in_descending_calibrated_order(
 def test_match_record_prefers_series_title_pairing_when_it_scores_higher(
     tmp_path: Path, compiled_pairings: CompiledPairings
 ) -> None:
-    """A series title that perfectly matches NYPL wins over a primary mismatch."""
+    """A series title that perfectly matches NYPL wins over a weaker primary.
+
+    The primary title shares only the ``study`` token with UUID-0001 (enough
+    to retrieve the candidate), while the series title matches it perfectly,
+    so the series pairing must out-score the primary pairing.
+    """
     out_path = _build_tiny_index(tmp_path)
     with NyplIndexLookup(out_path) as lookup:
         idf = _idf(lookup)
         config = _config(min_score=0.0)
-        # marc.title is unrelated; the series_titles contain the real match.
+        # marc.title is a weak partial; the series_titles contain the real match.
         marc = MarcRecord(
             control_id="m",
-            title="Completely unrelated cover title",
-            title_main="Completely unrelated cover title",
+            title="A study of unrelated cover matters",
+            title_main="A study of unrelated cover matters",
             series_titles=("A study of widgets",),
             publication_year=1940,
         )

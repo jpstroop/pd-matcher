@@ -134,7 +134,7 @@ class IndexConfig(Struct, frozen=True, forbid_unknown_fields=True):
 
     lmdb_path: Path
     map_size_bytes: Annotated[int, Meta(ge=1)] = _DEFAULT_LMDB_MAP_SIZE_BYTES
-    schema_version: Annotated[int, Meta(ge=1)] = 2
+    schema_version: Annotated[int, Meta(ge=1)] = 3
 
 
 class FieldSpec(Struct, frozen=True, forbid_unknown_fields=True):

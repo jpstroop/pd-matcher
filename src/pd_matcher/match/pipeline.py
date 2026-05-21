@@ -4,7 +4,9 @@
 to match a :class:`MarcRecord` against the indexed NYPL corpus. The flow
 is intentionally small:
 
-1. Retrieve year-bucketed candidates from the lookup.
+1. Retrieve candidates from the lookup: registrations that share both the
+   year window and at least one title/author/publisher token with the MARC
+   record (cheap inverted-index retrieval, not a full year-bucket scan).
 2. Build one :class:`ScorerContext` for the record (one stopword/stemmer
    resolution per record, not per candidate).
 3. For each candidate run all scorers, keep the best Evidence per scorer
@@ -175,7 +177,7 @@ def match_record(
             alternates=(),
             candidates_considered=0,
         )
-    candidates = list(lookup.candidates_for_year(marc.publication_year, config.year_window))
+    candidates = list(lookup.candidates_for(marc, config.year_window))
     if not candidates:
         return MatchResult(
             marc_control_id=marc.control_id,

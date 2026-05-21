@@ -92,7 +92,7 @@ class _SubDb:
 class NyplIndexStore:
     """LMDB environment wrapper exposing the named sub-DBs we care about.
 
-    The env is opened with ``max_dbs=8`` so we have headroom for future
+    The env is opened with ``max_dbs=12`` so we have headroom for future
     sub-DBs without an env migration. ``subdir=True`` is used because the
     LMDB data directory layout (``data.mdb`` plus ``lock.mdb`` inside one
     directory) is what Phase 6's worker processes will mmap-share.
@@ -105,14 +105,17 @@ class NyplIndexStore:
 
     __slots__ = (
         "_active_txn",
+        "_author_index_db",
         "_env",
         "_meta_db",
         "_path",
+        "_publisher_index_db",
         "_readonly",
         "_reg_by_id_db",
         "_reg_by_year_db",
         "_ren_by_id_db",
         "_ren_by_oreg_db",
+        "_title_index_db",
     )
 
     def __init__(
@@ -133,13 +136,16 @@ class NyplIndexStore:
             subdir=True,
             readonly=readonly,
             lock=not readonly,
-            max_dbs=8,
+            max_dbs=12,
             create=not readonly,
         )
         self._reg_by_id_db = self._env.open_db(b"reg_by_id", create=not readonly)
         self._ren_by_id_db = self._env.open_db(b"ren_by_id", create=not readonly)
         self._reg_by_year_db = self._env.open_db(b"reg_by_year", create=not readonly)
         self._ren_by_oreg_db = self._env.open_db(b"ren_by_oreg", create=not readonly)
+        self._title_index_db = self._env.open_db(b"title_index", create=not readonly)
+        self._author_index_db = self._env.open_db(b"author_index", create=not readonly)
+        self._publisher_index_db = self._env.open_db(b"publisher_index", create=not readonly)
         self._meta_db = self._env.open_db(b"meta", create=not readonly)
 
     def __enter__(self) -> Self:
@@ -186,6 +192,21 @@ class NyplIndexStore:
     def ren_by_oreg(self) -> _SubDb:
         """Sub-DB mapping ``make_renewal_key(...)`` to the renewal entry id."""
         return _SubDb(self, self._ren_by_oreg_db)
+
+    @property
+    def title_index(self) -> _SubDb:
+        """Inverted index mapping a title token to a uuid-list blob."""
+        return _SubDb(self, self._title_index_db)
+
+    @property
+    def author_index(self) -> _SubDb:
+        """Inverted index mapping an author token to a uuid-list blob."""
+        return _SubDb(self, self._author_index_db)
+
+    @property
+    def publisher_index(self) -> _SubDb:
+        """Inverted index mapping a publisher token to a uuid-list blob."""
+        return _SubDb(self, self._publisher_index_db)
 
     @property
     def meta(self) -> _SubDb:
