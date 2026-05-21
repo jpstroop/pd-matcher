@@ -23,7 +23,7 @@ app = Typer(add_completion=False, help="Acquire Princeton MARC ground-truth cand
 _DEFAULT_PER_DECADE_CAP = 20000
 _DEFAULT_SEED = 42
 _DEFAULT_WORKERS = 8
-_DEFAULT_SAMPLE_PER_LANG = 3000
+_DEFAULT_SAMPLE_PER_LANG = 1500
 
 
 @app.callback()
@@ -97,7 +97,10 @@ def build_queue_command(
     ] = _DEFAULT_WORKERS,
     sample_per_lang: Annotated[
         int,
-        Option("--sample-per-lang", help="Reservoir size per language directory."),
+        Option(
+            "--sample-per-lang",
+            help="Reservoir size per language directory (default fills the default budget).",
+        ),
     ] = _DEFAULT_SAMPLE_PER_LANG,
 ) -> None:
     """Match a stratified pool sample and write a SQLite review queue."""

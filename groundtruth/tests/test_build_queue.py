@@ -41,6 +41,7 @@ from pd_groundtruth.build_queue import _pair_insert
 from pd_groundtruth.build_queue import _pool_match
 from pd_groundtruth.build_queue import _run_pool
 from pd_groundtruth.build_queue import _sample_language
+from pd_groundtruth.build_queue import _tally_kept
 from pd_groundtruth.build_queue import _Task
 from pd_groundtruth.build_queue import build_queue
 from pd_groundtruth.review_db import ReviewDb
@@ -402,6 +403,71 @@ def test_pool_match_raises_when_state_uninitialized(monkeypatch: MonkeyPatch) ->
     task = _Task(language="eng", marc_json=json_encode(_marc()))
     with raises(RuntimeError, match="before _pool_initializer"):
         _pool_match(task)
+
+
+def test_tally_kept_increments_banded_acceptance() -> None:
+    kept: dict[tuple[str, str], int] = {}
+    accepted = AcceptedPair(key="ctrl-1", language="eng", band="ge90", source="banded", score=0.95)
+    budget = BudgetModel(caps={("eng", "ge90"): 5, ("eng", "below"): 2})
+    _tally_kept(kept, _outcome("ctrl-1", 0.95), accepted, budget)
+    _tally_kept(kept, _outcome("ctrl-2", 0.95), accepted, budget)
+    assert kept[("eng", "ge90")] == 2
+
+
+def test_tally_kept_clamps_below_to_cap() -> None:
+    kept: dict[tuple[str, str], int] = {}
+    budget = BudgetModel(caps={("eng", "below"): 2})
+    for control_id in ("a", "b", "c", "d"):
+        _tally_kept(kept, _outcome(control_id, 0.3), None, budget)
+    assert kept[("eng", "below")] == 2
+
+
+def test_tally_kept_ignores_rejected_banded() -> None:
+    kept: dict[tuple[str, str], int] = {}
+    budget = BudgetModel(caps={("eng", "ge90"): 5})
+    _tally_kept(kept, _outcome("ctrl-1", 0.95), None, budget)
+    assert kept == {}
+
+
+def test_build_queue_logs_progress_during_matching(
+    tmp_path: Path, monkeypatch: MonkeyPatch, caplog: object
+) -> None:
+    from logging import INFO
+
+    from _pytest.logging import LogCaptureFixture
+
+    assert isinstance(caplog, LogCaptureFixture)
+    pool = tmp_path / "pool"
+    (pool / "eng").mkdir(parents=True)
+    monkeypatch.setattr(bq, "_refresh_idf_cache", lambda *a, **k: None)
+    monkeypatch.setattr(bq, "_sample_language", lambda *a, **k: [_marc()])
+
+    def _fake_pool(tasks: list[bq._Task], **_kwargs: object) -> Iterator[WorkerOutcome]:
+        for index in range(6):
+            yield _outcome(f"ctrl-{index}", 0.95)
+
+    monkeypatch.setattr(bq, "_run_pool", _fake_pool)
+    monkeypatch.setattr(bq, "NyplIndexLookup", _FakeLookup)
+
+    ticks = iter(float(n) for n in range(0, 1000, 5))
+    monkeypatch.setattr(bq, "monotonic", lambda: next(ticks))
+
+    with caplog.at_level(INFO, logger="pd_groundtruth.build_queue"):
+        build_queue(
+            pool=pool,
+            index_path=tmp_path / "idx" / "nypl.lmdb",
+            out_path=tmp_path / "review.db",
+            budget=BudgetModel(caps={("eng", "ge90"): 10}),
+            matching_config=_MATCHING_CONFIG,
+            pairing_config=_PAIRING_CONFIG,
+            seed=42,
+            workers=2,
+            sample_per_lang=10,
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(message.startswith("matching start: total=") for message in messages)
+    assert any(message.startswith("progress  ") for message in messages)
 
 
 def test_run_pool_empty_tasks_yields_nothing() -> None:

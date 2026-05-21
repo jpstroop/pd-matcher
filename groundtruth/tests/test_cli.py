@@ -101,7 +101,7 @@ def test_build_queue_command_defaults(tmp_path: Path) -> None:
     _, kwargs = mock_build.call_args
     assert kwargs["seed"] == 42
     assert kwargs["workers"] == 8
-    assert kwargs["sample_per_lang"] == 3000
+    assert kwargs["sample_per_lang"] == 1500
     assert kwargs["budget"].caps == default_budget().caps
     assert "pairs_written=5" in result.stdout
     assert "eng/ge90=3" in result.stdout
