@@ -57,6 +57,37 @@ def test_build_index_writes_records_year_buckets_and_meta(tmp_path: Path) -> Non
         assert store.ren_by_oreg.get(join_key) == b"entry-001"
 
 
+def test_build_index_writes_token_inverted_indexes(tmp_path: Path) -> None:
+    """Title/author/publisher tokens map to their registration uuids.
+
+    UUID-0001 has title "A study of widgets.", author "Smith, John", and
+    publisher "Acme Press". UUID-0002 carries publisher names and a claimant;
+    the publisher index draws tokens from both, so "estate" (from the
+    claimant "Estate of Dubois") retrieves UUID-0002.
+    """
+    reg_dir, ren_dir = _seed_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        widgets = store.title_index.get(b"widgets")
+        assert widgets is not None
+        assert "UUID-0001" in decode_uuid_list(widgets)
+
+        smith = store.author_index.get(b"smith")
+        assert smith is not None
+        assert decode_uuid_list(smith) == ("UUID-0001",)
+
+        acme = store.publisher_index.get(b"acme")
+        assert acme is not None
+        assert "UUID-0001" in decode_uuid_list(acme)
+
+        # Claimant tokens feed the publisher index too.
+        estate = store.publisher_index.get(b"estate")
+        assert estate is not None
+        assert "UUID-0002" in decode_uuid_list(estate)
+
+
 def test_build_index_is_idempotent_without_force(tmp_path: Path) -> None:
     reg_dir, ren_dir = _seed_sources(tmp_path)
     out_path = tmp_path / "idx.lmdb"

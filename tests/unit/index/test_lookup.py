@@ -7,6 +7,7 @@ from pytest import raises
 from pd_matcher.index.builder import build_index
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.index.store import NyplIndexStore
+from pd_matcher.models import MarcRecord
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 
@@ -112,11 +113,139 @@ def test_candidates_for_year_skips_uuid_with_no_registration(tmp_path: Path) -> 
     assert records == []
 
 
+def _marc(
+    *,
+    title: str = "",
+    main_author: str | None = None,
+    statement_of_responsibility: str | None = None,
+    publisher: str | None = None,
+    publication_year: int | None = None,
+) -> MarcRecord:
+    return MarcRecord(
+        control_id="m",
+        title=title,
+        title_main=title,
+        main_author=main_author,
+        statement_of_responsibility=statement_of_responsibility,
+        publisher=publisher,
+        publication_year=publication_year,
+    )
+
+
+def test_candidates_for_returns_year_and_title_token_sharer(tmp_path: Path) -> None:
+    """A title token shared with UUID-0001 in the 1940 bucket retrieves it."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="An illustrated study of widgets", publication_year=1940)
+        records = list(lookup.candidates_for(marc))
+    assert [r.uuid for r in records] == ["UUID-0001"]
+
+
+def test_candidates_for_matches_via_author_token(tmp_path: Path) -> None:
+    """An author token (no shared title token) still retrieves the candidate."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="Totally different heading", main_author="Smith", publication_year=1940)
+        records = list(lookup.candidates_for(marc))
+    assert [r.uuid for r in records] == ["UUID-0001"]
+
+
+def test_candidates_for_matches_via_sor_author_token(tmp_path: Path) -> None:
+    """Statement-of-responsibility tokens feed the author retrieval path."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(
+            title="Totally different heading",
+            statement_of_responsibility="by John Smith",
+            publication_year=1940,
+        )
+        records = list(lookup.candidates_for(marc))
+    assert [r.uuid for r in records] == ["UUID-0001"]
+
+
+def test_candidates_for_matches_via_publisher_token(tmp_path: Path) -> None:
+    """A publisher token (no shared title/author token) retrieves the candidate."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="Totally different heading", publisher="Acme", publication_year=1940)
+        records = list(lookup.candidates_for(marc))
+    assert [r.uuid for r in records] == ["UUID-0001"]
+
+
+def test_candidates_for_intersects_year_and_token(tmp_path: Path) -> None:
+    """A shared token but a non-matching year yields nothing (intersection)."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="A study of widgets", publication_year=1962)
+        records = list(lookup.candidates_for(marc))
+    assert records == []
+
+
+def test_candidates_for_yields_nothing_without_shared_token(tmp_path: Path) -> None:
+    """A correct year but no shared token yields nothing (token set empty)."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="Zzz qqq xyzzy", publication_year=1940)
+        records = list(lookup.candidates_for(marc))
+    assert records == []
+
+
+def test_candidates_for_yields_nothing_without_publication_year(tmp_path: Path) -> None:
+    """No publication_year short-circuits to an empty iterator."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="A study of widgets", publication_year=None)
+        records = list(lookup.candidates_for(marc))
+    assert records == []
+
+
+def test_candidates_for_yields_nothing_when_year_bucket_empty(tmp_path: Path) -> None:
+    """A year with no registrations yields nothing even with shared tokens."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="A study of widgets", publication_year=1800)
+        records = list(lookup.candidates_for(marc))
+    assert records == []
+
+
+def test_candidates_for_window_widens_year_set(tmp_path: Path) -> None:
+    """A non-zero window pulls in a token sharer from an adjacent year.
+
+    UUID-0011 ("Histoire de la folie", 1962) shares the ``folie`` token; a
+    1963 query with window 1 reaches the 1962 bucket and retrieves it.
+    """
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="folie", publication_year=1963)
+        zero_window = list(lookup.candidates_for(marc, window=0))
+        widened = list(lookup.candidates_for(marc, window=1))
+    assert zero_window == []
+    assert [r.uuid for r in widened] == ["UUID-0011"]
+
+
+def test_candidates_for_skips_uuid_with_no_registration(tmp_path: Path) -> None:
+    """A posting that points at a missing registration is skipped."""
+    out_path = _build_tiny_index(tmp_path)
+    from pd_matcher.index.codec import encode_uuid_list
+    from pd_matcher.index.codec import encode_year_key
+
+    with NyplIndexStore(out_path) as store, store.write_transaction():
+        # Plant a uuid in both the 1940 year bucket and the title index so the
+        # intersection contains it, but never write a reg_by_id record for it.
+        store.reg_by_year.put(encode_year_key(1940), encode_uuid_list(("UUID-GHOST",)))
+        store.title_index.put(b"widgets", encode_uuid_list(("UUID-GHOST",)))
+
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="widgets", publication_year=1940)
+        records = list(lookup.candidates_for(marc))
+    assert records == []
+
+
 def test_stats_reflect_build_report(tmp_path: Path) -> None:
     out_path = _build_tiny_index(tmp_path)
     with NyplIndexLookup(out_path) as lookup:
         stats = lookup.stats()
-    assert stats.schema_version == 2
+    assert stats.schema_version == 3
     assert stats.registrations_written == 9
     assert stats.renewals_written == 4
     assert stats.renewal_joins == 2

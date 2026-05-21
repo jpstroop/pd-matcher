@@ -58,12 +58,40 @@ def test_store_sub_dbs_are_isolated(tmp_path: Path) -> None:
             store.ren_by_id.put(b"shared_key", b"ren_value")
             store.reg_by_year.put(b"shared_key", b"year_value")
             store.ren_by_oreg.put(b"shared_key", b"oreg_value")
+            store.title_index.put(b"shared_key", b"title_value")
+            store.author_index.put(b"shared_key", b"author_value")
+            store.publisher_index.put(b"shared_key", b"publisher_value")
             store.meta.put(b"shared_key", b"meta_value")
         assert store.reg_by_id.get(b"shared_key") == b"reg_value"
         assert store.ren_by_id.get(b"shared_key") == b"ren_value"
         assert store.reg_by_year.get(b"shared_key") == b"year_value"
         assert store.ren_by_oreg.get(b"shared_key") == b"oreg_value"
+        assert store.title_index.get(b"shared_key") == b"title_value"
+        assert store.author_index.get(b"shared_key") == b"author_value"
+        assert store.publisher_index.get(b"shared_key") == b"publisher_value"
         assert store.meta.get(b"shared_key") == b"meta_value"
+
+
+def test_store_token_indexes_round_trip_uuid_list_postings(tmp_path: Path) -> None:
+    """The three inverted indexes round-trip encoded uuid-list postings."""
+    from pd_matcher.index.codec import decode_uuid_list
+    from pd_matcher.index.codec import encode_uuid_list
+
+    with NyplIndexStore(tmp_path / "env") as store:
+        with store.write_transaction():
+            store.title_index.put(b"widgets", encode_uuid_list(("u1", "u2")))
+            store.author_index.put(b"smith", encode_uuid_list(("u1",)))
+            store.publisher_index.put(b"acme", encode_uuid_list(("u3", "u4", "u1")))
+        title_blob = store.title_index.get(b"widgets")
+        author_blob = store.author_index.get(b"smith")
+        publisher_blob = store.publisher_index.get(b"acme")
+        assert title_blob is not None
+        assert author_blob is not None
+        assert publisher_blob is not None
+        assert decode_uuid_list(title_blob) == ("u1", "u2")
+        assert decode_uuid_list(author_blob) == ("u1",)
+        assert decode_uuid_list(publisher_blob) == ("u3", "u4", "u1")
+        assert store.title_index.get(b"absent") is None
 
 
 def test_store_readonly_rejects_writes(tmp_path: Path) -> None:

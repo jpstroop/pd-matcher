@@ -33,7 +33,11 @@ from pd_matcher.index.codec import encode_ren
 from pd_matcher.index.codec import encode_uuid_list
 from pd_matcher.index.codec import encode_year_key
 from pd_matcher.index.codec import make_renewal_key
+from pd_matcher.index.keys import author_keys
+from pd_matcher.index.keys import publisher_keys
+from pd_matcher.index.keys import title_keys
 from pd_matcher.index.store import NyplIndexStore
+from pd_matcher.index.store import _SubDb
 from pd_matcher.models import index_reg
 from pd_matcher.parsers.nypl_reg import iter_nypl_reg_directory
 from pd_matcher.parsers.nypl_ren import iter_nypl_ren_directory
@@ -47,6 +51,22 @@ _META_REG_COUNT_KEY = b"registrations_written"
 _META_REN_COUNT_KEY = b"renewals_written"
 _META_RENEWAL_JOINS_KEY = b"renewal_joins"
 _META_YEAR_BUCKETS_KEY = b"year_buckets"
+
+
+class _IngestResult(Struct, frozen=True, forbid_unknown_fields=True):
+    """Aggregates collected during a single registration ingest pass.
+
+    ``year_buckets`` and the three token-postings maps are accumulated in
+    memory while ``reg_by_id`` is written, then flushed to their respective
+    sub-DBs once the streaming pass completes.
+    """
+
+    written: int
+    joins: int
+    year_buckets: dict[int, list[str]]
+    title_postings: dict[str, list[str]]
+    author_postings: dict[str, list[str]]
+    publisher_postings: dict[str, list[str]]
 
 
 class BuildReport(Struct, frozen=True, forbid_unknown_fields=True):
@@ -131,21 +151,38 @@ def _ingest_renewals(
         unbind_contextvars("phase")
 
 
+def _accumulate_postings(
+    postings: dict[str, list[str]],
+    tokens: frozenset[str],
+    uuid: str,
+) -> None:
+    """Append ``uuid`` to the posting list of every token in ``tokens``."""
+    for token in tokens:
+        postings.setdefault(token, []).append(uuid)
+
+
 def _ingest_registrations(
     store: NyplIndexStore,
     reg_dir: Path,
-) -> tuple[int, int, dict[int, list[str]]]:
-    """Stream registrations into ``reg_by_id`` and collect year buckets.
+) -> _IngestResult:
+    """Stream registrations into ``reg_by_id`` and collect index aggregates.
 
-    Returns a tuple of ``(records_written, renewal_joins, year_buckets)``.
-    Records with no ``reg_year`` are skipped from the year-bucket index but
-    still written to ``reg_by_id`` so they can be looked up by uuid.
+    Returns an :class:`_IngestResult` carrying the record/join counts, the
+    year buckets, and the three token-postings maps (title, author, and
+    publisher). Records with no ``reg_year`` are skipped from the year-bucket
+    index but still written to ``reg_by_id`` so they can be looked up by uuid.
+    Publisher postings draw tokens from both ``publisher_names`` and
+    ``claimants`` so either side of a registration's publisher signal can
+    retrieve the record.
     """
     bind_contextvars(phase="registrations")
     try:
         written = 0
         joins = 0
         year_buckets: dict[int, list[str]] = {}
+        title_postings: dict[str, list[str]] = {}
+        author_postings: dict[str, list[str]] = {}
+        publisher_postings: dict[str, list[str]] = {}
         with store.write_transaction():
             for record in iter_nypl_reg_directory(reg_dir):
                 was_renewed = False
@@ -158,14 +195,31 @@ def _ingest_registrations(
                 store.reg_by_id.put(record.uuid.encode("utf-8"), encode_reg(indexed))
                 if record.reg_year is not None:
                     year_buckets.setdefault(record.reg_year, []).append(record.uuid)
+                _accumulate_postings(title_postings, title_keys(record.title), record.uuid)
+                _accumulate_postings(author_postings, author_keys(record.author_name), record.uuid)
+                publisher_tokens: frozenset[str] = frozenset().union(
+                    *(publisher_keys(value) for value in record.publisher_names),
+                    *(publisher_keys(value) for value in record.claimants),
+                )
+                _accumulate_postings(publisher_postings, publisher_tokens, record.uuid)
                 written += 1
         _LOGGER.info(
             "index.registrations.ingested",
             count=written,
             renewal_joins=joins,
             year_buckets=len(year_buckets),
+            title_tokens=len(title_postings),
+            author_tokens=len(author_postings),
+            publisher_tokens=len(publisher_postings),
         )
-        return written, joins, year_buckets
+        return _IngestResult(
+            written=written,
+            joins=joins,
+            year_buckets=year_buckets,
+            title_postings=title_postings,
+            author_postings=author_postings,
+            publisher_postings=publisher_postings,
+        )
     finally:
         unbind_contextvars("phase")
 
@@ -181,6 +235,31 @@ def _flush_year_buckets(store: NyplIndexStore, year_buckets: dict[int, list[str]
         bucket_count = len(year_buckets)
         _LOGGER.info("index.year_buckets.flushed", count=bucket_count)
         return bucket_count
+    finally:
+        unbind_contextvars("phase")
+
+
+def _flush_token_index(
+    store: NyplIndexStore,
+    sub_db: _SubDb,
+    postings: dict[str, list[str]],
+    *,
+    name: str,
+) -> int:
+    """Write each token's posting list to ``sub_db`` and return the token count.
+
+    Mirrors :func:`_flush_year_buckets`: a single write transaction stores
+    ``token (utf-8) -> encode_uuid_list(uuids)`` for every accumulated token.
+    """
+    bind_contextvars(phase=f"token_index.{name}")
+    try:
+        with store.write_transaction():
+            for token in sorted(postings):
+                uuids = tuple(postings[token])
+                sub_db.put(token.encode("utf-8"), encode_uuid_list(uuids))
+        token_count = len(postings)
+        _LOGGER.info("index.token_index.flushed", index=name, count=token_count)
+        return token_count
     finally:
         unbind_contextvars("phase")
 
@@ -230,7 +309,7 @@ def build_index(
     reg_dir: Path,
     ren_dir: Path,
     out_path: Path,
-    schema_version: int = 2,
+    schema_version: int = 3,
     force: bool = False,
 ) -> BuildReport:
     """Materialise the LMDB index from the two CCE source directories.
@@ -269,32 +348,37 @@ def build_index(
 
     with NyplIndexStore(out_path, readonly=False) as store:
         renewals_written = _ingest_renewals(store, ren_dir)
-        registrations_written, renewal_joins, year_buckets = _ingest_registrations(store, reg_dir)
-        bucket_count = _flush_year_buckets(store, year_buckets)
+        ingest = _ingest_registrations(store, reg_dir)
+        bucket_count = _flush_year_buckets(store, ingest.year_buckets)
+        _flush_token_index(store, store.title_index, ingest.title_postings, name="title")
+        _flush_token_index(store, store.author_index, ingest.author_postings, name="author")
+        _flush_token_index(
+            store, store.publisher_index, ingest.publisher_postings, name="publisher"
+        )
         _write_meta(
             store,
             schema_version=schema_version,
             source_hash=source_hash,
-            registrations=registrations_written,
+            registrations=ingest.written,
             renewals=renewals_written,
-            renewal_joins=renewal_joins,
+            renewal_joins=ingest.joins,
             year_buckets=bucket_count,
         )
 
     duration = perf_counter() - start
     _LOGGER.info(
         "index.build.complete",
-        registrations=registrations_written,
+        registrations=ingest.written,
         renewals=renewals_written,
-        renewal_joins=renewal_joins,
+        renewal_joins=ingest.joins,
         year_buckets=bucket_count,
         duration_seconds=duration,
     )
     return BuildReport(
         skipped=False,
-        registrations_written=registrations_written,
+        registrations_written=ingest.written,
         renewals_written=renewals_written,
-        renewal_joins=renewal_joins,
+        renewal_joins=ingest.joins,
         year_buckets=bucket_count,
         duration_seconds=duration,
     )

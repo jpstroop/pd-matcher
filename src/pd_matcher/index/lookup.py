@@ -21,8 +21,13 @@ from pd_matcher.index.codec import decode_reg
 from pd_matcher.index.codec import decode_ren
 from pd_matcher.index.codec import decode_uuid_list
 from pd_matcher.index.codec import encode_year_key
+from pd_matcher.index.keys import author_keys
+from pd_matcher.index.keys import publisher_keys
+from pd_matcher.index.keys import title_keys
 from pd_matcher.index.store import NyplIndexStore
+from pd_matcher.index.store import _SubDb
 from pd_matcher.models import IndexedNyplRegRecord
+from pd_matcher.models import MarcRecord
 from pd_matcher.models import NyplRenRecord
 
 _META_SCHEMA_VERSION_KEY = b"schema_version"
@@ -126,6 +131,80 @@ class NyplIndexLookup:
                 record = self.get_registration(uuid)
                 if record is not None:
                     yield record
+
+    def _year_candidates(self, year: int, window: int) -> set[str]:
+        """Return the union of uuids in every year bucket across the window."""
+        candidates: set[str] = set()
+        for candidate_year in range(year - window, year + window + 1):
+            blob = self._store.reg_by_year.get(encode_year_key(candidate_year))
+            if blob is None:
+                continue
+            candidates.update(decode_uuid_list(blob))
+        return candidates
+
+    @staticmethod
+    def _postings(sub_db: _SubDb, token: str) -> tuple[str, ...]:
+        """Return the posting list for ``token`` in ``sub_db`` (empty if absent)."""
+        blob = sub_db.get(token.encode("utf-8"))
+        if blob is None:
+            return ()
+        return decode_uuid_list(blob)
+
+    def _token_candidates(self, marc: MarcRecord) -> set[str]:
+        """Return the union of every registration sharing a query token.
+
+        Title tokens come from ``marc.title``; author tokens from both
+        ``marc.main_author`` and ``marc.statement_of_responsibility``;
+        publisher tokens from ``marc.publisher``. Each token's posting list
+        is fetched from the matching inverted sub-DB and unioned together.
+        """
+        candidates: set[str] = set()
+        for token in title_keys(marc.title):
+            candidates.update(self._postings(self._store.title_index, token))
+        author_tokens = author_keys(marc.main_author) | author_keys(
+            marc.statement_of_responsibility
+        )
+        for token in author_tokens:
+            candidates.update(self._postings(self._store.author_index, token))
+        for token in publisher_keys(marc.publisher):
+            candidates.update(self._postings(self._store.publisher_index, token))
+        return candidates
+
+    def candidates_for(
+        self,
+        marc: MarcRecord,
+        window: int = 0,
+    ) -> Iterator[IndexedNyplRegRecord]:
+        """Yield registrations sharing a year AND at least one field token.
+
+        Candidate retrieval (cheap) is separated from scoring (expensive):
+        rather than scoring an entire year bucket, only registrations that
+        both fall inside the year window and share a title/author/publisher
+        token with ``marc`` are returned. The token side is a UNION across
+        all query tokens (favouring recall); the final candidate set is the
+        INTERSECTION of the year set and the token set.
+
+        Args:
+            marc: The MARC record to retrieve candidates for.
+            window: Inclusive year radius; ``0`` restricts to the exact year.
+
+        Yields:
+            :class:`IndexedNyplRegRecord` instances, deduplicated by uuid.
+            Nothing is yielded when ``marc`` has no ``publication_year``,
+            when the year set is empty, or when the record shares no token.
+        """
+        if marc.publication_year is None:
+            return
+        year_set = self._year_candidates(marc.publication_year, window)
+        if not year_set:
+            return
+        token_set = self._token_candidates(marc)
+        if not token_set:
+            return
+        for uuid in year_set & token_set:
+            record = self.get_registration(uuid)
+            if record is not None:
+                yield record
 
     def stats(self) -> IndexStats:
         """Return the build metadata persisted alongside the index.
