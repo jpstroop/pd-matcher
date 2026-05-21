@@ -18,8 +18,14 @@ the raw leader, 008, and 245):
 2. **Supported language** — 008 positions 35:38 are one of
    `eng`, `fre`, `ger`, `spa`, `ita`.
 3. **Publication year** — 008 positions 7:11 parse as a 4-digit integer in the
-   inclusive range `[1923, 1977]`. Unknown/partial values (`uuuu`, `||||`,
-   blanks, etc.) are rejected.
+   inclusive range `[min_year, 1977]`. Unknown/partial values (`uuuu`, `||||`,
+   blanks, etc.) are rejected. The **lower bound is the moving wall**, not a
+   fixed year: it defaults to `today.year - 95` (= 1931 as of 2026) and is
+   recomputed on every run, so it advances each January 1. Works published at or
+   before the wall are already public domain by age and carry no copyright-status
+   signal for a matching dataset, so keeping them would only dilute the corpus.
+   The upper bound stays `1977` (the last CCE renewal year of interest). Pass
+   `--min-year` to override the default (e.g. for reproducible runs).
 4. **Not a government publication** — 008 position 28 must be blank (`" "`) or
    `"|"`. Any coded value (`a c f i l m o s u z` …) is dropped. U.S. (and other)
    government works are public domain by statute and were never registered in
@@ -45,26 +51,27 @@ compressed archive:
 
 Disk peak is therefore ~one compressed dump file.
 
-## Per-language partitioning
+## Per-(language, decade) quotas
 
 Survivors are partitioned by their 008 language code into per-language
-subdirectories, each with its own cap. This lets the labeled dataset be built
-English-first and then extended to the harder languages. Defaults are tuned so
-the common case (English) dominates while the long tail is still collected:
+subdirectories (output layout unchanged — see below), but **sampling is
+constrained per (language, decade)** rather than by a flat per-language cap.
+Each eligible record's decade bucket is `(year // 10) * 10`, so the buckets are
+`1930, 1940, 1950, 1960, 1970` (the `1930` bucket only holds `1931–1939` given
+the moving wall, and `1970` holds `1970–1977`). The bucket set is derived from
+`min_year`..`1977`, so it stays correct as the wall moves.
 
-| Language | Flag        | Default cap |
-| -------- | ----------- | ----------- |
-| `eng`    | `--cap-eng` | 40000       |
-| `fre`    | `--cap-fre` | 2500        |
-| `ger`    | `--cap-ger` | 2500        |
-| `spa`    | `--cap-spa` | 2500        |
-| `ita`    | `--cap-ita` | 2500        |
+A single `--per-decade-cap` (default **20000**) applies to every
+`(target language, decade)` pair. An eligible record is kept only while its own
+`(language, decade)` bucket is below the quota; otherwise it is skipped. This
+prevents any one decade from dominating a language's slice and avoids
+overweighting the high-volume English mid-century years.
 
-Each eligible record is routed to its language's writer only while that
-language is configured and below its cap. The run stops when **every**
-configured language has reached its cap, or dumps are exhausted, or
-`--max-dumps` is hit. Rare languages usually never fill, so in practice the run
-scans every dump to gather as many of those as exist — that is intentional.
+The five target languages are `eng`, `fre`, `ger`, `spa`, `ita`. The run stops
+when **every** `(language, decade)` bucket has reached the quota, or dumps are
+exhausted, or `--max-dumps` is hit. The non-English buckets essentially never
+fill, so in practice the run scans every dump — that is intentional: it gathers
+every available non-English book and as many English-per-decade as exist.
 
 ## Output layout
 
@@ -82,7 +89,9 @@ data/candidates/
 ```
 
 A language subdirectory is created only when at least one record is written to
-it.
+it. The decade is a **sampling constraint only** — there are no decade
+subdirectories; records of all decades for a language are interleaved across
+that language's shards.
 
 ## Usage
 
@@ -91,18 +100,24 @@ cd groundtruth
 pdm install
 pdm run pd-groundtruth acquire --out-dir data/candidates \
   [--manifest-url URL] \
-  [--cap-eng 40000] [--cap-fre 2500] [--cap-ger 2500] [--cap-spa 2500] [--cap-ita 2500] \
+  [--per-decade-cap 20000] \
+  [--min-year 1931] \
   [--max-dumps N]
 ```
 
-During a run each completed dump logs a single progress line, e.g.:
+`--min-year` defaults to the moving wall (`today.year - 95`); omit it for a
+normal run and pass it only for reproducible/replay runs.
+
+During a run each completed dump logs a single progress line showing English's
+per-decade fill plus per-language totals for the rest, e.g.:
 
 ```
-dump done: scanned=124301 running_total=124301 eng=12500/40000 fre=831/2500 ger=1402/2500 spa=560/2500 ita=77/2500
+dump done: scanned=124301 running_total=124301 eng [1930]=4101/20000 [1940]=8800/20000 [1950]=12000/20000 [1960]=20000/20000 [1970]=20000/20000 | fre total=412 ger total=380 spa total=151 ita total=77
 ```
 
-with `full=[...]` appended as languages reach their caps, plus a final summary
-line reporting per-language totals and the stop reason.
+with a `bucket full: eng[1960] reached quota 20000` notice logged the first time
+each `(language, decade)` bucket fills, plus a final multi-line summary table
+reporting every per-language per-decade fill and the stop reason.
 
 ## Development
 
