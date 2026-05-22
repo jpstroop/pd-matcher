@@ -119,6 +119,32 @@ class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
     created_at: str
 
 
+class LanguageProgress(Struct, frozen=True, forbid_unknown_fields=True):
+    """Per-language pair totals and labeled counts for the stats page."""
+
+    language: str
+    total: int
+    labeled: int
+
+
+class ProgressCounts(Struct, frozen=True, forbid_unknown_fields=True):
+    """A running tally of review progress across the whole queue.
+
+    ``labeled`` counts distinct ``pair_id`` values with at least one ``label``
+    row; ``match`` / ``no_match`` / ``unsure`` count pairs by their *current*
+    verdict (the latest label by ``(labeled_at, id)``), so re-labels move a
+    pair between buckets without double-counting.
+    """
+
+    total: int
+    labeled: int
+    remaining: int
+    match: int
+    no_match: int
+    unsure: int
+    by_language: tuple[LanguageProgress, ...]
+
+
 def _now() -> str:
     """Return the current UTC instant as an ISO-8601 string."""
     return datetime.now(UTC).isoformat()
@@ -274,6 +300,72 @@ class ReviewDb:
             return None
         return _row_to_pair(row)
 
+    def get_pair(self, pair_id: int) -> ReviewPairRow | None:
+        """Return one ``review_pair`` by id, or ``None`` if it does not exist."""
+        row = self._conn.execute(
+            "SELECT * FROM review_pair WHERE id = ?",
+            (pair_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return _row_to_pair(row)
+
+    def progress(self) -> ProgressCounts:
+        """Return a running tally of labeling progress across the queue.
+
+        Counts distinct labeled pairs and groups current verdicts (the latest
+        label per ``pair_id``) into match / no_match / unsure buckets, plus a
+        per-language total/labeled breakdown for the stats page.
+        """
+        total = self._conn.execute("SELECT COUNT(*) AS n FROM review_pair").fetchone()["n"]
+        labeled = self._conn.execute("SELECT COUNT(DISTINCT pair_id) AS n FROM label").fetchone()[
+            "n"
+        ]
+        verdict_rows = self._conn.execute(
+            """
+            SELECT cur.verdict AS verdict, COUNT(*) AS n
+            FROM (
+                SELECT l.pair_id, l.verdict
+                FROM label l
+                JOIN (
+                    SELECT pair_id, MAX(labeled_at) AS max_at, MAX(id) AS max_id
+                    FROM label GROUP BY pair_id
+                ) latest
+                  ON l.pair_id = latest.pair_id AND l.id = latest.max_id
+            ) cur
+            GROUP BY cur.verdict
+            """
+        ).fetchall()
+        by_verdict = {row["verdict"]: row["n"] for row in verdict_rows}
+        language_rows = self._conn.execute(
+            """
+            SELECT rp.language AS language,
+                   COUNT(*) AS total,
+                   COUNT(DISTINCT l.pair_id) AS labeled
+            FROM review_pair rp
+            LEFT JOIN label l ON l.pair_id = rp.id
+            GROUP BY rp.language
+            ORDER BY rp.language
+            """
+        ).fetchall()
+        by_language = tuple(
+            LanguageProgress(
+                language=row["language"],
+                total=row["total"],
+                labeled=row["labeled"],
+            )
+            for row in language_rows
+        )
+        return ProgressCounts(
+            total=total,
+            labeled=labeled,
+            remaining=total - labeled,
+            match=by_verdict.get(VERDICT_MATCH, 0),
+            no_match=by_verdict.get(VERDICT_NO_MATCH, 0),
+            unsure=by_verdict.get(VERDICT_UNSURE, 0),
+            by_language=by_language,
+        )
+
     def add_label(self, pair_id: int, verdict: str, note: str | None = None) -> int:
         """Append a verdict for ``pair_id`` and return the new ``label.id``.
 
@@ -297,7 +389,9 @@ __all__ = [
     "VERDICT_MATCH",
     "VERDICT_NO_MATCH",
     "VERDICT_UNSURE",
+    "LanguageProgress",
     "PairInsert",
+    "ProgressCounts",
     "ReviewDb",
     "ReviewPairRow",
 ]

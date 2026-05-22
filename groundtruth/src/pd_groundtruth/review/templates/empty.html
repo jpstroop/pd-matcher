@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel" style="text-align: center; padding: 3rem;">
+  <p class="big">All done</p>
+  {% if filters.language or filters.band %}
+  <p class="hint">No unlabeled pairs remain for this filter
+    ({% if filters.language %}lang={{ filters.language }}{% endif %}{% if filters.band %} band={{ filters.band }}{% endif %}).
+    <a href="/">Clear filter</a> to review the rest.</p>
+  {% else %}
+  <p class="hint">Every pair in the queue has been labeled. See <a href="/stats">stats</a>.</p>
+  {% endif %}
+</section>
+{% endblock %}

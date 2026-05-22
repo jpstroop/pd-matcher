@@ -18,6 +18,7 @@ from pd_groundtruth.acquire import default_min_year
 from pd_groundtruth.build_queue import build_queue
 from pd_groundtruth.build_queue import load_default_ruleset
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
+from pd_groundtruth.review.server import serve
 from pd_groundtruth.sampling import default_budget
 from pd_groundtruth.sampling import scale_budget
 
@@ -27,6 +28,8 @@ _DEFAULT_PER_DECADE_CAP = 20000
 _DEFAULT_SEED = 42
 _DEFAULT_WORKERS = 8
 _DEFAULT_SAMPLE_PER_LANG = 1500
+_DEFAULT_REVIEW_HOST = "127.0.0.1"
+_DEFAULT_REVIEW_PORT = 8000
 
 
 @app.callback()
@@ -139,3 +142,18 @@ def build_queue_command(
         f"pairs_written={summary.pairs_written} "
         f"strata=[{strata}]"
     )
+
+
+@app.command(name="review")
+def review_command(
+    db: Annotated[Path, Option("--db", help="SQLite review database produced by `build-queue`.")],
+    host: Annotated[
+        str, Option("--host", help="Interface to bind the local review server.")
+    ] = _DEFAULT_REVIEW_HOST,
+    port: Annotated[int, Option("--port", help="Port for the local review server.")] = (
+        _DEFAULT_REVIEW_PORT
+    ),
+) -> None:
+    """Launch the local keyboard-driven review UI over a review database."""
+    echo(f"serving review UI for {db} at http://{host}:{port}")
+    serve(db, host=host, port=port)

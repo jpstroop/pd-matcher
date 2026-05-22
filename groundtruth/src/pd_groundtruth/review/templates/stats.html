@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h2>Progress</h2>
+  <p><span class="big">{{ counts.labeled }}</span> labeled · {{ counts.remaining }} remaining · {{ counts.total }} total</p>
+  <table class="stats">
+    <tr><th>verdict</th><th>count</th></tr>
+    <tr><td>match</td><td>{{ counts.match }}</td></tr>
+    <tr><td>no_match</td><td>{{ counts.no_match }}</td></tr>
+    <tr><td>unsure</td><td>{{ counts.unsure }}</td></tr>
+  </table>
+</section>
+
+<section class="panel" style="margin-top: 1rem;">
+  <h2>By language</h2>
+  <table class="stats">
+    <tr><th>language</th><th>labeled</th><th>total</th><th>remaining</th></tr>
+    {% for lang in counts.by_language %}
+    <tr>
+      <td>{{ lang.language }}</td>
+      <td>{{ lang.labeled }}</td>
+      <td>{{ lang.total }}</td>
+      <td>{{ lang.total - lang.labeled }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endblock %}

@@ -6,6 +6,7 @@ from pytest import raises
 
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
+from pd_groundtruth.review_db import VERDICT_UNSURE
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
 
@@ -151,6 +152,68 @@ def test_commit_persists_across_connections(tmp_path: Path) -> None:
         db.commit()
     with ReviewDb.connect(path) as reopened:
         assert reopened.stratum_counts()[("eng", "ge90")] == 1
+
+
+def test_get_pair_returns_row_or_none(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair(control_id="a"))
+        row = db.get_pair(pair_id)
+        assert row is not None
+        assert row.id == pair_id
+        assert row.marc_control_id == "a"
+        assert db.get_pair(9999) is None
+
+
+def test_progress_empty_db_is_all_zero(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        counts = db.progress()
+    assert counts.total == 0
+    assert counts.labeled == 0
+    assert counts.remaining == 0
+    assert counts.match == 0
+    assert counts.no_match == 0
+    assert counts.unsure == 0
+    assert counts.by_language == ()
+
+
+def test_progress_counts_current_verdicts_and_remaining(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        a = db.insert_pair(_pair(language="eng", control_id="a", nypl_uuid="u-a"))
+        b = db.insert_pair(_pair(language="eng", control_id="b", nypl_uuid="u-b"))
+        db.insert_pair(_pair(language="fre", control_id="c", nypl_uuid="u-c"))
+        db.add_label(a, VERDICT_MATCH)
+        db.add_label(b, VERDICT_UNSURE)
+        counts = db.progress()
+    assert counts.total == 3
+    assert counts.labeled == 2
+    assert counts.remaining == 1
+    assert counts.match == 1
+    assert counts.unsure == 1
+    assert counts.no_match == 0
+
+
+def test_progress_relabel_uses_latest_verdict(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair())
+        db.add_label(pair_id, VERDICT_MATCH)
+        db.add_label(pair_id, VERDICT_NO_MATCH)
+        counts = db.progress()
+    assert counts.labeled == 1
+    assert counts.match == 0
+    assert counts.no_match == 1
+
+
+def test_progress_per_language_totals_and_labeled(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        eng_a = db.insert_pair(_pair(language="eng", control_id="a", nypl_uuid="u-a"))
+        db.insert_pair(_pair(language="eng", control_id="b", nypl_uuid="u-b"))
+        db.insert_pair(_pair(language="fre", control_id="c", nypl_uuid="u-c"))
+        db.add_label(eng_a, VERDICT_MATCH)
+        by_language = {lang.language: lang for lang in db.progress().by_language}
+    assert by_language["eng"].total == 2
+    assert by_language["eng"].labeled == 1
+    assert by_language["fre"].total == 1
+    assert by_language["fre"].labeled == 0
 
 
 def test_round_trip_preserves_all_columns(tmp_path: Path) -> None:
