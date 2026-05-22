@@ -2,11 +2,19 @@
 
 A standalone PDM subproject that builds the public-domain **ground-truth
 corpus** for [`pd-matcher`](..). It streams Princeton `bibdata` MARC dumps,
-keeps only the in-scope records, and writes the survivors as lossless MARCXML
-shards for a later human-review phase (Phase 2).
+keeps only the in-scope records, runs them through the matcher to assemble a
+stratified review queue, and serves a keyboard-driven web UI where a human
+labels each `(MARC, CCE-candidate)` pair. Those labels **are** the ground truth.
+
+The workflow is three commands, run in order:
+
+1. **`acquire`** — pull + filter Princeton MARC dumps into MARCXML shards.
+2. **`build-queue`** — match the shards against the CCE index and stratify the
+   results into a `review.db` SQLite queue.
+3. **`review`** — launch the local web UI and label the queued pairs.
 
 This project is intentionally separate from the core `pd-matcher`: it carries
-heavier dependencies (`requests` now, a review UI later) and a relaxed coverage
+heavier dependencies (`requests`, `fastapi`, `uvicorn`) and a relaxed coverage
 bar, so its configuration never touches the core's strict `pyproject.toml`.
 
 ## Filter criteria
@@ -118,6 +126,75 @@ dump done: scanned=124301 running_total=124301 eng [1930]=4101/20000 [1940]=8800
 with a `bucket full: eng[1960] reached quota 20000` notice logged the first time
 each `(language, decade)` bucket fills, plus a final multi-line summary table
 reporting every per-language per-decade fill and the stop reason.
+
+## Build the review queue
+
+`build-queue` matches the acquired shards against the CCE index (the same engine
+the production matcher uses) and writes a **stratified** sample of
+`(MARC, CCE-candidate)` pairs into a `review.db` SQLite file — the queue the UI
+serves. Stratification is per `(language, confidence-band)` so labeling effort is
+spread across the score range rather than piling onto easy high-confidence pairs.
+
+```bash
+cd groundtruth
+pdm run pd-groundtruth build-queue \
+  --pool data/candidates \
+  --index ../caches/nypl.lmdb \
+  --out data/review.db \
+  [--budget 2000] \
+  [--sample-per-lang 1500] \
+  [--workers N] \
+  [--seed 42] \
+  [-v | -vv]
+```
+
+`--index` points at the LMDB env produced by `pd-matcher index build`. `--budget`
+scales the per-stratum caps proportionally; `--sample-per-lang` bounds the
+reservoir drawn from each language directory. `-v` adds per-worker throughput
+heartbeats (records/sec + ETA); `-vv` logs every match hit. On completion it
+prints `records_sampled`, `records_matched`, `pairs_written`, and the per-stratum
+counts.
+
+## Review UI
+
+`review` launches a local, keyboard-driven web UI for labeling the queued pairs.
+Each label (**match / no_match / unsure**) is written straight to `review.db`;
+that accumulating set of labels **is** the ground-truth corpus.
+
+```bash
+cd groundtruth
+pdm run pd-groundtruth review --db data/review.db [--host 127.0.0.1] [--port 8000]
+```
+
+Then open <http://127.0.0.1:8000>. Ctrl-C stops the server; labels persist in the
+database.
+
+**Each card** shows the MARC record (left) against the proposed CCE candidate
+(right), the per-field evidence bars, the overall score and confidence band, and
+the **renewal flag** — the public-domain tell (a registration *not* renewed is the
+signal we care about).
+
+**Label with the keyboard** (the UI auto-advances to the next unlabeled pair, and
+every keypress writes to `review.db`):
+
+| key | verdict |
+|---|---|
+| `y` | match |
+| `n` | no_match |
+| `u` | unsure |
+| `s` or space | skip (advance without labeling) |
+
+On-screen buttons do the same.
+
+**Focus a session** with URL filters — useful for the English-first curriculum:
+
+- `…/?language=eng` (or `fre` / `ger` / `spa` / `ita`)
+- add `&band=ge90` (or `b80_90`, `b70_80`, `below`) to drill into one confidence
+  band
+
+**Track progress** at `…/stats`: labeled vs. remaining, the match / no_match /
+unsure tally, broken down per language. Revisit or re-label any specific pair at
+`…/pair/{id}`.
 
 ## Development
 
