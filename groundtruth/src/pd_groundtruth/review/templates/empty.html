@@ -9,5 +9,8 @@
   {% else %}
   <p class="hint">Every pair in the queue has been labeled. See <a href="/stats">stats</a>.</p>
   {% endif %}
+  {% if back_id is not none %}
+  <p class="hint"><a id="back-link" href="/pair/{{ back_id }}{% if filters.query_string() %}?{{ filters.query_string() }}{% endif %}">&larr; Back</a> to the last pair you labeled.</p>
+  {% endif %}
 </section>
 {% endblock %}

@@ -61,16 +61,18 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         with ReviewDb.connect(_db_path(request)) as db:
             row = db.next_unlabeled(language=filters.language, band=filters.band)
             counts = db.progress()
+            back = db.previous_labeled(language=filters.language, band=filters.band)
+        back_id = None if back is None else back.id
         if row is None:
             return templates.TemplateResponse(
                 request,
                 "empty.html",
-                {"filters": filters, "counts": counts},
+                {"filters": filters, "counts": counts, "back_id": back_id},
             )
         return templates.TemplateResponse(
             request,
             "card.html",
-            {"card": build_card(row), "filters": filters, "counts": counts},
+            {"card": build_card(row), "filters": filters, "counts": counts, "back_id": back_id},
         )
 
     @app.get("/pair/{pair_id}", response_class=HTMLResponse)
@@ -81,6 +83,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         with ReviewDb.connect(_db_path(request)) as db:
             row = db.get_pair(pair_id)
             counts = db.progress()
+            back = db.previous_labeled(before=pair_id, language=filters.language, band=filters.band)
+        back_id = None if back is None else back.id
         if row is None:
             return templates.TemplateResponse(
                 request,
@@ -91,7 +95,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "card.html",
-            {"card": build_card(row), "filters": filters, "counts": counts},
+            {"card": build_card(row), "filters": filters, "counts": counts, "back_id": back_id},
         )
 
     @app.post("/label")

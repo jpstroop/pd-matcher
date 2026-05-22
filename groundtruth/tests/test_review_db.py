@@ -228,3 +228,55 @@ def test_round_trip_preserves_all_columns(tmp_path: Path) -> None:
     assert row.cce_regnum == "R12345"
     assert row.evidence_json == '{"title.token_set": 0.91}'
     assert row.created_at != ""
+
+
+def test_previous_labeled_none_when_nothing_labeled(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        assert db.previous_labeled() is None
+
+
+def test_previous_labeled_returns_most_recent_action(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        db.add_label(first, VERDICT_MATCH)
+        db.add_label(second, VERDICT_NO_MATCH)
+        back = db.previous_labeled()
+        assert back is not None
+        assert back.id == second
+
+
+def test_previous_labeled_chains_backward_with_before(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        db.add_label(first, VERDICT_MATCH)
+        db.add_label(second, VERDICT_NO_MATCH)
+        step_back = db.previous_labeled(before=second)
+        assert step_back is not None
+        assert step_back.id == first
+        assert db.previous_labeled(before=first) is None
+
+
+def test_previous_labeled_follows_relabel_to_front(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        db.add_label(first, VERDICT_MATCH)
+        db.add_label(second, VERDICT_NO_MATCH)
+        db.add_label(first, VERDICT_UNSURE)
+        back = db.previous_labeled()
+        assert back is not None
+        assert back.id == first
+
+
+def test_previous_labeled_respects_language_filter(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        eng = db.insert_pair(_pair(language="eng", control_id="a", nypl_uuid="u-a"))
+        fre = db.insert_pair(_pair(language="fre", control_id="b", nypl_uuid="u-b"))
+        db.add_label(eng, VERDICT_MATCH)
+        db.add_label(fre, VERDICT_MATCH)
+        back = db.previous_labeled(language="eng")
+        assert back is not None
+        assert back.id == eng
