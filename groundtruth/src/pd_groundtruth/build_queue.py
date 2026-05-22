@@ -45,8 +45,9 @@ from pd_matcher.match.pipeline import match_record
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 from pd_matcher.parsers.marc import iter_marc_records
+from pd_matcher.progress import ProgressReporter
 
-from pd_groundtruth.progress import ProgressReporter
+from pd_groundtruth.progress import render_kept_suffix
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import BAND_BELOW
@@ -393,7 +394,6 @@ def build_queue(
     reporter = ProgressReporter(
         logger=_LOGGER,
         total=len(tasks),
-        budget=budget,
         clock=monotonic,
     )
     for outcome in _run_pool(
@@ -414,7 +414,7 @@ def build_queue(
             )
         )
         _tally_kept(kept_by_stratum, outcome, accepted_pair, budget)
-        reporter.update(records_matched, kept_by_stratum)
+        reporter.update(records_matched, detail=render_kept_suffix(budget, kept_by_stratum))
 
     accepted = stratifier.finalize()
     pairs_written = _persist(out_path, accepted, outcomes_by_key, index_path)

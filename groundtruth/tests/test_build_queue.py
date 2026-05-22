@@ -467,7 +467,9 @@ def test_build_queue_logs_progress_during_matching(
 
     messages = [record.getMessage() for record in caplog.records]
     assert any(message.startswith("matching start: total=") for message in messages)
-    assert any(message.startswith("progress  ") for message in messages)
+    progress_lines = [message for message in messages if message.startswith("progress  ")]
+    assert progress_lines
+    assert all("kept: eng[" in message for message in progress_lines)
 
 
 def test_run_pool_empty_tasks_yields_nothing() -> None:
