@@ -16,6 +16,11 @@ from pd_groundtruth.review.app import create_app
 def serve(db_path: Path, host: str, port: int) -> None:
     """Bind ``db_path`` into the app and serve it on ``host:port``.
 
+    A ``Ctrl-C`` (``KeyboardInterrupt``) returns cleanly after uvicorn's own
+    graceful shutdown completes, suppressing only the cosmetic interrupt
+    traceback. Any other failure from :func:`uvicorn.run` (e.g. a bind error)
+    propagates so genuine problems stay visible.
+
     Args:
         db_path: Path to the SQLite ``review.db`` to label against.
         host: Interface to bind (default a loopback address for local use).
@@ -27,7 +32,10 @@ def serve(db_path: Path, host: str, port: int) -> None:
     if not db_path.exists():
         raise FileNotFoundError(f"review database not found: {db_path}")
     application = create_app(db_path)
-    uvicorn_run(application, host=host, port=port)
+    try:
+        uvicorn_run(application, host=host, port=port)
+    except KeyboardInterrupt:
+        print("Stopped.")
 
 
 __all__ = [

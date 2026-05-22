@@ -133,8 +133,8 @@ class ProgressCounts(Struct, frozen=True, forbid_unknown_fields=True):
 
     ``labeled`` counts distinct ``pair_id`` values with at least one ``label``
     row; ``match`` / ``no_match`` / ``unsure`` count pairs by their *current*
-    verdict (the latest label by ``(labeled_at, id)``), so re-labels move a
-    pair between buckets without double-counting.
+    verdict (the latest label by ``MAX(id)``, the monotonic action order), so
+    re-labels move a pair between buckets without double-counting.
     """
 
     total: int
@@ -384,7 +384,7 @@ class ReviewDb:
                 SELECT l.pair_id, l.verdict
                 FROM label l
                 JOIN (
-                    SELECT pair_id, MAX(labeled_at) AS max_at, MAX(id) AS max_id
+                    SELECT pair_id, MAX(id) AS max_id
                     FROM label GROUP BY pair_id
                 ) latest
                   ON l.pair_id = latest.pair_id AND l.id = latest.max_id
