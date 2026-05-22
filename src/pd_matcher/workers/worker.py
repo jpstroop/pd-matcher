@@ -16,6 +16,7 @@ backing pages.
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
+from time import monotonic
 
 from structlog import get_logger
 from structlog.contextvars import bind_contextvars
@@ -42,6 +43,16 @@ from pd_matcher.workers.messages import encode_worker_output
 from pd_matcher.workers.producer import decode_batch
 
 _LOGGER = get_logger(__name__)
+
+_WORKER_LOG_EVERY_N: int = 1000
+
+
+def _worker_rate(processed: int, started_at: float, now: float) -> float:
+    """Return per-worker throughput, falling back to ``0.0`` when idle."""
+    elapsed = now - started_at
+    if elapsed <= 0.0:
+        return 0.0
+    return processed / elapsed
 
 
 def _process_record(
@@ -102,6 +113,21 @@ def _stats_event_for(output: WorkerOutput) -> bytes:
     )
 
 
+def _log_hit(worker_id: int, output: WorkerOutput) -> None:
+    """Emit a per-record ``-vv`` line describing one match outcome."""
+    best = output.match.best
+    reg = "none" if best is None else best.nypl_uuid
+    score = 0.0 if best is None else best.combined.calibrated
+    _LOGGER.info(
+        "worker.hit",
+        worker=worker_id,
+        marc=output.marc.control_id,
+        reg=reg,
+        score=round(score, 4),
+        status=output.assessment.status.value,
+    )
+
+
 def run_worker_loop(
     *,
     lookup: NyplIndexLookup,
@@ -115,6 +141,9 @@ def run_worker_loop(
     output_put: Callable[[bytes], None],
     stats_put: Callable[[bytes], None],
     is_shutdown: Callable[[], bool],
+    worker_id: int = 0,
+    verbosity: int = 0,
+    clock: Callable[[], float] = monotonic,
 ) -> int:
     """Drain the input queue, score records, and forward results.
 
@@ -136,11 +165,20 @@ def run_worker_loop(
         is_shutdown: Zero-arg callable returning ``True`` when shutdown
             has been requested. Checked between batches and between
             records.
+        worker_id: Stable ordinal for this worker, used in per-worker logs.
+        verbosity: ``0`` aggregate-only (no per-worker logs); ``1`` logs a
+            ``worker=<id> processed=<n> rate=<r>/s`` line on start/finish and
+            every :data:`_WORKER_LOG_EVERY_N` records; ``2`` additionally logs
+            one line per record processed.
+        clock: Monotonic clock; injected so per-worker rate is testable.
 
     Returns:
         The number of records processed by this worker.
     """
     combiner = WeightedMeanCombiner(config=config)
+    started_at = clock()
+    if verbosity >= 1:
+        _LOGGER.info("worker.start", worker=worker_id)
     processed = 0
     while True:
         if is_shutdown():
@@ -151,6 +189,13 @@ def run_worker_loop(
         batch = decode_batch(blob)
         for marc in batch:
             if is_shutdown():
+                if verbosity >= 1:
+                    _LOGGER.info(
+                        "worker.finish",
+                        worker=worker_id,
+                        processed=processed,
+                        rate=round(_worker_rate(processed, started_at, clock()), 1),
+                    )
                 return processed
             bind_contextvars(marc_id=marc.control_id)
             try:
@@ -168,8 +213,24 @@ def run_worker_loop(
                 output_put(encode_worker_output(output))
                 stats_put(_stats_event_for(output))
                 processed += 1
+                if verbosity >= 2:
+                    _log_hit(worker_id, output)
+                if verbosity >= 1 and processed % _WORKER_LOG_EVERY_N == 0:
+                    _LOGGER.info(
+                        "worker.progress",
+                        worker=worker_id,
+                        processed=processed,
+                        rate=round(_worker_rate(processed, started_at, clock()), 1),
+                    )
             finally:
                 unbind_contextvars("marc_id")
+    if verbosity >= 1:
+        _LOGGER.info(
+            "worker.finish",
+            worker=worker_id,
+            processed=processed,
+            rate=round(_worker_rate(processed, started_at, clock()), 1),
+        )
     return processed
 
 
@@ -186,12 +247,15 @@ def worker_main(
     output_put: Callable[[bytes], None],
     stats_put: Callable[[bytes], None],
     is_shutdown: Callable[[], bool],
+    worker_id: int = 0,
+    verbosity: int = 0,
 ) -> int:
     """Top-level worker entry point.
 
     Opens the LMDB lookup, compiles the pairing config once, and runs the
-    consume loop until exhaustion or shutdown. Returns the count of
-    processed records.
+    consume loop until exhaustion or shutdown. ``worker_id`` and ``verbosity``
+    flow straight through to :func:`run_worker_loop`'s per-worker logging.
+    Returns the count of processed records.
     """
     pairings = compile_pairings(pairing_config)
     with NyplIndexLookup(index_path) as lookup:
@@ -207,6 +271,8 @@ def worker_main(
             output_put=output_put,
             stats_put=stats_put,
             is_shutdown=is_shutdown,
+            worker_id=worker_id,
+            verbosity=verbosity,
         )
 
 

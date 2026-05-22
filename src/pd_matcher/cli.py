@@ -19,6 +19,7 @@ from os import cpu_count
 from pathlib import Path
 from typing import Annotated
 
+from msgspec import DecodeError
 from msgspec import to_builtins
 from typer import BadParameter
 from typer import Exit
@@ -43,6 +44,9 @@ from pd_matcher.logging_config import configure_logging
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.calibrator import load_calibrator
 from pd_matcher.match.idf import load_or_build_idf
+from pd_matcher.match.prepare import PrepareReport
+from pd_matcher.match.prepare import prepare_marc
+from pd_matcher.match.prepare import read_manifest
 from pd_matcher.workers import RunReport
 from pd_matcher.workers import run_match
 
@@ -60,6 +64,25 @@ _YEAR_WINDOW_MIN: int = 0
 _YEAR_WINDOW_MAX: int = 100
 
 _EVAL_WORKERS_MIN: int = 1
+
+
+class _LogSettings:
+    """Process-wide log settings captured by the root callback.
+
+    Spawned match workers reconfigure logging from scratch, so they need the
+    level and JSON flag the user chose at the root; typer does not thread
+    callback values into subcommands, so they are stashed here on the one
+    instance the callback writes and the subcommands read.
+    """
+
+    __slots__ = ("json_logs", "level")
+
+    def __init__(self) -> None:
+        self.level: str = "INFO"
+        self.json_logs: bool = False
+
+
+_LOG_SETTINGS: _LogSettings = _LogSettings()
 
 
 app: Typer = Typer(
@@ -97,6 +120,8 @@ def _main(
     """Initialize logging before any subcommand runs."""
     effective_level = "WARNING" if quiet else log_level
     configure_logging(level=effective_level, json_output=json_logs)
+    _LOG_SETTINGS.level = effective_level
+    _LOG_SETTINGS.json_logs = json_logs
     if quiet:
         from logging import getLogger
 
@@ -247,6 +272,18 @@ def _format_run_report(report: RunReport, out_path: Path) -> str:
     )
 
 
+def _format_prepare_report(report: PrepareReport) -> str:
+    """Render a :class:`PrepareReport` as a small human-readable summary."""
+    return (
+        f"Prepared: {report.out_dir}\n"
+        f"  skipped: {'yes' if report.skipped else 'no'}\n"
+        f"  records: {report.total_records}\n"
+        f"  chunks: {report.chunk_count}\n"
+        f"  chunk size: {report.chunk_size}\n"
+        f"  duration: {report.duration_seconds:.2f}s"
+    )
+
+
 def _format_eval_report(report: EvalReport) -> str:
     """Render an :class:`EvalReport` as a small human-readable summary."""
     return (
@@ -330,11 +367,70 @@ def index_info(
     echo(_format_index_stats(stats))
 
 
+@app.command("prepare-marc")
+def prepare_marc_command(
+    marc: Annotated[
+        Path,
+        Option("--marc", help="MARCXML file OR directory of *.xml shards."),
+    ],
+    out: Annotated[
+        Path,
+        Option("--out", help="Destination directory for pickled chunks + manifest."),
+    ],
+    chunk_size: Annotated[
+        int,
+        Option("--chunk-size", help="Target records per chunk."),
+    ] = 1000,
+    force: Annotated[
+        bool,
+        Option("--force/--no-force", help="Rebuild even when the prepared cache is current."),
+    ] = False,
+) -> None:
+    """Stream MARCXML into re-runnable pickled chunks for `match --prepared`.
+
+    Examples:
+        pd-matcher prepare-marc \\
+            --marc data/candidates/eng \\
+            --out caches/prepared-eng
+    """
+    if chunk_size < 1:
+        raise _fail(
+            f"--chunk-size: must be a positive integer (got {chunk_size})",
+            code=_ARG_ERROR_EXIT_CODE,
+        )
+    if not marc.exists():
+        raise _fail(f"--marc does not exist: {marc}")
+    try:
+        report = prepare_marc(marc, out, chunk_size=chunk_size, force=force)
+    except OSError as exc:
+        raise _fail(f"prepare-marc failed: {exc}") from exc
+    echo(_format_prepare_report(report))
+
+
 @app.command("match")
 def match(
-    marc: Annotated[Path, Option("--marc", help="MARC XML file.")],
     index: Annotated[Path, Option("--index", help="LMDB index directory.")],
     out: Annotated[Path, Option("--out", help="Output CSV path.")],
+    marc: Annotated[
+        Path | None,
+        Option("--marc", help="MARC XML file (mutually exclusive with --prepared)."),
+    ] = None,
+    prepared: Annotated[
+        Path | None,
+        Option(
+            "--prepared",
+            help="Prepared-chunk directory from `prepare-marc` (mutually exclusive with --marc).",
+        ),
+    ] = None,
+    verbose: Annotated[
+        int,
+        Option(
+            "--verbose",
+            "-v",
+            count=True,
+            help="Increase logging: -v per-worker heartbeats, -vv per-record hits.",
+        ),
+    ] = 0,
     workers: Annotated[
         int | None,
         Option("--workers", help="Number of worker processes (default: cpu_count - 1)."),
@@ -368,8 +464,21 @@ def match(
             --workers 4
     """
     as_of_year = _parse_as_of(as_of)
-    if not marc.is_file():
+    if (marc is None) == (prepared is None):
+        raise _fail(
+            "exactly one of --marc or --prepared is required",
+            code=_ARG_ERROR_EXIT_CODE,
+        )
+    expected_total: int | None = None
+    if marc is not None and not marc.is_file():
         raise _fail(f"--marc does not exist or is not a file: {marc}")
+    if prepared is not None:
+        if not prepared.is_dir():
+            raise _fail(f"--prepared does not exist or is not a directory: {prepared}")
+        try:
+            expected_total = read_manifest(prepared).total_records
+        except (OSError, DecodeError) as exc:
+            raise _fail(f"--prepared has no readable manifest: {exc}") from exc
     if not index.exists():
         raise _fail(f"--index does not exist: {index}")
     try:
@@ -410,6 +519,8 @@ def match(
     try:
         report = run_match(
             marc_path=marc,
+            prepared_dir=prepared,
+            expected_total=expected_total,
             index_path=index,
             output_path=out,
             matching_config=matching_config,
@@ -420,6 +531,9 @@ def match(
             calibrator=calibrator,
             workers=workers,
             report_interval_seconds=5.0,
+            verbosity=verbose,
+            log_level=_LOG_SETTINGS.level,
+            json_logs=_LOG_SETTINGS.json_logs,
         )
     except OSError as exc:
         raise _fail(f"match run failed: {exc}") from exc
