@@ -56,6 +56,11 @@
     .chip.no { color: var(--no); }
     .chip.unsure { color: var(--unsure); }
     .chip:hover { border-color: currentColor; }
+    .chip.selected { border-color: currentColor; border-width: 2px; font-weight: 600;
+                     background: currentColor; }
+    .chip.selected.no { color: var(--no); }
+    .chip.selected.unsure { color: var(--unsure); }
+    .chip.selected { box-shadow: inset 0 0 0 99px rgba(255, 255, 255, .82); }
     .note-input { width: 100%; padding: .5rem .6rem; font-size: .9rem;
                   border: 1px solid var(--line); border-radius: 8px; margin-top: .2rem; }
     .hint { color: var(--muted); font-size: .82rem; margin-top: .8rem; }

@@ -164,6 +164,32 @@ def test_reason_chip_records_reason(client: TestClient) -> None:
     assert "Different work / title collision" in stats.text
 
 
+def test_multiple_reasons_are_recorded(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "no_match", "reason": ["diff_work", "garbled"]},
+        follow_redirects=False,
+    )
+    stats = client.get("/stats")
+    assert "Different work / title collision" in stats.text
+    assert "Garbled transcription" in stats.text
+
+
+def test_cross_verdict_and_invalid_reasons_are_dropped(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={
+            "pair_id": "1",
+            "verdict": "no_match",
+            "reason": ["diff_work", "edition_unsure", "nonsense"],
+        },
+        follow_redirects=False,
+    )
+    stats = client.get("/stats")
+    assert "Different work / title collision" in stats.text
+    assert "Unsure about edition" not in stats.text
+
+
 def test_invalid_reason_is_dropped(client: TestClient) -> None:
     client.post(
         "/label",

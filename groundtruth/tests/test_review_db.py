@@ -282,28 +282,39 @@ def test_previous_labeled_respects_language_filter(tmp_path: Path) -> None:
         assert back.id == eng
 
 
-def test_add_label_stores_reason_and_note(tmp_path: Path) -> None:
+def test_add_label_stores_single_reason_and_note(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         pair = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
-        db.add_label(pair, VERDICT_NO_MATCH, note="looks off", reason="diff_work")
+        db.add_label(pair, VERDICT_NO_MATCH, note="looks off", reasons=("diff_work",))
     with ReviewDb.connect(tmp_path / "review.db") as db:
         assert db.reason_counts() == {(VERDICT_NO_MATCH, "diff_work"): 1}
+
+
+def test_add_label_stores_multiple_reasons(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        db.add_label(pair, VERDICT_NO_MATCH, reasons=("diff_work", "garbled"))
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        assert db.reason_counts() == {
+            (VERDICT_NO_MATCH, "diff_work"): 1,
+            (VERDICT_NO_MATCH, "garbled"): 1,
+        }
 
 
 def test_reason_counts_uses_only_current_label(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         pair = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
-        db.add_label(pair, VERDICT_NO_MATCH, reason="diff_work")
-        db.add_label(pair, VERDICT_UNSURE, reason="multiple_candidates")
-        assert db.reason_counts() == {(VERDICT_UNSURE, "multiple_candidates"): 1}
+        db.add_label(pair, VERDICT_NO_MATCH, reasons=("diff_work", "garbled"))
+        db.add_label(pair, VERDICT_UNSURE, reasons=("edition_unsure",))
+        assert db.reason_counts() == {(VERDICT_UNSURE, "edition_unsure"): 1}
 
 
-def test_reason_counts_ignores_null_reasons(tmp_path: Path) -> None:
+def test_reason_counts_ignores_labels_without_reasons(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
         second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
         db.add_label(first, VERDICT_MATCH)
-        db.add_label(second, VERDICT_NO_MATCH, reason="garbled")
+        db.add_label(second, VERDICT_NO_MATCH, reasons=("garbled",))
         assert db.reason_counts() == {(VERDICT_NO_MATCH, "garbled"): 1}
 
 
@@ -333,3 +344,33 @@ def test_init_schema_migrates_label_table_missing_reason(tmp_path: Path) -> None
         assert "reason" in columns
         existing = db._conn.execute("SELECT COUNT(*) FROM label").fetchone()[0]
         assert existing == 1
+
+
+def test_init_schema_backfills_scalar_reason_into_label_reason(tmp_path: Path) -> None:
+    from sqlite3 import connect as sqlite_connect
+
+    db_path = tmp_path / "legacy.db"
+    legacy = sqlite_connect(db_path)
+    legacy.executescript(
+        """
+        CREATE TABLE label (
+            id INTEGER PRIMARY KEY,
+            pair_id INTEGER NOT NULL,
+            verdict TEXT NOT NULL,
+            reason TEXT,
+            note TEXT,
+            labeled_at TEXT NOT NULL
+        );
+        INSERT INTO label (pair_id, verdict, reason, note, labeled_at)
+        VALUES (1, 'no_match', 'diff_work', NULL, '2026-01-01T00:00:00+00:00');
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    with ReviewDb.connect(db_path) as db:
+        assert db.reason_counts() == {(VERDICT_NO_MATCH, "diff_work"): 1}
+
+    with ReviewDb.connect(db_path) as db:
+        rows = db._conn.execute("SELECT COUNT(*) FROM label_reason").fetchone()[0]
+        assert rows == 1

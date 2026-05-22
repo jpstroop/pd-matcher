@@ -61,7 +61,6 @@
 <form id="label-form" method="post" action="/label">
   <input type="hidden" name="pair_id" value="{{ card.pair_id }}">
   <input type="hidden" name="verdict" id="verdict-field" value="">
-  <input type="hidden" name="reason" id="reason-field" value="">
   {% if filters.language %}<input type="hidden" name="language" value="{{ filters.language }}">{% endif %}
   {% if filters.band %}<input type="hidden" name="band" value="{{ filters.band }}">{% endif %}
   <div class="actions">
@@ -87,21 +86,36 @@
            placeholder="Optional note (free text)">
   </div>
 </form>
-<p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}. Click a reason chip to record <em>why</em> a no-match/unsure (one click, also submits).</p>
+<p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}. Toggle any number of reason chips to mark <em>why</em> a no-match/unsure; the chosen verdict key or button records the selected reasons (codes that don't fit the verdict are ignored).</p>
 
 <script>
 (function () {
   const form = document.getElementById("label-form");
   const verdictField = document.getElementById("verdict-field");
-  const reasonField = document.getElementById("reason-field");
   const noteField = document.getElementById("note-field");
   const nextUrl = "/{% if filters.query_string() %}?{{ filters.query_string() }}{% endif %}";
   const backLink = document.getElementById("back-link");
+  const chips = document.querySelectorAll(".reasons .chip");
 
-  function submitVerdict(verdict, reason) {
+  function selectedReasons() {
+    const codes = [];
+    chips.forEach(function (chip) {
+      if (chip.classList.contains("selected")) { codes.push(chip.dataset.reason); }
+    });
+    return codes;
+  }
+
+  function submitVerdict(verdict) {
     if (!verdict) { window.location.href = nextUrl; return; }
     verdictField.value = verdict;
-    reasonField.value = reason || "";
+    form.querySelectorAll('input[name="reason"]').forEach(function (el) { el.remove(); });
+    selectedReasons().forEach(function (code) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "reason";
+      input.value = code;
+      form.appendChild(input);
+    });
     form.submit();
   }
 
@@ -110,20 +124,20 @@
   }
 
   document.querySelectorAll(".actions button").forEach(function (btn) {
-    btn.addEventListener("click", function () { submitVerdict(btn.dataset.verdict, ""); });
+    btn.addEventListener("click", function () { submitVerdict(btn.dataset.verdict); });
   });
-  document.querySelectorAll(".reasons .chip").forEach(function (btn) {
-    btn.addEventListener("click", function () { submitVerdict(btn.dataset.verdict, btn.dataset.reason); });
+  chips.forEach(function (chip) {
+    chip.addEventListener("click", function () { chip.classList.toggle("selected"); });
   });
 
   document.addEventListener("keydown", function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey) { return; }
     if (e.target === noteField) { return; }
     switch (e.key) {
-      case "y": e.preventDefault(); submitVerdict("match", ""); break;
-      case "n": e.preventDefault(); submitVerdict("no_match", ""); break;
-      case "u": e.preventDefault(); submitVerdict("unsure", ""); break;
-      case "s": case " ": e.preventDefault(); submitVerdict("", ""); break;
+      case "y": e.preventDefault(); submitVerdict("match"); break;
+      case "n": e.preventDefault(); submitVerdict("no_match"); break;
+      case "u": e.preventDefault(); submitVerdict("unsure"); break;
+      case "s": case " ": e.preventDefault(); submitVerdict(""); break;
       case "b": case "ArrowLeft": e.preventDefault(); goBack(); break;
     }
   });

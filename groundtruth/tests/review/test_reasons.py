@@ -3,7 +3,7 @@
 from pd_groundtruth.review.reasons import NO_MATCH_REASONS
 from pd_groundtruth.review.reasons import UNSURE_REASONS
 from pd_groundtruth.review.reasons import is_valid_reason
-from pd_groundtruth.review.reasons import normalize_reason
+from pd_groundtruth.review.reasons import normalize_reasons
 from pd_groundtruth.review.reasons import reasons_for
 from pd_groundtruth.review.reasons import summarize_reasons
 from pd_groundtruth.review_db import VERDICT_MATCH
@@ -26,17 +26,29 @@ def test_is_valid_reason_checks_membership_per_verdict() -> None:
     assert not is_valid_reason(VERDICT_MATCH, "diff_work")
 
 
-def test_normalize_reason_drops_invalid_and_empty() -> None:
-    assert normalize_reason(VERDICT_NO_MATCH, "diff_work") == "diff_work"
-    assert normalize_reason(VERDICT_NO_MATCH, "nonsense") is None
-    assert normalize_reason(VERDICT_NO_MATCH, "") is None
-    assert normalize_reason(VERDICT_NO_MATCH, None) is None
-    assert normalize_reason(VERDICT_MATCH, "diff_work") is None
+def test_normalize_reasons_keeps_only_valid_codes() -> None:
+    assert normalize_reasons(VERDICT_NO_MATCH, ["diff_work", "nonsense"]) == ("diff_work",)
+    assert normalize_reasons(VERDICT_NO_MATCH, ["nonsense"]) == ()
+    assert normalize_reasons(VERDICT_MATCH, ["diff_work"]) == ()
 
 
-def test_edition_unsure_validates_and_round_trips() -> None:
+def test_normalize_reasons_empty_input_returns_empty() -> None:
+    assert normalize_reasons(VERDICT_NO_MATCH, []) == ()
+
+
+def test_normalize_reasons_dedupes_and_preserves_vocab_order() -> None:
+    submitted = ["wrong_year_edition", "diff_work", "diff_work"]
+    assert normalize_reasons(VERDICT_NO_MATCH, submitted) == ("diff_work", "wrong_year_edition")
+
+
+def test_normalize_reasons_drops_cross_verdict_codes() -> None:
+    submitted = ["edition_unsure", "diff_work"]
+    assert normalize_reasons(VERDICT_UNSURE, submitted) == ("edition_unsure",)
+    assert normalize_reasons(VERDICT_NO_MATCH, submitted) == ("diff_work",)
+
+
+def test_edition_unsure_validates_per_verdict() -> None:
     assert is_valid_reason(VERDICT_UNSURE, "edition_unsure")
-    assert normalize_reason(VERDICT_UNSURE, "edition_unsure") == "edition_unsure"
     assert not is_valid_reason(VERDICT_NO_MATCH, "edition_unsure")
 
 
