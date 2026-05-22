@@ -23,6 +23,7 @@ from pd_groundtruth.review.filters import ReviewFilters
 from pd_groundtruth.review.filters import parse_filters
 from pd_groundtruth.review.reasons import NO_MATCH_REASONS
 from pd_groundtruth.review.reasons import UNSURE_REASONS
+from pd_groundtruth.review.reasons import ReasonCode
 from pd_groundtruth.review.reasons import normalize_reason
 from pd_groundtruth.review.reasons import summarize_reasons
 from pd_groundtruth.review.view import build_card
@@ -30,7 +31,7 @@ from pd_groundtruth.review_db import ReviewDb
 
 _TEMPLATES_DIR: Path = Path(__file__).parent / "templates"
 _DB_PATH_ATTR: str = "review_db_path"
-_REASON_CONTEXT: dict[str, object] = {
+_REASON_CONTEXT: dict[str, tuple[ReasonCode, ...]] = {
     "no_match_reasons": NO_MATCH_REASONS,
     "unsure_reasons": UNSURE_REASONS,
 }
