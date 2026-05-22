@@ -26,6 +26,7 @@ from msgspec import Struct
 from structlog import get_logger
 
 from pd_matcher.copyright.status import CopyrightStatus
+from pd_matcher.progress import ProgressSnapshot
 from pd_matcher.workers.events import ProducerHeartbeat
 from pd_matcher.workers.events import RecordProcessed
 from pd_matcher.workers.events import StatsEvent
@@ -34,6 +35,7 @@ from pd_matcher.workers.events import decode_stats_event
 
 _LOGGER = get_logger(__name__)
 _POLL_TIMEOUT_SECONDS: float = 0.1
+_SECONDS_PER_MINUTE: int = 60
 
 
 class EventQueue(Protocol):
@@ -139,17 +141,48 @@ class TotalsSnapshot(Struct, frozen=True, forbid_unknown_fields=True):
     stop_reason: str
 
 
-def _format_progress_line(totals: RunningTotals, now: float) -> str:
-    """Render one human-readable progress line from the running totals."""
-    throughput = totals.throughput_per_sec(now)
+def _format_detail(totals: RunningTotals) -> str:
+    """Render the domain-specific suffix appended to every progress line."""
     by_status = {status.value: count for status, count in totals.by_status.items()}
     return (
-        f"records_processed={totals.records_processed} "
-        f"written={totals.records_written} "
-        f"enqueued={totals.records_enqueued} "
-        f"rate={throughput:.1f}/s "
-        f"by_status={by_status}"
+        f"written={totals.records_written} enqueued={totals.records_enqueued} by_status={by_status}"
     )
+
+
+def _format_progress_line(
+    totals: RunningTotals,
+    now: float,
+    expected_total: int | None,
+) -> str:
+    """Render one progress line, omitting percent/ETA when total is unknown.
+
+    With a known ``expected_total`` the line reuses
+    :meth:`ProgressSnapshot.render` (percent + ETA). Without one, a terse
+    variant reuses the same rate/elapsed math but prints neither a
+    misleading ``0/0 (0%)`` nor a bogus ETA.
+    """
+    detail = _format_detail(totals)
+    if expected_total is not None:
+        snapshot = ProgressSnapshot(
+            done=totals.records_processed,
+            total=expected_total,
+            elapsed_seconds=now - totals.started_at,
+        )
+        return f"{snapshot.render()}  {detail}"
+    elapsed = now - totals.started_at
+    rate = totals.throughput_per_sec(now)
+    return (
+        f"progress  {totals.records_processed:,} done  "
+        f"agg {rate:.1f} rec/s ({rate * _SECONDS_PER_MINUTE:.0f}/min)  "
+        f"elapsed {_format_mmss(elapsed)}  {detail}"
+    )
+
+
+def _format_mmss(seconds: float) -> str:
+    """Render a non-negative duration in seconds as ``mm:ss`` (no 60-wrap)."""
+    total = int(seconds)
+    minutes, secs = divmod(total, _SECONDS_PER_MINUTE)
+    return f"{minutes:02d}:{secs:02d}"
 
 
 class Reporter:
@@ -160,13 +193,14 @@ class Reporter:
     snapshot (``records_processed``, ``records_written``, etc.).
     """
 
-    __slots__ = ("_interval", "_logger", "_queue", "_thread", "_totals")
+    __slots__ = ("_expected_total", "_interval", "_logger", "_queue", "_thread", "_totals")
 
     def __init__(
         self,
         queue: EventQueue,
         *,
         report_interval_seconds: float,
+        expected_total: int | None = None,
         clock: Callable[[], float] = monotonic,
     ) -> None:
         """Construct a reporter bound to ``queue``.
@@ -177,11 +211,15 @@ class Reporter:
                 or a :class:`multiprocessing.Queue`) is required.
             report_interval_seconds: Minimum wall-clock seconds between
                 progress log lines.
+            expected_total: Total records the run will process when known
+                (e.g. a prepared-chunk manifest's count). Enables percent
+                and ETA in the progress line; ``None`` omits both gracefully.
             clock: Monotonic clock for unit tests that need to advance
                 time deterministically.
         """
         self._queue = queue
         self._interval = report_interval_seconds
+        self._expected_total = expected_total
         self._totals = RunningTotals(started_at=clock())
         self._thread = Thread(target=self._run, name="pd_matcher.reporter", daemon=True)
         self._logger = _LOGGER
@@ -215,7 +253,9 @@ class Reporter:
                 if monotonic() - last_log >= self._interval:
                     self._logger.info(
                         "match.progress",
-                        progress=_format_progress_line(self._totals, monotonic()),
+                        progress=_format_progress_line(
+                            self._totals, monotonic(), self._expected_total
+                        ),
                     )
                     last_log = monotonic()
                 continue
@@ -225,13 +265,13 @@ class Reporter:
             if now - last_log >= self._interval:
                 self._logger.info(
                     "match.progress",
-                    progress=_format_progress_line(self._totals, now),
+                    progress=_format_progress_line(self._totals, now, self._expected_total),
                 )
                 last_log = now
             if should_stop:
                 self._logger.info(
                     "match.progress.final",
-                    progress=_format_progress_line(self._totals, now),
+                    progress=_format_progress_line(self._totals, now, self._expected_total),
                 )
                 break
 

@@ -18,15 +18,18 @@ from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.prepare import prepare_marc
 from pd_matcher.match.result import MatchResult
 from pd_matcher.models import MarcRecord
 from pd_matcher.output.csv_writer import CsvResultWriter
+from pd_matcher.parsers.marc import iter_marc_records
 from pd_matcher.workers.events import decode_stats_event
 from pd_matcher.workers.messages import WorkerOutput
 from pd_matcher.workers.messages import encode_worker_output
 from pd_matcher.workers.pool import RunReport
 from pd_matcher.workers.pool import _build_csv_writer
 from pd_matcher.workers.pool import _default_workers
+from pd_matcher.workers.pool import _resolve_source
 from pd_matcher.workers.pool import _shutdown_predicate
 from pd_matcher.workers.pool import _worker_entry
 from pd_matcher.workers.pool import _writer_entry
@@ -207,4 +210,78 @@ def test_run_match_returns_run_report(
     assert report.records_processed > 0
     assert report.records_written == report.records_processed
     assert report.interrupted is False
+    assert output_path.exists()
+
+
+def test_resolve_source_requires_exactly_one_input(tmp_path: Path) -> None:
+    with raises(ValueError, match="exactly one of"):
+        _resolve_source(None, None)
+    with raises(ValueError, match="exactly one of"):
+        _resolve_source(tmp_path / "a.xml", tmp_path / "prepared")
+
+
+def test_resolve_source_returns_file_iterator() -> None:
+    records = list(_resolve_source(_FIXTURES / "tiny.marcxml", None))
+    assert records == list(iter_marc_records(_FIXTURES / "tiny.marcxml"))
+
+
+def test_resolve_source_returns_prepared_iterator(tmp_path: Path) -> None:
+    prepared = tmp_path / "prepared"
+    prepare_marc(_FIXTURES / "tiny.marcxml", prepared, chunk_size=3)
+    records = list(_resolve_source(None, prepared))
+    assert records == list(iter_marc_records(_FIXTURES / "tiny.marcxml"))
+
+
+def test_run_match_consumes_prepared_chunks(
+    pairing_config: PairingConfig,
+    tmp_path: Path,
+) -> None:
+    """``run_match`` over a prepared directory matches the file-mode count."""
+    from pd_matcher.index.builder import build_index
+
+    reg_dir = tmp_path / "reg"
+    ren_dir = tmp_path / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "tiny_reg.xml").write_bytes((_FIXTURES / "tiny_reg.xml").read_bytes())
+    (ren_dir / "tiny_ren.tsv").write_bytes((_FIXTURES / "tiny_ren.tsv").read_bytes())
+    index_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=index_path)
+    with NyplIndexLookup(index_path) as lookup:
+        idf = build_idf_table(lookup)
+    config = MatchingConfig(
+        title_weight=0.40,
+        author_weight=0.20,
+        publisher_weight=0.10,
+        year_weight=0.10,
+        edition_weight=0.05,
+        lccn_weight=0.10,
+        isbn_weight=0.05,
+        year_window=2,
+        min_combined_score=30.0,
+        scorer="weighted_mean",
+    )
+    copyright_config = CopyrightAssessmentConfig(as_of_year=2026)
+    ruleset = load_copyright_rules(_DEFAULTS)
+    prepared = tmp_path / "prepared"
+    prepare_report = prepare_marc(_FIXTURES / "tiny.marcxml", prepared, chunk_size=4)
+    output_path = tmp_path / "results.csv"
+    report = run_match(
+        prepared_dir=prepared,
+        expected_total=prepare_report.total_records,
+        index_path=index_path,
+        output_path=output_path,
+        matching_config=config,
+        copyright_config=copyright_config,
+        ruleset=ruleset,
+        pairing_config=pairing_config,
+        idf=idf,
+        workers=1,
+        batch_size=2,
+        queue_maxsize=4,
+        report_interval_seconds=0.05,
+        verbosity=1,
+    )
+    assert report.records_processed == prepare_report.total_records
+    assert report.records_written == report.records_processed
     assert output_path.exists()

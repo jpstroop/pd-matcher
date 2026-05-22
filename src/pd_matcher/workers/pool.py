@@ -14,6 +14,7 @@ sticking to ``spawn`` and we gain identical behaviour on macOS and Linux.
 """
 
 from collections.abc import Callable
+from collections.abc import Iterator
 from multiprocessing import get_context
 from multiprocessing.context import SpawnContext
 from multiprocessing.context import SpawnProcess
@@ -30,8 +31,11 @@ from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
+from pd_matcher.logging_config import configure_logging
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.prepare import iter_prepared_records
+from pd_matcher.models import MarcRecord
 from pd_matcher.output.csv_writer import CsvResultWriter
 from pd_matcher.output.csv_writer import ResultWriter
 from pd_matcher.parsers.marc import iter_marc_records
@@ -87,6 +91,9 @@ def _spawn_workers(
     output_queue: MpQueue[bytes | None],
     stats_queue: MpQueue[bytes],
     shutdown_event: EventType,
+    verbosity: int,
+    log_level: str,
+    json_logs: bool,
 ) -> list[SpawnProcess]:
     """Spawn the configured number of worker processes and return them."""
     processes: list[SpawnProcess] = []
@@ -106,6 +113,10 @@ def _spawn_workers(
                 "output_queue": output_queue,
                 "stats_queue": stats_queue,
                 "shutdown_event": shutdown_event,
+                "worker_id": index,
+                "verbosity": verbosity,
+                "log_level": log_level,
+                "json_logs": json_logs,
             },
         )
         process.start()
@@ -126,13 +137,21 @@ def _worker_entry(
     output_queue: MpQueue[bytes | None],
     stats_queue: MpQueue[bytes],
     shutdown_event: EventType,
+    worker_id: int = 0,
+    verbosity: int = 0,
+    log_level: str = "INFO",
+    json_logs: bool = False,
 ) -> None:
     """Top-level callable executed inside each spawned worker process.
 
-    Keeping this thin (it just unpacks queues into get/put callables and
-    defers to :func:`worker_main`) means the heavy lifting stays in a
-    module that is also reachable from in-process tests.
+    Spawned workers start with a pristine interpreter and therefore do NOT
+    inherit the parent's ``structlog`` configuration, so logging is
+    reconfigured here before the consume loop runs. Otherwise this stays
+    thin (it just unpacks queues into get/put callables and defers to
+    :func:`worker_main`) so the heavy lifting remains reachable from
+    in-process tests, which configure logging themselves.
     """
+    configure_logging(level=log_level, json_output=json_logs)
     is_shutdown = _shutdown_predicate(shutdown_event)
     worker_main(
         index_path=index_path,
@@ -146,6 +165,8 @@ def _worker_entry(
         output_put=output_queue.put,
         stats_put=stats_queue.put,
         is_shutdown=is_shutdown,
+        worker_id=worker_id,
+        verbosity=verbosity,
     )
 
 
@@ -177,9 +198,32 @@ def _shutdown_predicate(event: EventType) -> Callable[[], bool]:
     return predicate
 
 
+def _resolve_source(
+    marc_path: Path | None,
+    prepared_dir: Path | None,
+) -> Iterator[MarcRecord]:
+    """Return the record iterator for exactly one of the two input modes.
+
+    Args:
+        marc_path: MARCXML file to stream-parse, or ``None``.
+        prepared_dir: Prepared-chunk directory to replay, or ``None``.
+
+    Raises:
+        ValueError: If neither or both inputs are supplied.
+    """
+    if (marc_path is None) == (prepared_dir is None):
+        raise ValueError("exactly one of marc_path or prepared_dir is required")
+    if prepared_dir is not None:
+        return iter_prepared_records(prepared_dir)
+    assert marc_path is not None
+    return iter_marc_records(marc_path)
+
+
 def run_match(
-    marc_path: Path,
+    marc_path: Path | None = None,
     *,
+    prepared_dir: Path | None = None,
+    expected_total: int | None = None,
     index_path: Path,
     output_path: Path,
     matching_config: MatchingConfig,
@@ -193,11 +237,26 @@ def run_match(
     queue_maxsize: int | None = None,
     writer_factory: WriterFactory = _build_csv_writer,
     report_interval_seconds: float = _DEFAULT_REPORT_INTERVAL_SECONDS,
+    verbosity: int = 0,
+    log_level: str = "INFO",
+    json_logs: bool = False,
 ) -> RunReport:
-    """Run the full match pipeline over ``marc_path`` and return a summary.
+    """Run the full match pipeline over one input source and return a summary.
+
+    Exactly one of ``marc_path`` (stream-parse MARCXML) or ``prepared_dir``
+    (replay pickled chunks) must be supplied. The prepared path is the
+    re-runnable production source; pass the manifest's record count as
+    ``expected_total`` so the reporter can show percent-complete and ETA.
 
     Args:
-        marc_path: MARCXML file to ingest.
+        marc_path: MARCXML file to ingest, or ``None`` when using
+            ``prepared_dir``.
+        prepared_dir: Prepared-chunk directory (see
+            :mod:`pd_matcher.match.prepare`), or ``None`` when using
+            ``marc_path``.
+        expected_total: Total records the run will process when known.
+            Threaded into the reporter to enable percent/ETA; ``None`` omits
+            both gracefully (the typical ``--marc`` case).
         index_path: LMDB env directory produced by ``pd-matcher index build``.
         output_path: Destination CSV path.
         matching_config: Loaded :class:`MatchingConfig`.
@@ -213,10 +272,16 @@ def run_match(
         writer_factory: Factory producing the per-row CSV writer. Defaults
             to :class:`CsvResultWriter`.
         report_interval_seconds: Reporter cadence.
+        verbosity: ``0`` aggregate-only; ``1`` adds per-worker heartbeats;
+            ``2`` adds per-record hit lines. Forwarded to each worker.
+        log_level: Log level reconfigured inside each spawned worker (which
+            do not inherit the parent's logging config).
+        json_logs: Whether spawned workers emit JSON logs.
 
     Returns:
         A :class:`RunReport` describing the run.
     """
+    records = _resolve_source(marc_path, prepared_dir)
     worker_count = workers if workers is not None else _default_workers()
     if worker_count < 1:
         raise ValueError(f"workers must be >= 1 (got {worker_count!r})")
@@ -231,6 +296,7 @@ def run_match(
         Reporter(
             queue=stats_queue,
             report_interval_seconds=report_interval_seconds,
+            expected_total=expected_total,
         ) as reporter,
     ):
         worker_processes = _spawn_workers(
@@ -247,6 +313,9 @@ def run_match(
             output_queue=output_queue,
             stats_queue=stats_queue,
             shutdown_event=coord.event,
+            verbosity=verbosity,
+            log_level=log_level,
+            json_logs=json_logs,
         )
         writer_process = ctx.Process(
             target=_writer_entry,
@@ -268,7 +337,7 @@ def run_match(
             output_path=str(output_path),
         )
         records_enqueued = run_producer(
-            iter_marc_records(marc_path),
+            records,
             input_put=input_queue.put,
             stats_put=stats_queue.put,
             is_shutdown=coord.event.is_set,

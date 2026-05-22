@@ -111,6 +111,8 @@ def test_match_help_lists_options() -> None:
     assert result.exit_code == 0
     for flag in (
         "--marc",
+        "--prepared",
+        "--verbose",
         "--index",
         "--out",
         "--workers",
@@ -298,6 +300,216 @@ def test_index_info_reports_corrupt_env(
     result = _runner.invoke(app, ["index", "info", "--lmdb-path", str(index_path)])
     assert result.exit_code == 1
     assert "meta missing" in result.output
+
+
+def test_prepare_marc_help_lists_options() -> None:
+    """``prepare-marc --help`` must mention every public option."""
+    result = _runner.invoke(app, ["prepare-marc", "--help"])
+    assert result.exit_code == 0
+    for flag in ("--marc", "--out", "--chunk-size", "--force"):
+        assert flag in result.stdout
+
+
+def test_prepare_marc_runs_and_is_idempotent(tmp_path: Path) -> None:
+    """``prepare-marc`` writes chunks once, then no-ops on a clean re-run."""
+    out_dir = tmp_path / "prepared"
+    first = _runner.invoke(
+        app,
+        [
+            "prepare-marc",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--out",
+            str(out_dir),
+            "--chunk-size",
+            "5",
+        ],
+    )
+    assert first.exit_code == 0, first.output
+    assert "records:" in first.stdout
+    assert "skipped: no" in first.stdout
+    assert sorted(p.name for p in out_dir.glob("chunk_*.pkl"))
+    second = _runner.invoke(
+        app,
+        [
+            "prepare-marc",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--out",
+            str(out_dir),
+            "--chunk-size",
+            "5",
+        ],
+    )
+    assert second.exit_code == 0, second.output
+    assert "skipped: yes" in second.stdout
+
+
+def test_prepare_marc_rejects_missing_source(tmp_path: Path) -> None:
+    result = _runner.invoke(
+        app,
+        [
+            "prepare-marc",
+            "--marc",
+            str(tmp_path / "nope.xml"),
+            "--out",
+            str(tmp_path / "prepared"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--marc" in result.output
+
+
+def test_prepare_marc_rejects_zero_chunk_size(tmp_path: Path) -> None:
+    result = _runner.invoke(
+        app,
+        [
+            "prepare-marc",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--out",
+            str(tmp_path / "prepared"),
+            "--chunk-size",
+            "0",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "chunk-size" in result.output
+
+
+def test_prepare_marc_surfaces_oserror(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    def _raise(*_args: object, **_kwargs: object) -> object:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("pd_matcher.cli.prepare_marc", _raise)
+    result = _runner.invoke(
+        app,
+        [
+            "prepare-marc",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--out",
+            str(tmp_path / "prepared"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "disk full" in result.output
+
+
+def test_match_consumes_prepared_directory(tmp_path: Path) -> None:
+    """``match --prepared`` runs against a prepared cache and writes a CSV."""
+    index_path = _build_index(tmp_path)
+    prepared = tmp_path / "prepared"
+    prep = _runner.invoke(
+        app,
+        [
+            "prepare-marc",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--out",
+            str(prepared),
+        ],
+    )
+    assert prep.exit_code == 0, prep.output
+    out_csv = tmp_path / "out.csv"
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--prepared",
+            str(prepared),
+            "--index",
+            str(index_path),
+            "--out",
+            str(out_csv),
+            "--workers",
+            "1",
+            "--min-score",
+            "1.0",
+            "-v",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with out_csv.open(encoding="utf-8") as fp:
+        assert list(DictReader(fp))
+
+
+def test_match_rejects_both_marc_and_prepared(tmp_path: Path) -> None:
+    """Supplying both ``--marc`` and ``--prepared`` exits 2."""
+    index_path = _build_index(tmp_path)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--prepared",
+            str(tmp_path / "prepared"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.csv"),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "exactly one of" in result.output
+
+
+def test_match_rejects_neither_marc_nor_prepared(tmp_path: Path) -> None:
+    """Supplying neither ``--marc`` nor ``--prepared`` exits 2."""
+    index_path = _build_index(tmp_path)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.csv"),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "exactly one of" in result.output
+
+
+def test_match_rejects_prepared_directory_missing(tmp_path: Path) -> None:
+    """A ``--prepared`` path that is not a directory exits 1."""
+    index_path = _build_index(tmp_path)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--prepared",
+            str(tmp_path / "nope"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.csv"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--prepared" in result.output
+
+
+def test_match_rejects_prepared_directory_without_manifest(tmp_path: Path) -> None:
+    """A ``--prepared`` directory lacking a manifest exits 1."""
+    index_path = _build_index(tmp_path)
+    empty = tmp_path / "prepared"
+    empty.mkdir()
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--prepared",
+            str(empty),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.csv"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "manifest" in result.output
 
 
 def test_match_runs_against_tiny_fixtures(tmp_path: Path) -> None:
