@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
+{% if back_id is not none %}
+<nav class="nav-back">
+  <a id="back-link" href="/pair/{{ back_id }}{% if filters.query_string() %}?{{ filters.query_string() }}{% endif %}">&larr; Back (b)</a>
+</nav>
+{% endif %}
 <div class="meta">
   <span class="score">{{ "%.3f"|format(card.score) }}</span>
   <span class="band">{{ card.band }}</span>
@@ -65,18 +70,23 @@
     <button type="button" class="skip" data-verdict="">Skip (s / space)</button>
   </div>
 </form>
-<p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip.</p>
+<p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}.</p>
 
 <script>
 (function () {
   const form = document.getElementById("label-form");
   const verdictField = document.getElementById("verdict-field");
   const nextUrl = "/{% if filters.query_string() %}?{{ filters.query_string() }}{% endif %}";
+  const backLink = document.getElementById("back-link");
 
   function submitVerdict(verdict) {
     if (!verdict) { window.location.href = nextUrl; return; }
     verdictField.value = verdict;
     form.submit();
+  }
+
+  function goBack() {
+    if (backLink) { window.location.href = backLink.href; }
   }
 
   document.querySelectorAll(".actions button").forEach(function (btn) {
@@ -90,6 +100,7 @@
       case "n": e.preventDefault(); submitVerdict("no_match"); break;
       case "u": e.preventDefault(); submitVerdict("unsure"); break;
       case "s": case " ": e.preventDefault(); submitVerdict(""); break;
+      case "b": case "ArrowLeft": e.preventDefault(); goBack(); break;
     }
   });
 })();

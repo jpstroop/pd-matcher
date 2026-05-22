@@ -310,6 +310,52 @@ class ReviewDb:
             return None
         return _row_to_pair(row)
 
+    def previous_labeled(
+        self,
+        *,
+        before: int | None = None,
+        language: str | None = None,
+        band: str | None = None,
+    ) -> ReviewPairRow | None:
+        """Return the labeled pair to step *back* to from the current view.
+
+        Labeled pairs are ordered by the autoincrement id of their latest
+        ``label`` row (monotonic action order, so a re-label moves a pair to the
+        front). With ``before=None`` this returns the most recently labeled pair
+        — the one you just acted on before landing on the next queue card. With
+        ``before`` set to a pair id, it returns the labeled pair acted on
+        immediately before that pair, so the back button chains backward through
+        history. Optional ``language`` / ``band`` keep navigation inside an
+        active filter. Returns ``None`` when there is nothing earlier to revisit.
+        """
+        clauses: list[str] = []
+        params: list[str | int] = []
+        if language is not None:
+            clauses.append("rp.language = ?")
+            params.append(language)
+        if band is not None:
+            clauses.append("rp.band = ?")
+            params.append(band)
+        if before is not None:
+            clauses.append("la.last_id < (SELECT MAX(id) FROM label WHERE pair_id = ?)")
+            params.append(before)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        row = self._conn.execute(
+            f"""
+            SELECT rp.*
+            FROM review_pair rp
+            JOIN (SELECT pair_id, MAX(id) AS last_id FROM label GROUP BY pair_id) la
+              ON la.pair_id = rp.id
+            {where}
+            ORDER BY la.last_id DESC
+            LIMIT 1
+            """,
+            params,
+        ).fetchone()
+        if row is None:
+            return None
+        return _row_to_pair(row)
+
     def progress(self) -> ProgressCounts:
         """Return a running tally of labeling progress across the queue.
 

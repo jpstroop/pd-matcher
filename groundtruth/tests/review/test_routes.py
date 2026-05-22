@@ -123,6 +123,29 @@ def test_stats_route_renders_progress(client: TestClient) -> None:
     assert "By language" in response.text
 
 
+def test_index_hides_back_link_before_any_label(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'id="back-link"' not in response.text
+
+
+def test_back_link_targets_last_labeled_pair(client: TestClient) -> None:
+    client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    nxt = client.get("/")
+    assert 'id="back-link"' in nxt.text
+    assert "/pair/1" in nxt.text
+
+
+def test_back_link_preserves_filter(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "2", "verdict": "match", "language": "fre"},
+        follow_redirects=False,
+    )
+    nxt = client.get("/", params={"language": "fre"})
+    assert "/pair/2?language=fre" in nxt.text
+
+
 def test_empty_queue_page_when_all_labeled(client: TestClient) -> None:
     client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
     client.post("/label", data={"pair_id": "2", "verdict": "match"}, follow_redirects=False)
