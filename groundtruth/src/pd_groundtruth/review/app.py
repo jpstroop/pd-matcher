@@ -21,11 +21,19 @@ from fastapi.templating import Jinja2Templates
 
 from pd_groundtruth.review.filters import ReviewFilters
 from pd_groundtruth.review.filters import parse_filters
+from pd_groundtruth.review.reasons import NO_MATCH_REASONS
+from pd_groundtruth.review.reasons import UNSURE_REASONS
+from pd_groundtruth.review.reasons import normalize_reason
+from pd_groundtruth.review.reasons import summarize_reasons
 from pd_groundtruth.review.view import build_card
 from pd_groundtruth.review_db import ReviewDb
 
 _TEMPLATES_DIR: Path = Path(__file__).parent / "templates"
 _DB_PATH_ATTR: str = "review_db_path"
+_REASON_CONTEXT: dict[str, object] = {
+    "no_match_reasons": NO_MATCH_REASONS,
+    "unsure_reasons": UNSURE_REASONS,
+}
 
 
 def _db_path(request: Request) -> Path:
@@ -72,7 +80,13 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "card.html",
-            {"card": build_card(row), "filters": filters, "counts": counts, "back_id": back_id},
+            {
+                "card": build_card(row),
+                "filters": filters,
+                "counts": counts,
+                "back_id": back_id,
+                **_REASON_CONTEXT,
+            },
         )
 
     @app.get("/pair/{pair_id}", response_class=HTMLResponse)
@@ -95,7 +109,13 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "card.html",
-            {"card": build_card(row), "filters": filters, "counts": counts, "back_id": back_id},
+            {
+                "card": build_card(row),
+                "filters": filters,
+                "counts": counts,
+                "back_id": back_id,
+                **_REASON_CONTEXT,
+            },
         )
 
     @app.post("/label")
@@ -103,13 +123,16 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         request: Request,
         pair_id: int = Form(...),
         verdict: str = Form(...),
+        reason: str | None = Form(None),
         note: str | None = Form(None),
         language: str | None = Form(None),
         band: str | None = Form(None),
     ) -> RedirectResponse:
         filters = parse_filters(language, band)
+        clean_note = note.strip() if note is not None and note.strip() else None
+        clean_reason = normalize_reason(verdict, reason)
         with ReviewDb.connect(_db_path(request)) as db:
-            db.add_label(pair_id, verdict, note=note)
+            db.add_label(pair_id, verdict, note=clean_note, reason=clean_reason)
         return _redirect_to_next(filters)
 
     @app.get("/stats", response_class=HTMLResponse)
@@ -119,10 +142,11 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         filters = parse_filters(language, band)
         with ReviewDb.connect(_db_path(request)) as db:
             counts = db.progress()
+            reason_summary = summarize_reasons(db.reason_counts())
         return templates.TemplateResponse(
             request,
             "stats.html",
-            {"counts": counts, "filters": filters},
+            {"counts": counts, "filters": filters, "reason_summary": reason_summary},
         )
 
     return app

@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS label (
     id INTEGER PRIMARY KEY,
     pair_id INTEGER NOT NULL REFERENCES review_pair(id),
     verdict TEXT NOT NULL CHECK (verdict IN ('match', 'no_match', 'unsure')),
+    reason TEXT,
     note TEXT,
     labeled_at TEXT NOT NULL
 );
@@ -214,8 +215,17 @@ class ReviewDb:
         self._conn.close()
 
     def init_schema(self) -> None:
-        """Create tables and indices if they do not already exist."""
+        """Create tables and indices if they do not already exist.
+
+        Also runs an idempotent migration that adds the ``label.reason``
+        column to databases created before reason codes existed, so a
+        partially-labeled ``review.db`` is upgraded in place without losing
+        any verdicts.
+        """
         self._conn.executescript(_SCHEMA)
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(label)")}
+        if "reason" not in columns:
+            self._conn.execute("ALTER TABLE label ADD COLUMN reason TEXT")
 
     def commit(self) -> None:
         """Flush pending writes to disk."""
@@ -412,8 +422,19 @@ class ReviewDb:
             by_language=by_language,
         )
 
-    def add_label(self, pair_id: int, verdict: str, note: str | None = None) -> int:
+    def add_label(
+        self,
+        pair_id: int,
+        verdict: str,
+        note: str | None = None,
+        reason: str | None = None,
+    ) -> int:
         """Append a verdict for ``pair_id`` and return the new ``label.id``.
+
+        ``reason`` is an optional controlled reason code (see
+        :mod:`pd_groundtruth.review.reasons`); ``note`` is optional free text.
+        Both are stored as-is — the caller is responsible for validating the
+        code against the verdict's vocabulary.
 
         Raises:
             ValueError: If ``verdict`` is not one of ``match``,
@@ -422,13 +443,37 @@ class ReviewDb:
         if verdict not in _VALID_VERDICTS:
             raise ValueError(f"invalid verdict {verdict!r}")
         cursor = self._conn.execute(
-            "INSERT INTO label (pair_id, verdict, note, labeled_at) VALUES (?, ?, ?, ?)",
-            (pair_id, verdict, note, _now()),
+            "INSERT INTO label (pair_id, verdict, reason, note, labeled_at) VALUES (?, ?, ?, ?, ?)",
+            (pair_id, verdict, reason, note, _now()),
         )
         row_id = cursor.lastrowid
         if row_id is None:  # pragma: no cover
             raise RuntimeError("INSERT did not return a rowid")
         return row_id
+
+    def reason_counts(self) -> dict[tuple[str, str], int]:
+        """Return counts of current-label reason codes keyed on ``(verdict, reason)``.
+
+        Only the latest label per pair is counted (matching :meth:`progress`),
+        and only rows that carry a non-null reason, so the result is a tally of
+        *why* the current no_match / unsure verdicts were given.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT cur.verdict AS verdict, cur.reason AS reason, COUNT(*) AS n
+            FROM (
+                SELECT l.pair_id, l.verdict, l.reason
+                FROM label l
+                JOIN (
+                    SELECT pair_id, MAX(id) AS max_id FROM label GROUP BY pair_id
+                ) latest
+                  ON l.pair_id = latest.pair_id AND l.id = latest.max_id
+            ) cur
+            WHERE cur.reason IS NOT NULL
+            GROUP BY cur.verdict, cur.reason
+            """
+        ).fetchall()
+        return {(row["verdict"], row["reason"]): row["n"] for row in rows}
 
 
 __all__ = [
