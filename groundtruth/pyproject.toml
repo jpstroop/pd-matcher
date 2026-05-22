@@ -13,6 +13,10 @@ dependencies = [
     "lxml>=5.3.0",
     "typer[all]>=0.15.0",
     "msgspec>=0.21.1",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.18",
     "pd-matcher @ file:///${PROJECT_ROOT}/..",
 ]
 
@@ -32,6 +36,7 @@ lint = "ruff check src tests"
 lint-fix = "ruff check --fix src tests"
 typecheck = "mypy src tests"
 test = "pytest"
+webui = "pytest -m webui -o addopts= --no-header"
 gates = {composite = ["fmt", "lint", "typecheck", "test"]}
 
 [tool.pdm.build]
@@ -87,11 +92,18 @@ line-ending = "lf"
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-addopts = "--cov=src/pd_groundtruth --cov-branch --cov-fail-under=90 --cov-report=term-missing"
+addopts = "-m 'not webui' --cov=src/pd_groundtruth --cov-branch --cov-fail-under=90 --cov-report=term-missing"
+markers = [
+    "webui: thin FastAPI route + template smoke tests (deselected from the default run)",
+]
 
 [tool.coverage.run]
 branch = true
 source = ["src/pd_groundtruth"]
+omit = [
+    "src/pd_groundtruth/review/app.py",
+    "src/pd_groundtruth/review/server.py",
+]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -108,4 +120,5 @@ dev = [
     "types-requests>=2.32.0",
     "responses>=0.25.0",
     "lxml-stubs>=0.5.1",
+    "httpx>=0.28.0",
 ]

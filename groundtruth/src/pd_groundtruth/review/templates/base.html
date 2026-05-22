@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pd-groundtruth review</title>
+  <style>
+    :root { --bg: #f7f7f8; --fg: #1d1d1f; --muted: #6b6b70; --line: #e0e0e3;
+            --match: #1e7d34; --no: #b3261e; --unsure: #8a6d00; --accent: #2962ff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif;
+           background: var(--bg); color: var(--fg); }
+    header { display: flex; align-items: baseline; gap: 1.5rem; padding: .6rem 1.2rem;
+             background: #fff; border-bottom: 1px solid var(--line); position: sticky; top: 0; }
+    header .tally { color: var(--muted); font-size: .9rem; }
+    header a { color: var(--accent); text-decoration: none; }
+    main { max-width: 980px; margin: 1.4rem auto; padding: 0 1.2rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .panel { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; }
+    .panel h2 { margin: 0 0 .6rem; font-size: .8rem; letter-spacing: .08em;
+                text-transform: uppercase; color: var(--muted); }
+    .field { margin: .35rem 0; }
+    .field .k { color: var(--muted); font-size: .78rem; }
+    .field .v { font-size: .98rem; }
+    .v.title { font-weight: 600; font-size: 1.1rem; }
+    .renewal { display: inline-block; padding: .1rem .5rem; border-radius: 999px;
+               font-size: .78rem; font-weight: 600; }
+    .renewal.Renewed { background: #fdecea; color: var(--no); }
+    .renewal.Not.renewed, .renewal.notrenewed { background: #e9f6ec; color: var(--match); }
+    .renewal.unknown { background: #eee; color: var(--muted); }
+    .meta { display: flex; gap: .8rem; flex-wrap: wrap; align-items: center;
+            margin-bottom: 1rem; color: var(--muted); font-size: .85rem; }
+    .score { font-weight: 700; color: var(--fg); font-size: 1rem; }
+    .band { padding: .1rem .5rem; border-radius: 6px; background: #eef1ff; color: var(--accent); }
+    .evidence { margin-top: 1rem; }
+    .ev-row { display: grid; grid-template-columns: 180px 1fr 48px; gap: .6rem;
+              align-items: center; margin: .3rem 0; font-size: .85rem; }
+    .ev-bar { background: #ececef; border-radius: 5px; height: 12px; overflow: hidden; }
+    .ev-fill { background: var(--accent); height: 100%; }
+    .actions { display: flex; gap: .6rem; margin-top: 1.2rem; }
+    .actions button { flex: 1; padding: .8rem; font-size: 1rem; font-weight: 600;
+                      border: 1px solid var(--line); border-radius: 10px; cursor: pointer; background: #fff; }
+    .actions button.match { color: var(--match); }
+    .actions button.no { color: var(--no); }
+    .actions button.unsure { color: var(--unsure); }
+    .actions button.skip { color: var(--muted); }
+    .hint { color: var(--muted); font-size: .82rem; margin-top: .8rem; }
+    table.stats { border-collapse: collapse; width: 100%; }
+    table.stats th, table.stats td { text-align: left; padding: .4rem .8rem;
+                                     border-bottom: 1px solid var(--line); }
+    .big { font-size: 2rem; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong><a href="/{% if filters %}?{{ filters.query_string() }}{% endif %}">pd-groundtruth review</a></strong>
+    {% if counts %}
+    <span class="tally">labeled <strong>{{ counts.labeled }}</strong> / remaining <strong>{{ counts.remaining }}</strong> of {{ counts.total }}</span>
+    {% endif %}
+    <span class="tally"><a href="/stats{% if filters %}?{{ filters.query_string() }}{% endif %}">stats</a></span>
+    {% if filters and (filters.language or filters.band) %}
+    <span class="tally">filter:
+      {% if filters.language %}lang={{ filters.language }}{% endif %}
+      {% if filters.band %}band={{ filters.band }}{% endif %}
+    </span>
+    {% endif %}
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
