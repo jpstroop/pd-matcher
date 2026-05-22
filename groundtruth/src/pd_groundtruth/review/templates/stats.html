@@ -25,4 +25,20 @@
     {% endfor %}
   </table>
 </section>
+
+{% if reason_summary %}
+<section class="panel" style="margin-top: 1rem;">
+  <h2>Reasons (current no-match / unsure)</h2>
+  <table class="stats">
+    <tr><th>verdict</th><th>reason</th><th>count</th></tr>
+    {% for r in reason_summary %}
+    <tr>
+      <td>{{ r.verdict }}</td>
+      <td>{{ r.label }}</td>
+      <td>{{ r.count }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
 {% endblock %}

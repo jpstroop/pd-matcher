@@ -47,6 +47,17 @@
     .actions button.no { color: var(--no); }
     .actions button.unsure { color: var(--unsure); }
     .actions button.skip { color: var(--muted); }
+    .reasons { margin-top: .9rem; display: flex; flex-direction: column; gap: .5rem; }
+    .reason-group { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; }
+    .reason-label { color: var(--muted); font-size: .72rem; text-transform: uppercase;
+                    letter-spacing: .06em; min-width: 7.5rem; }
+    .chip { padding: .25rem .6rem; font-size: .82rem; border: 1px solid var(--line);
+            border-radius: 999px; background: #fff; cursor: pointer; }
+    .chip.no { color: var(--no); }
+    .chip.unsure { color: var(--unsure); }
+    .chip:hover { border-color: currentColor; }
+    .note-input { width: 100%; padding: .5rem .6rem; font-size: .9rem;
+                  border: 1px solid var(--line); border-radius: 8px; margin-top: .2rem; }
     .hint { color: var(--muted); font-size: .82rem; margin-top: .8rem; }
     table.stats { border-collapse: collapse; width: 100%; }
     table.stats th, table.stats td { text-align: left; padding: .4rem .8rem;

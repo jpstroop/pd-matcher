@@ -139,7 +139,16 @@ every keypress writes to `review.db`:
 | `u` | unsure |
 | `s` or space | skip (advance without labeling) |
 
-On-screen buttons do the same.
+On-screen buttons do the same. To step back and fix a verdict, press `b` (or
+`←`); it returns to the pair you most recently labeled and chains further back
+from there.
+
+**Record *why* a no-match / unsure** (optional, never blocks the fast path). Each
+`no_match` / `unsure` reason is a one-click button that submits that verdict
+*with* a controlled reason code (e.g. "Different work / title collision",
+"Wrong year or edition"), so failure modes are aggregatable. A free-text note
+field rides along for anything the codes don't cover. The reason tally shows up
+on `…/stats`.
 
 **Focus a session** with URL filters — useful for the English-first curriculum
 (label the easier languages before the harder ones):

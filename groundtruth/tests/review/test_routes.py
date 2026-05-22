@@ -146,6 +146,34 @@ def test_back_link_preserves_filter(client: TestClient) -> None:
     assert "/pair/2?language=fre" in nxt.text
 
 
+def test_card_renders_reason_chips(client: TestClient) -> None:
+    response = client.get("/")
+    assert "Different work / title collision" in response.text
+    assert "Insufficient data on one side" in response.text
+    assert 'name="note"' in response.text
+
+
+def test_reason_chip_records_reason(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "no_match", "reason": "diff_work"},
+        follow_redirects=False,
+    )
+    stats = client.get("/stats")
+    assert "Reasons (current" in stats.text
+    assert "Different work / title collision" in stats.text
+
+
+def test_invalid_reason_is_dropped(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match", "reason": "diff_work"},
+        follow_redirects=False,
+    )
+    stats = client.get("/stats")
+    assert "Reasons (current" not in stats.text
+
+
 def test_empty_queue_page_when_all_labeled(client: TestClient) -> None:
     client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
     client.post("/label", data={"pair_id": "2", "verdict": "match"}, follow_redirects=False)
