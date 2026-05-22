@@ -34,6 +34,12 @@ def test_normalize_reason_drops_invalid_and_empty() -> None:
     assert normalize_reason(VERDICT_MATCH, "diff_work") is None
 
 
+def test_edition_unsure_validates_and_round_trips() -> None:
+    assert is_valid_reason(VERDICT_UNSURE, "edition_unsure")
+    assert normalize_reason(VERDICT_UNSURE, "edition_unsure") == "edition_unsure"
+    assert not is_valid_reason(VERDICT_NO_MATCH, "edition_unsure")
+
+
 def test_summarize_reasons_orders_by_vocab_and_drops_zero() -> None:
     counts = {
         (VERDICT_NO_MATCH, "wrong_year_edition"): 3,

@@ -32,6 +32,7 @@ NO_MATCH_REASONS: tuple[ReasonCode, ...] = (
 UNSURE_REASONS: tuple[ReasonCode, ...] = (
     ReasonCode(code="insufficient_data", label="Insufficient data on one side"),
     ReasonCode(code="plausible_unverified", label="Plausible but unverified"),
+    ReasonCode(code="edition_unsure", label="Unsure about edition"),
     ReasonCode(code="multiple_candidates", label="Multiple candidates plausible"),
 )
 
