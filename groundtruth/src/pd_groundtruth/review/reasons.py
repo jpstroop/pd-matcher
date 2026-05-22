@@ -33,7 +33,6 @@ UNSURE_REASONS: tuple[ReasonCode, ...] = (
     ReasonCode(code="insufficient_data", label="Insufficient data on one side"),
     ReasonCode(code="plausible_unverified", label="Plausible but unverified"),
     ReasonCode(code="edition_unsure", label="Unsure about edition"),
-    ReasonCode(code="multiple_candidates", label="Multiple candidates plausible"),
 )
 
 _BY_VERDICT: dict[str, tuple[ReasonCode, ...]] = {
@@ -55,15 +54,16 @@ def is_valid_reason(verdict: str, code: str) -> bool:
     return any(reason.code == code for reason in reasons_for(verdict))
 
 
-def normalize_reason(verdict: str, code: str | None) -> str | None:
-    """Return ``code`` if valid for ``verdict``, else ``None``.
+def normalize_reasons(verdict: str, codes: list[str]) -> tuple[str, ...]:
+    """Return the subset of ``codes`` valid for ``verdict``, de-duplicated.
 
-    Used by the route to drop unrecognized or mismatched codes rather than
-    persisting garbage into the ``reason`` column.
+    Codes not in the verdict's vocabulary are dropped, duplicates are
+    collapsed, and the result follows the vocabulary's declared order rather
+    than the caller's submission order, so a label's stored reasons are stable
+    regardless of which chips the reviewer clicked first.
     """
-    if code is None or not code:
-        return None
-    return code if is_valid_reason(verdict, code) else None
+    submitted = set(codes)
+    return tuple(reason.code for reason in reasons_for(verdict) if reason.code in submitted)
 
 
 class ReasonSummary(Struct, frozen=True, forbid_unknown_fields=True):
@@ -104,7 +104,7 @@ __all__ = [
     "ReasonCode",
     "ReasonSummary",
     "is_valid_reason",
-    "normalize_reason",
+    "normalize_reasons",
     "reasons_for",
     "summarize_reasons",
 ]

@@ -63,8 +63,15 @@ CREATE TABLE IF NOT EXISTS label (
     labeled_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS label_reason (
+    label_id INTEGER NOT NULL REFERENCES label(id),
+    code TEXT NOT NULL,
+    PRIMARY KEY (label_id, code)
+);
+
 CREATE INDEX IF NOT EXISTS ix_review_pair_lang_band ON review_pair (language, band);
 CREATE INDEX IF NOT EXISTS ix_label_pair ON label (pair_id);
+CREATE INDEX IF NOT EXISTS ix_label_reason_label ON label_reason (label_id);
 """
 
 
@@ -217,15 +224,45 @@ class ReviewDb:
     def init_schema(self) -> None:
         """Create tables and indices if they do not already exist.
 
-        Also runs an idempotent migration that adds the ``label.reason``
-        column to databases created before reason codes existed, so a
-        partially-labeled ``review.db`` is upgraded in place without losing
-        any verdicts.
+        Runs two idempotent migrations so a partially-labeled ``review.db``
+        upgrades in place without losing any verdicts:
+
+        1. Add the scalar ``label.reason`` column to databases created before
+           reason codes existed. The column is retained but no longer written;
+           SQLite makes dropping a column painful and a stale column is harmless.
+        2. Backfill the normalized ``label_reason`` table from any pre-existing
+           scalar ``label.reason`` values, so single-reason labels recorded
+           under the old schema still feed :meth:`reason_counts`.
         """
         self._conn.executescript(_SCHEMA)
         columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(label)")}
         if "reason" not in columns:
             self._conn.execute("ALTER TABLE label ADD COLUMN reason TEXT")
+        unmigrated = self._conn.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM label l
+                WHERE l.reason IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM label_reason lr
+                      WHERE lr.label_id = l.id AND lr.code = l.reason
+                  )
+            )
+            """
+        ).fetchone()[0]
+        if unmigrated:
+            self._conn.execute(
+                """
+                INSERT INTO label_reason (label_id, code)
+                SELECT l.id, l.reason
+                FROM label l
+                WHERE l.reason IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM label_reason lr
+                      WHERE lr.label_id = l.id AND lr.code = l.reason
+                  )
+                """
+            )
 
     def commit(self) -> None:
         """Flush pending writes to disk."""
@@ -427,14 +464,16 @@ class ReviewDb:
         pair_id: int,
         verdict: str,
         note: str | None = None,
-        reason: str | None = None,
+        reasons: tuple[str, ...] = (),
     ) -> int:
         """Append a verdict for ``pair_id`` and return the new ``label.id``.
 
-        ``reason`` is an optional controlled reason code (see
-        :mod:`pd_groundtruth.review.reasons`); ``note`` is optional free text.
-        Both are stored as-is — the caller is responsible for validating the
-        code against the verdict's vocabulary.
+        ``reasons`` is zero or more controlled reason codes (see
+        :mod:`pd_groundtruth.review.reasons`), each written as its own
+        ``label_reason`` row; ``note`` is optional free text. The codes are
+        stored as-is — the caller is responsible for validating them against
+        the verdict's vocabulary. The legacy scalar ``label.reason`` column is
+        left ``NULL``; reasons live only in ``label_reason`` going forward.
 
         Raises:
             ValueError: If ``verdict`` is not one of ``match``,
@@ -443,37 +482,42 @@ class ReviewDb:
         if verdict not in _VALID_VERDICTS:
             raise ValueError(f"invalid verdict {verdict!r}")
         cursor = self._conn.execute(
-            "INSERT INTO label (pair_id, verdict, reason, note, labeled_at) VALUES (?, ?, ?, ?, ?)",
-            (pair_id, verdict, reason, note, _now()),
+            "INSERT INTO label (pair_id, verdict, note, labeled_at) VALUES (?, ?, ?, ?)",
+            (pair_id, verdict, note, _now()),
         )
         row_id = cursor.lastrowid
         if row_id is None:  # pragma: no cover
             raise RuntimeError("INSERT did not return a rowid")
+        self._conn.executemany(
+            "INSERT INTO label_reason (label_id, code) VALUES (?, ?)",
+            [(row_id, code) for code in reasons],
+        )
         return row_id
 
     def reason_counts(self) -> dict[tuple[str, str], int]:
-        """Return counts of current-label reason codes keyed on ``(verdict, reason)``.
+        """Return counts of current-label reason codes keyed on ``(verdict, code)``.
 
-        Only the latest label per pair is counted (matching :meth:`progress`),
-        and only rows that carry a non-null reason, so the result is a tally of
-        *why* the current no_match / unsure verdicts were given.
+        Joins ``label_reason`` to the latest label per pair (matching
+        :meth:`progress`), so a label carrying two codes contributes to two
+        counts and superseded labels' reasons are excluded. The result is a
+        tally of *why* the current no_match / unsure verdicts were given.
         """
         rows = self._conn.execute(
             """
-            SELECT cur.verdict AS verdict, cur.reason AS reason, COUNT(*) AS n
+            SELECT cur.verdict AS verdict, lr.code AS code, COUNT(*) AS n
             FROM (
-                SELECT l.pair_id, l.verdict, l.reason
+                SELECT l.id, l.verdict
                 FROM label l
                 JOIN (
                     SELECT pair_id, MAX(id) AS max_id FROM label GROUP BY pair_id
                 ) latest
                   ON l.pair_id = latest.pair_id AND l.id = latest.max_id
             ) cur
-            WHERE cur.reason IS NOT NULL
-            GROUP BY cur.verdict, cur.reason
+            JOIN label_reason lr ON lr.label_id = cur.id
+            GROUP BY cur.verdict, lr.code
             """
         ).fetchall()
-        return {(row["verdict"], row["reason"]): row["n"] for row in rows}
+        return {(row["verdict"], row["code"]): row["n"] for row in rows}
 
 
 __all__ = [

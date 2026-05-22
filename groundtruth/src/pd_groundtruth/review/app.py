@@ -24,13 +24,14 @@ from pd_groundtruth.review.filters import parse_filters
 from pd_groundtruth.review.reasons import NO_MATCH_REASONS
 from pd_groundtruth.review.reasons import UNSURE_REASONS
 from pd_groundtruth.review.reasons import ReasonCode
-from pd_groundtruth.review.reasons import normalize_reason
+from pd_groundtruth.review.reasons import normalize_reasons
 from pd_groundtruth.review.reasons import summarize_reasons
 from pd_groundtruth.review.view import build_card
 from pd_groundtruth.review_db import ReviewDb
 
 _TEMPLATES_DIR: Path = Path(__file__).parent / "templates"
 _DB_PATH_ATTR: str = "review_db_path"
+_REASON_FORM: list[str] = Form([])
 _REASON_CONTEXT: dict[str, tuple[ReasonCode, ...]] = {
     "no_match_reasons": NO_MATCH_REASONS,
     "unsure_reasons": UNSURE_REASONS,
@@ -124,16 +125,16 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         request: Request,
         pair_id: int = Form(...),
         verdict: str = Form(...),
-        reason: str | None = Form(None),
+        reason: list[str] = _REASON_FORM,
         note: str | None = Form(None),
         language: str | None = Form(None),
         band: str | None = Form(None),
     ) -> RedirectResponse:
         filters = parse_filters(language, band)
         clean_note = note.strip() if note is not None and note.strip() else None
-        clean_reason = normalize_reason(verdict, reason)
+        clean_reasons = normalize_reasons(verdict, reason)
         with ReviewDb.connect(_db_path(request)) as db:
-            db.add_label(pair_id, verdict, note=clean_note, reason=clean_reason)
+            db.add_label(pair_id, verdict, note=clean_note, reasons=clean_reasons)
         return _redirect_to_next(filters)
 
     @app.get("/stats", response_class=HTMLResponse)
