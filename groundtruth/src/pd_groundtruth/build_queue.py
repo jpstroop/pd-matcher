@@ -54,6 +54,7 @@ from pd_matcher.models import MarcRecord
 from pd_matcher.parsers.marc import iter_marc_records
 from pd_matcher.workers import run_match
 
+from pd_groundtruth.build_queue_vault import resolve_vault_for_build
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.progress import render_kept_suffix
@@ -65,10 +66,12 @@ from pd_groundtruth.sampling import SOURCE_BELOW_SAMPLE
 from pd_groundtruth.sampling import BudgetModel
 from pd_groundtruth.sampling import band_of
 from pd_groundtruth.sampling import reservoir_sample
+from pd_groundtruth.vault_pair_resolver import IDF_CACHE_NAME as _SHARED_IDF_CACHE_NAME
+from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
 
 _LOGGER = getLogger(__name__)
 
-_IDF_CACHE_NAME: str = "idf.msgpack"
+_IDF_CACHE_NAME: str = _SHARED_IDF_CACHE_NAME
 _CALIBRATOR_NAME: str = "calibrator.msgpack"
 _PREPARED_PREFIX: str = "pd-groundtruth-prepared-"
 _DEFAULT_LANGUAGE: str = "eng"
@@ -156,6 +159,12 @@ class StratifyingResultWriter:
     row using that vault entry's verdict / reasons / note / ``labeled_at`` so a
     rebuilt queue still reports the pair as labeled and ``next_unlabeled`` skips
     it. The reviewer can step back to re-label if needed.
+
+    Pre-resolved vault pairs (already scored against the matcher's per-pair
+    routine by :func:`pd_groundtruth.vault_pair_resolver.resolve_vault_pairs`
+    in the parent) are injected unconditionally on close, bypassing the
+    per-stratum caps so every persistable vault verdict makes it back into
+    the rebuilt queue regardless of sample size.
     """
 
     __slots__ = (
@@ -168,6 +177,7 @@ class StratifyingResultWriter:
         "_seen",
         "_vault",
         "_vault_applied",
+        "_vault_pairs",
     )
 
     def __init__(
@@ -177,11 +187,13 @@ class StratifyingResultWriter:
         budget: BudgetModel,
         seed: int,
         vault: dict[tuple[str, str], VaultEntry] | None = None,
+        vault_pairs: tuple[ResolvedVaultPair, ...] = (),
     ) -> None:
         self._db_path = db_path
         self._budget = budget
         self._seed = seed
         self._vault: dict[tuple[str, str], VaultEntry] = vault or {}
+        self._vault_pairs: tuple[ResolvedVaultPair, ...] = vault_pairs
         self._db: ReviewDb | None = None
         self._kept: dict[tuple[str, str], int] = {}
         self._below_buffer: dict[str, list[_BufferedCandidate]] = {}
@@ -199,16 +211,18 @@ class StratifyingResultWriter:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
-        """Draw the below-0.7 reservoir, persist it, then commit and close."""
+        """Draw the below-0.7 reservoir, inject vault pairs, commit and close."""
         db = self._require_db()
         if exc_type is None:
             self._finalize_below_sample(db)
+            self._inject_vault_pairs(db)
             db.commit()
             self._log_fill()
             new_pairs = sum(self._kept.values()) - self._vault_applied
             _LOGGER.info(
-                "vault contributed %d pre-applied labels; %d new pairs queued",
+                "vault pre-applied: %d pairs (of %d resolved); %d non-vault pairs queued",
                 self._vault_applied,
+                len(self._vault_pairs),
                 new_pairs,
             )
         db.__exit__(exc_type, exc, tb)
@@ -270,6 +284,29 @@ class StratifyingResultWriter:
                 key = (language, BAND_BELOW)
                 self._kept[key] = self._kept.get(key, 0) + 1
 
+    def _inject_vault_pairs(self, db: ReviewDb) -> None:
+        """Persist every pre-resolved vault pair, bypassing per-stratum caps.
+
+        Vault pairs are inserted *after* the regular stratifying flow has
+        finalized, so cap counts reflect only matcher-proposed acceptances
+        and the vault contribution stays a pure bonus. Each insertion also
+        pre-applies the vault entry's verdict via
+        :meth:`ReviewDb.insert_existing_label` so a rebuilt queue carries
+        the original ``labeled_at`` forward unchanged.
+        """
+        for resolved in self._vault_pairs:
+            pair_id = db.insert_pair(resolved.pair)
+            db.insert_existing_label(
+                pair_id=pair_id,
+                verdict=resolved.entry.verdict,
+                labeled_at=resolved.entry.labeled_at,
+                note=resolved.entry.note,
+                reasons=resolved.entry.reasons,
+            )
+            self._vault_applied += 1
+            key = (resolved.pair.language, resolved.pair.band)
+            self._kept[key] = self._kept.get(key, 0) + 1
+
     def _insert_with_vault(self, db: ReviewDb, pair: PairInsert) -> None:
         """Insert one pair; if the vault has a verdict for it, also pre-apply it."""
         pair_id = db.insert_pair(pair)
@@ -302,17 +339,21 @@ class StratifyingWriterFactory(Struct, frozen=True, forbid_unknown_fields=True):
     ``run_match`` invokes the factory inside the spawned writer process with
     the run's ``output_path``; that path is ignored here because the review
     database location travels with the factory. Carrying only paths, the
-    budget, and the seed keeps every attribute picklable across ``spawn``.
+    budget, the seed, and the already-resolved vault pairs keeps every
+    attribute picklable across ``spawn``.
 
-    ``vault_path`` is read inside the writer process (so the parent never
-    needs to ship the parsed vault across the process boundary) — the factory
-    only carries the path.
+    ``vault_path`` is re-read inside the writer process so the matcher-route
+    safety net still pre-applies labels for any pair the matcher happens to
+    propose for a vault key (rare once vault MARCs are excluded from the
+    sample, but kept as a belt-and-braces). ``vault_pairs`` carries the
+    parent's pre-scored, ready-to-insert vault pairs across the boundary.
     """
 
     db_path: Path
     budget: BudgetModel
     seed: int
     vault_path: Path
+    vault_pairs: tuple[ResolvedVaultPair, ...] = ()
 
     def __call__(self, _output_path: Path) -> StratifyingResultWriter:
         """Construct the writer; ``_output_path`` is unused by design."""
@@ -322,16 +363,27 @@ class StratifyingWriterFactory(Struct, frozen=True, forbid_unknown_fields=True):
             budget=self.budget,
             seed=self.seed,
             vault=vault,
+            vault_pairs=self.vault_pairs,
         )
 
 
 class BuildSummary(Struct, frozen=True, forbid_unknown_fields=True):
-    """Result of one :func:`build_queue` invocation."""
+    """Result of one :func:`build_queue` invocation.
+
+    ``vault_resolved`` is the count of vault entries materialized into a
+    persistable pair this run; ``vault_missing_in_pool`` and
+    ``vault_missing_in_index`` are the diagnostic counts for vault entries
+    that could not be carried forward this run because the underlying MARC or
+    CCE record is no longer available (the vault file is never modified).
+    """
 
     records_sampled: int
     records_matched: int
     pairs_written: int
     stratum_counts: dict[str, int]
+    vault_resolved: int = 0
+    vault_missing_in_pool: int = 0
+    vault_missing_in_index: int = 0
 
 
 def _iter_language_dirs(pool: Path) -> Iterator[tuple[str, Path]]:
@@ -346,12 +398,23 @@ def _sample_language(
     *,
     sample_per_lang: int,
     seed: int,
+    exclude: frozenset[str] = frozenset(),
 ) -> list[MarcRecord]:
-    """Reservoir-sample up to ``sample_per_lang`` MARC records from one dir."""
+    """Reservoir-sample up to ``sample_per_lang`` records, skipping ``exclude``.
+
+    Records whose ``control_id`` is in ``exclude`` are dropped before reservoir
+    selection so they neither count against the sample budget nor reach the
+    matcher. The intended use is to bypass vault-claimed MARCs (whose
+    matcher-route output would be redundant with the pre-resolved vault
+    pair already queued for insertion).
+    """
 
     def _records() -> Iterator[MarcRecord]:
         for shard in sorted(language_dir.glob("*.xml")):
-            yield from iter_marc_records(shard)
+            for record in iter_marc_records(shard):
+                if record.control_id in exclude:
+                    continue
+                yield record
 
     return reservoir_sample(_records(), sample_per_lang, seed)
 
@@ -399,8 +462,16 @@ def build_queue(
 ) -> BuildSummary:
     """Build the stratified review queue and persist it to ``out_path``.
 
-    Samples the pool per language, materializes the sample as prepared chunks,
-    then drives :func:`pd_matcher.workers.run_match` with a
+    Resolves every current vault entry up front into a pre-scored pair so the
+    rebuilt queue *always* carries the existing verdict forward (the matcher's
+    candidate retrieval doesn't necessarily surface a previously-labeled pair
+    on a fresh pass — see jpstroop/pd-matcher#33). Vault-claimed MARC records
+    are then excluded from the per-language reservoir so the matcher does not
+    re-propose them, and the writer inserts the resolved vault pairs at close
+    *outside* the per-stratum caps so vault carryover is unconditional.
+
+    Samples the (vault-excluded) pool per language, materializes the sample as
+    prepared chunks, and drives :func:`pd_matcher.workers.run_match` with a
     :class:`StratifyingResultWriter`. The matcher's ``min_combined_score`` is
     forced to ``0.0`` so the writer sees every candidate's score and can band
     it; per-worker and aggregate throughput/ETA come from ``run_match``'s
@@ -410,8 +481,9 @@ def build_queue(
         pool: Root directory whose ``<lang>/*.xml`` shards form the pool.
         index_path: LMDB env produced by ``pd-matcher index build``.
         out_path: Destination SQLite review database.
-        vault_path: JSONL label vault; current entries are pre-applied to the
-            queue so previously-labeled pairs stay labeled across rebuilds.
+        vault_path: JSONL label vault; current entries are resolved against
+            the pool/index and pre-applied to the queue so previously-labeled
+            pairs stay labeled across rebuilds, regardless of sample size.
         budget: Per-(language, band) caps.
         matching_config: Active config; the score floor is forced to ``0.0``.
         pairing_config: Active field-pairing config.
@@ -429,21 +501,43 @@ def build_queue(
     """
     if workers < 1:
         raise ValueError(f"workers must be >= 1 (got {workers!r})")
+
+    idf_cache_path = index_path.parent / _IDF_CACHE_NAME
+    idf = load_or_build_idf(idf_cache_path, lambda: NyplIndexLookup(index_path))
+    calibrator = _load_calibrator(index_path.parent)
+
+    resolved_vault_pairs, vault_summary = resolve_vault_for_build(
+        vault_path=vault_path,
+        pool=pool,
+        index_path=index_path,
+        matching_config=matching_config,
+        pairing_config=pairing_config,
+        idf=idf,
+        calibrator=calibrator,
+    )
+    exclude_ids = frozenset(resolved.pair.marc_control_id for resolved in resolved_vault_pairs)
+
     sampled: list[MarcRecord] = []
     for language, language_dir in _iter_language_dirs(pool):
-        records = _sample_language(language_dir, sample_per_lang=sample_per_lang, seed=seed)
+        records = _sample_language(
+            language_dir,
+            sample_per_lang=sample_per_lang,
+            seed=seed,
+            exclude=exclude_ids,
+        )
         _LOGGER.info("sampled %d records for language=%s", len(records), language)
         sampled.extend(records)
 
     prepared_dir = Path(mkdtemp(prefix=_PREPARED_PREFIX))
     try:
         manifest = _write_sample_chunks(sampled, prepared_dir)
-        idf_cache_path = index_path.parent / _IDF_CACHE_NAME
-        idf = load_or_build_idf(idf_cache_path, lambda: NyplIndexLookup(index_path))
-        calibrator = _load_calibrator(index_path.parent)
         floored_config = replace(matching_config, min_combined_score=0.0)
         factory = StratifyingWriterFactory(
-            db_path=out_path, budget=budget, seed=seed, vault_path=vault_path
+            db_path=out_path,
+            budget=budget,
+            seed=seed,
+            vault_path=vault_path,
+            vault_pairs=tuple(resolved_vault_pairs),
         )
         _LOGGER.info("matching start: total=%d workers=%d", manifest.total_records, workers)
         report = run_match(
@@ -471,16 +565,20 @@ def build_queue(
         _LOGGER.info("stratum %s filled=%d", label, n)
     pairs_written = sum(labeled.values())
     _LOGGER.info(
-        "build complete: sampled=%d matched=%d written=%d",
+        "build complete: sampled=%d matched=%d written=%d vault_resolved=%d",
         len(sampled),
         report.records_processed,
         pairs_written,
+        vault_summary.resolved,
     )
     return BuildSummary(
         records_sampled=len(sampled),
         records_matched=report.records_processed,
         pairs_written=pairs_written,
         stratum_counts=labeled,
+        vault_resolved=vault_summary.resolved,
+        vault_missing_in_pool=vault_summary.missing_in_pool,
+        vault_missing_in_index=vault_summary.missing_in_index,
     )
 
 
