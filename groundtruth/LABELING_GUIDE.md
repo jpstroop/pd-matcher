@@ -52,9 +52,12 @@ artifacts of the reissue, not as scoring failures. Use `reprint_or_format` on
 the unsure side if the underlying work looks right but the digital reissue
 muddies the comparison.
 
-TODO: e-book reprints will eventually be filtered out at acquire time; once
-that lands these pairs will not reach the review queue at all. (Linking the
-GitHub issue is pending.)
+E-book reprints will be filtered out at acquire time once
+[#30](https://github.com/jpstroop/pd-matcher/issues/30) lands; after that
+these pairs will not reach the review queue at all. That work depends on
+[#28](https://github.com/jpstroop/pd-matcher/issues/28) (label vault)
+shipping first, so the human labels already produced survive the
+inevitable `review.db` rebuild.
 
 ## When to use each chip
 
