@@ -336,6 +336,16 @@ class ReviewDb:
         ).fetchall()
         return {(row["language"], row["band"]): row["n"] for row in rows}
 
+    def pair_keys(self) -> set[tuple[str, str]]:
+        """Return every ``(marc_control_id, nypl_uuid)`` already in ``review_pair``.
+
+        Used by the ``vault-into-queue`` backfill to compute the set of vault
+        entries that need to be inserted into the rebuilt queue: anything not in
+        this set is missing and needs a row.
+        """
+        rows = self._conn.execute("SELECT marc_control_id, nypl_uuid FROM review_pair").fetchall()
+        return {(row["marc_control_id"], row["nypl_uuid"]) for row in rows}
+
     def next_unlabeled(
         self,
         *,

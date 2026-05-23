@@ -35,6 +35,7 @@ from pd_groundtruth.review.server import serve
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import default_budget
 from pd_groundtruth.sampling import scale_budget
+from pd_groundtruth.vault_into_queue import vault_into_queue
 
 app = Typer(add_completion=False, help="Acquire Princeton MARC ground-truth candidates.")
 
@@ -338,3 +339,54 @@ def seed_vault_command(
             append_entry(vault, entry)
             seeded += 1
     echo(f"seeded {seeded} labels; skipped {skipped} already-present")
+
+
+@app.command(name="vault-into-queue")
+def vault_into_queue_command(
+    db: Annotated[Path, Option("--db", help="Existing SQLite review database to backfill.")],
+    vault: Annotated[
+        Path,
+        Option(
+            "--vault",
+            help="JSONL label vault whose entries are checked against the queue.",
+        ),
+    ],
+    pool: Annotated[
+        Path,
+        Option(
+            "--pool",
+            help="Root dir whose <lang>/*.xml shards form the candidate pool.",
+        ),
+    ],
+    index: Annotated[
+        Path, Option("--index", help="LMDB env produced by `pd-matcher index build`.")
+    ],
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Backfill vault-labeled pairs that are missing from ``--db``.
+
+    Tactical bridge until ``build-queue`` always includes vault MARCs
+    (``jpstroop/pd-matcher#33``). Reads the vault, finds every
+    ``(marc_control_id, nypl_uuid)`` not present in ``--db``, locates the MARC
+    in ``--pool`` and the CCE registration in ``--index``, scores the specific
+    pair with the matcher, and inserts both the ``review_pair`` row and the
+    pre-existing vault verdict.
+    """
+    _configure_logging("vault-into-queue", log_file)
+    summary = vault_into_queue(
+        db_path=db,
+        vault_path=vault,
+        pool_path=pool,
+        index_path=index,
+        matching_config=_load_default_matching_config(),
+        pairing_config=_load_default_pairing_config(),
+    )
+    echo(
+        f"backfilled {summary.backfilled} vault pairs; "
+        f"{summary.missing_in_pool} MARC records not found in pool; "
+        f"{summary.missing_in_index} CCE records not found in index; "
+        f"{summary.already_present} already present (skipped)"
+    )
