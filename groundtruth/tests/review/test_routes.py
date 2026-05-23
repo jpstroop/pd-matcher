@@ -114,6 +114,43 @@ def ebook_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
         yield test_client
 
 
+@fixture
+def empty_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path):
+        pass
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
+def labels_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        eng_match = db.insert_pair(_pair(language="eng", control_id="eng-m", nypl_uuid="u-eng-m"))
+        eng_no = db.insert_pair(_pair(language="eng", control_id="eng-n", nypl_uuid="u-eng-n"))
+        fre_match = db.insert_pair(_pair(language="fre", control_id="fre-m", nypl_uuid="u-fre-m"))
+        db.add_label(eng_match, "match")
+        db.add_label(eng_no, "no_match", reasons=("diff_work",))
+        db.add_label(fre_match, "match")
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
+def pagination_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        for i in range(110):
+            pair_id = db.insert_pair(_pair(language="eng", control_id=f"c-{i}", nypl_uuid=f"u-{i}"))
+            db.add_label(pair_id, "match")
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
 def test_index_renders_a_card(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
@@ -388,3 +425,107 @@ def test_card_skip_url_includes_filters(skip_client: TestClient) -> None:
     response = skip_client.get("/", params={"language": "eng"})
     assert response.status_code == 200
     assert 'skipUrl = "/?language=eng&skip=1"' in response.text
+
+
+def test_labels_route_with_no_labels_shows_empty_message(empty_client: TestClient) -> None:
+    response = empty_client.get("/labels")
+    assert response.status_code == 200
+    assert "No labels yet" in response.text
+    assert "<table" not in response.text
+
+
+def test_labels_route_renders_table_for_each_label(labels_client: TestClient) -> None:
+    response = labels_client.get("/labels")
+    assert response.status_code == 200
+    assert 'href="/pair/1"' in response.text
+    assert 'href="/pair/2"' in response.text
+    assert 'href="/pair/3"' in response.text
+    assert "verdict-match" in response.text
+    assert "verdict-no_match" in response.text
+    assert "Different work / title collision" in response.text
+
+
+def test_labels_route_filter_by_verdict_narrows_rows(labels_client: TestClient) -> None:
+    response = labels_client.get("/labels", params={"verdict": "no_match"})
+    assert response.status_code == 200
+    assert 'href="/pair/2"' in response.text
+    assert 'href="/pair/1"' not in response.text
+    assert 'href="/pair/3"' not in response.text
+
+
+def test_labels_route_filter_by_language_narrows_rows(labels_client: TestClient) -> None:
+    response = labels_client.get("/labels", params={"language": "fre"})
+    assert response.status_code == 200
+    assert 'href="/pair/3"' in response.text
+    assert 'href="/pair/1"' not in response.text
+    assert 'href="/pair/2"' not in response.text
+
+
+def test_labels_route_filter_by_reason_excludes_labels_without_reason(
+    labels_client: TestClient,
+) -> None:
+    response = labels_client.get("/labels", params={"reason": "diff_work"})
+    assert response.status_code == 200
+    assert 'href="/pair/2"' in response.text
+    assert 'href="/pair/1"' not in response.text
+    assert 'href="/pair/3"' not in response.text
+
+
+def test_labels_route_substring_search_matches_marc_title(labels_client: TestClient) -> None:
+    response = labels_client.get("/labels", params={"q": "studied"})
+    assert response.status_code == 200
+    assert 'href="/pair/1"' in response.text
+    response = labels_client.get("/labels", params={"q": "no-such-thing"})
+    assert response.status_code == 200
+    assert 'href="/pair/1"' not in response.text
+    assert 'href="/pair/2"' not in response.text
+
+
+def test_labels_route_combined_filters_and_together(labels_client: TestClient) -> None:
+    response = labels_client.get("/labels", params={"verdict": "no_match", "language": "eng"})
+    assert response.status_code == 200
+    assert 'href="/pair/2"' in response.text
+    assert 'href="/pair/1"' not in response.text
+    assert 'href="/pair/3"' not in response.text
+
+
+def test_labels_route_pair_id_links_to_pair_detail(labels_client: TestClient) -> None:
+    response = labels_client.get("/labels")
+    assert response.status_code == 200
+    assert 'href="/pair/1"' in response.text
+
+
+def test_labels_route_pagination_caps_rows_and_disables_next_on_last_page(
+    pagination_client: TestClient,
+) -> None:
+    page_two = pagination_client.get("/labels", params={"page": 2})
+    assert page_two.status_code == 200
+    body_rows = page_two.text.split("<tbody>")[1].split("</tbody>")[0]
+    assert body_rows.count("<tr>") == 10
+    assert "page 2 of 2" in page_two.text
+    assert '<span class="disabled">Next' in page_two.text
+
+
+def test_labels_route_pagination_disables_prev_on_first_page(
+    pagination_client: TestClient,
+) -> None:
+    page_one = pagination_client.get("/labels")
+    assert page_one.status_code == 200
+    body_rows = page_one.text.split("<tbody>")[1].split("</tbody>")[0]
+    assert body_rows.count("<tr>") == 100
+    assert '<span class="disabled">' in page_one.text
+    assert "Prev" in page_one.text
+
+
+def test_labels_route_shows_filter_summary_when_active(labels_client: TestClient) -> None:
+    response = labels_client.get("/labels", params={"verdict": "match"})
+    assert response.status_code == 200
+    assert "Showing 2 of 3 labels" in response.text
+    assert "verdict=match" in response.text
+    assert "Clear filters" in response.text
+
+
+def test_labels_route_nav_link_present_on_other_pages(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'href="/labels"' in response.text

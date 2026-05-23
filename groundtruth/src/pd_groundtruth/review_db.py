@@ -96,6 +96,43 @@ class CurrentLabelRow(Struct, frozen=True, forbid_unknown_fields=True):
     reasons: tuple[str, ...]
 
 
+class LabeledPairRow(Struct, frozen=True, forbid_unknown_fields=True):
+    """A flat projection of one current-label row for the ``/labels`` table.
+
+    Carries only the columns the table view renders (no MARC blob, no
+    evidence): the originating pair id and its denormalized ``marc_*`` /
+    ``cce_title`` columns, the current verdict and its reason codes, plus the
+    ``labeled_at`` timestamp for relative-time rendering.
+    """
+
+    pair_id: int
+    language: str
+    marc_control_id: str
+    marc_title: str | None
+    cce_title: str | None
+    verdict: str
+    reason_codes: tuple[str, ...]
+    labeled_at: str
+
+
+class LabelFilters(Struct, frozen=True, forbid_unknown_fields=True):
+    """Narrowing filters for :meth:`ReviewDb.iter_labeled_pairs`.
+
+    All fields AND together; an unset field imposes no constraint. ``q`` is a
+    case-insensitive substring matched against ``marc_title``, ``cce_title``,
+    and ``marc_control_id``. ``reason`` filters to labels carrying the given
+    reason code (labels with no reasons are excluded when ``reason`` is set).
+    """
+
+    verdict: str | None = None
+    language: str | None = None
+    reason: str | None = None
+    q: str | None = None
+
+
+_NO_LABEL_FILTERS: LabelFilters = LabelFilters()
+
+
 class PairInsert(Struct, frozen=True, forbid_unknown_fields=True):
     """All column values for one :func:`ReviewDb.insert_pair` call."""
 
@@ -177,6 +214,17 @@ class ProgressCounts(Struct, frozen=True, forbid_unknown_fields=True):
 def _now() -> str:
     """Return the current UTC instant as an ISO-8601 string."""
     return datetime.now(UTC).isoformat()
+
+
+def _split_reason_codes(raw: str | None) -> tuple[str, ...]:
+    """Split a GROUP_CONCAT'd reason-code string into an ordered tuple.
+
+    Returns an empty tuple when the aggregate is ``NULL`` (no reasons on the
+    label) or after filtering yields no non-empty codes.
+    """
+    if not raw:
+        return ()
+    return tuple(code for code in raw.split(",") if code)
 
 
 def _row_to_pair(row: Row) -> ReviewPairRow:
@@ -620,6 +668,112 @@ class ReviewDb:
         )
         return row_id
 
+    def count_labeled_pairs(self, filters: LabelFilters = _NO_LABEL_FILTERS) -> int:
+        """Return the number of current-label rows matching ``filters``.
+
+        Counts distinct ``pair_id`` values whose latest label satisfies every
+        active filter (matches the row set :meth:`iter_labeled_pairs` would
+        yield without pagination). Used by the ``/labels`` table view to size
+        the pager and the "showing N of M" header.
+        """
+        sql, params = self._labeled_pairs_query(
+            filters=filters,
+            select="COUNT(*) AS n",
+            order_limit="",
+        )
+        row = self._conn.execute(sql, params).fetchone()
+        return int(row["n"])
+
+    def iter_labeled_pairs(
+        self,
+        filters: LabelFilters = _NO_LABEL_FILTERS,
+        *,
+        page_size: int = 100,
+        page: int = 1,
+    ) -> tuple[LabeledPairRow, ...]:
+        """Return one :class:`LabeledPairRow` per current label, paged and filtered.
+
+        The "current" label is the latest by ``MAX(id)`` per ``pair_id``
+        (matching :meth:`iter_current_labels` / :meth:`progress`). Rows are
+        ordered ``labeled_at DESC`` so the most recently labeled pair appears
+        first, then sliced by ``page_size`` / ``page`` (1-indexed). Reason
+        codes are aggregated into a tuple ordered by ``label_reason.code`` so
+        the result is deterministic across runs.
+        """
+        if page < 1:
+            raise ValueError(f"page must be >= 1, got {page}")
+        if page_size < 1:
+            raise ValueError(f"page_size must be >= 1, got {page_size}")
+        offset = (page - 1) * page_size
+        sql, params = self._labeled_pairs_query(
+            filters=filters,
+            select=(
+                "rp.id AS pair_id, rp.language AS language, "
+                "rp.marc_control_id AS marc_control_id, rp.marc_title AS marc_title, "
+                "rp.cce_title AS cce_title, l.verdict AS verdict, "
+                "l.labeled_at AS labeled_at, "
+                "(SELECT GROUP_CONCAT(code, ',') FROM ("
+                "  SELECT code FROM label_reason WHERE label_id = l.id ORDER BY code"
+                ")) AS reason_codes"
+            ),
+            order_limit="ORDER BY l.labeled_at DESC, rp.id LIMIT ? OFFSET ?",
+        )
+        params = (*params, page_size, offset)
+        rows = self._conn.execute(sql, params).fetchall()
+        return tuple(
+            LabeledPairRow(
+                pair_id=row["pair_id"],
+                language=row["language"],
+                marc_control_id=row["marc_control_id"],
+                marc_title=row["marc_title"],
+                cce_title=row["cce_title"],
+                verdict=row["verdict"],
+                labeled_at=row["labeled_at"],
+                reason_codes=_split_reason_codes(row["reason_codes"]),
+            )
+            for row in rows
+        )
+
+    def _labeled_pairs_query(
+        self,
+        *,
+        filters: LabelFilters,
+        select: str,
+        order_limit: str,
+    ) -> tuple[str, tuple[str | int, ...]]:
+        """Assemble the WHERE clause and params shared by count and list queries."""
+        clauses: list[str] = []
+        params: list[str | int] = []
+        if filters.verdict is not None:
+            clauses.append("l.verdict = ?")
+            params.append(filters.verdict)
+        if filters.language is not None:
+            clauses.append("rp.language = ?")
+            params.append(filters.language)
+        if filters.reason is not None:
+            clauses.append("EXISTS (SELECT 1 FROM label_reason WHERE label_id = l.id AND code = ?)")
+            params.append(filters.reason)
+        if filters.q:
+            pattern = f"%{filters.q.lower()}%"
+            clauses.append(
+                "(lower(COALESCE(rp.marc_title, '')) LIKE ?"
+                " OR lower(COALESCE(rp.cce_title, '')) LIKE ?"
+                " OR lower(rp.marc_control_id) LIKE ?)"
+            )
+            params.extend((pattern, pattern, pattern))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"""
+            SELECT {select}
+            FROM (
+                SELECT pair_id, MAX(id) AS last_id FROM label GROUP BY pair_id
+            ) cl
+            JOIN label l ON l.id = cl.last_id
+            JOIN review_pair rp ON rp.id = cl.pair_id
+            {where}
+            {order_limit}
+        """
+        return sql, tuple(params)
+
     def reason_counts(self) -> dict[tuple[str, str], int]:
         """Return counts of current-label reason codes keyed on ``(verdict, code)``.
 
@@ -651,7 +805,9 @@ __all__ = [
     "VERDICT_NO_MATCH",
     "VERDICT_UNSURE",
     "CurrentLabelRow",
+    "LabelFilters",
     "LabelInsertResult",
+    "LabeledPairRow",
     "LanguageProgress",
     "PairInsert",
     "ProgressCounts",

@@ -11,11 +11,19 @@ flag rendered as a human-readable renewal label. No ``Any`` crosses this
 boundary; this module is the unit-tested heart of the UI.
 """
 
+from datetime import datetime
+
 from msgspec import Struct
 from msgspec.json import decode as json_decode
 from pd_matcher.models import MarcRecord
 
+from pd_groundtruth.review.reasons import reasons_for
+from pd_groundtruth.review.relative_time import format_relative
+from pd_groundtruth.review_db import LabeledPairRow
 from pd_groundtruth.review_db import ReviewPairRow
+
+_TITLE_TRUNCATE: int = 60
+_ELLIPSIS: str = "…"
 
 RENEWAL_RENEWED: str = "Renewed"
 RENEWAL_NOT_RENEWED: str = "Not renewed"
@@ -155,13 +163,77 @@ def build_card(row: ReviewPairRow) -> ReviewCard:
     )
 
 
+class LabeledRow(Struct, frozen=True, forbid_unknown_fields=True):
+    """A render-ready projection of one row in the ``/labels`` table."""
+
+    pair_id: int
+    language: str
+    marc_control_id: str
+    marc_title: str
+    marc_title_short: str
+    cce_title: str
+    cce_title_short: str
+    verdict: str
+    reason_codes: tuple[str, ...]
+    reason_labels: tuple[str, ...]
+    labeled_at: str
+    labeled_relative: str
+
+
+def _truncate(value: str, limit: int = _TITLE_TRUNCATE) -> str:
+    """Truncate ``value`` to ``limit`` chars, appending an ellipsis if cut."""
+    if len(value) <= limit:
+        return value
+    return value[: limit - 1].rstrip() + _ELLIPSIS
+
+
+def _resolve_reason_labels(verdict: str, codes: tuple[str, ...]) -> tuple[str, ...]:
+    """Map reason codes to their human-readable labels for ``verdict``.
+
+    Codes outside the verdict's vocabulary fall back to the raw code so the
+    display never silently drops a stored value (e.g. an entry preserved from
+    an older vocabulary).
+    """
+    if not codes:
+        return ()
+    vocabulary = {reason.code: reason.label for reason in reasons_for(verdict)}
+    return tuple(vocabulary.get(code, code) for code in codes)
+
+
+def build_labeled_row(row: LabeledPairRow, now: datetime) -> LabeledRow:
+    """Project one :class:`LabeledPairRow` into a render-ready :class:`LabeledRow`.
+
+    Empty / null titles render as the empty string in the table; the truncated
+    forms drive what the cell displays while the full strings live in the
+    hover ``title`` attribute for disambiguation.
+    """
+    marc_title = row.marc_title or ""
+    cce_title = row.cce_title or ""
+    return LabeledRow(
+        pair_id=row.pair_id,
+        language=row.language,
+        marc_control_id=row.marc_control_id,
+        marc_title=marc_title,
+        marc_title_short=_truncate(marc_title),
+        cce_title=cce_title,
+        cce_title_short=_truncate(cce_title),
+        verdict=row.verdict,
+        reason_codes=row.reason_codes,
+        reason_labels=_resolve_reason_labels(row.verdict, row.reason_codes),
+        labeled_at=row.labeled_at,
+        labeled_relative=format_relative(row.labeled_at, now),
+    )
+
+
 __all__ = [
     "RENEWAL_NOT_RENEWED",
     "RENEWAL_RENEWED",
     "RENEWAL_UNKNOWN",
     "EvidenceBar",
+    "LabeledRow",
     "ReviewCard",
     "build_card",
+    "build_labeled_row",
     "parse_evidence",
     "render_renewal_label",
 ]

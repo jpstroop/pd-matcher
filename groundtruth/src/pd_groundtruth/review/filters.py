@@ -18,6 +18,8 @@ from urllib.parse import urlencode
 
 from msgspec import Struct
 
+from pd_groundtruth.review_db import LabelFilters
+
 
 class ReviewFilters(Struct, frozen=True, forbid_unknown_fields=True):
     """The active language/band narrowing and skip list for a review session."""
@@ -103,7 +105,57 @@ def parse_filters(
     )
 
 
+def parse_label_filters(
+    verdict: str | None,
+    language: str | None,
+    reason: str | None,
+    q: str | None,
+) -> LabelFilters:
+    """Normalize raw ``/labels`` query values into typed :class:`LabelFilters`.
+
+    Whitespace is stripped and empty strings become ``None`` so that a form
+    that submits ``verdict=`` does not over-narrow the row set. ``q`` is kept
+    in its raw case here; the DB layer lower-cases it for matching.
+    """
+    return LabelFilters(
+        verdict=_clean(verdict),
+        language=_clean(language),
+        reason=_clean(reason),
+        q=_clean(q),
+    )
+
+
+def label_filters_query_string(filters: LabelFilters, *, drop: str | None = None) -> str:
+    """Render active label filters as a URL query string.
+
+    Pass ``drop`` to omit one filter key from the rendered string — used by
+    the per-filter "clear" links in the page header so each link removes only
+    the filter it represents while preserving the rest.
+    """
+    params: list[tuple[str, str]] = []
+    if filters.verdict is not None and drop != "verdict":
+        params.append(("verdict", filters.verdict))
+    if filters.language is not None and drop != "language":
+        params.append(("language", filters.language))
+    if filters.reason is not None and drop != "reason":
+        params.append(("reason", filters.reason))
+    if filters.q is not None and drop != "q":
+        params.append(("q", filters.q))
+    return urlencode(params)
+
+
+def label_filters_active(filters: LabelFilters) -> bool:
+    """Return ``True`` when any of the label filters is set."""
+    return any(
+        value is not None
+        for value in (filters.verdict, filters.language, filters.reason, filters.q)
+    )
+
+
 __all__ = [
     "ReviewFilters",
+    "label_filters_active",
+    "label_filters_query_string",
     "parse_filters",
+    "parse_label_filters",
 ]

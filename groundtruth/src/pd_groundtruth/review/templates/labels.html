@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h2>Labels</h2>
+  <p class="hint">
+    {% if filters_active %}
+      Showing {{ filtered_total }} of {{ total_labeled }} labels
+      <span class="filter-summary">
+        {% if label_filters.verdict %}· verdict={{ label_filters.verdict }}{% endif %}
+        {% if label_filters.language %}· lang={{ label_filters.language }}{% endif %}
+        {% if label_filters.reason %}· reason={{ label_filters.reason }}{% endif %}
+        {% if label_filters.q %}· q={{ label_filters.q }}{% endif %}
+      </span>
+      · <a href="/labels">Clear filters</a>
+    {% else %}
+      Showing {{ filtered_total }} label{{ "" if filtered_total == 1 else "s" }}
+    {% endif %}
+    · <a href="/{% if query_string %}?{% endif %}">Back to labeling</a>
+  </p>
+  <form class="filters-bar" method="get" action="/labels">
+    <label>
+      <span>verdict</span>
+      <select name="verdict">
+        <option value="">any</option>
+        {% for choice in verdict_choices %}
+        <option value="{{ choice }}"{% if label_filters.verdict == choice %} selected{% endif %}>{{ choice }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>language</span>
+      <select name="language">
+        <option value="">any</option>
+        {% for choice in language_choices %}
+        <option value="{{ choice }}"{% if label_filters.language == choice %} selected{% endif %}>{{ choice }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>reason</span>
+      <select name="reason">
+        <option value="">any</option>
+        {% for choice in reason_choices %}
+        <option value="{{ choice.code }}"{% if label_filters.reason == choice.code %} selected{% endif %}>{{ choice.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>search</span>
+      <input type="text" name="q" value="{{ label_filters.q or '' }}" placeholder="title or control id" autocomplete="off">
+    </label>
+    <button type="submit">Filter</button>
+  </form>
+
+  {% if rows %}
+  <table class="labels-table">
+    <thead>
+      <tr>
+        <th>pair</th>
+        <th>MARC title</th>
+        <th>CCE title</th>
+        <th>verdict</th>
+        <th>reasons</th>
+        <th>lang</th>
+        <th>labeled</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><a href="/pair/{{ row.pair_id }}">#{{ row.pair_id }}</a></td>
+        <td title="{{ row.marc_title }}">{{ row.marc_title_short }}</td>
+        <td title="{{ row.cce_title }}">{{ row.cce_title_short }}</td>
+        <td><span class="verdict verdict-{{ row.verdict }}">{{ row.verdict }}</span></td>
+        <td class="reasons-cell">
+          {% for label in row.reason_labels %}
+          <span class="chip reason-chip">{{ label }}</span>
+          {% endfor %}
+        </td>
+        <td>{{ row.language }}</td>
+        <td title="{{ row.labeled_at }}">{{ row.labeled_relative }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if total_pages > 1 %}
+  <nav class="pagination">
+    {% if page > 1 %}
+    <a href="/labels?{% if query_string %}{{ query_string }}&{% endif %}page={{ page - 1 }}">&larr; Prev</a>
+    {% else %}
+    <span class="disabled">&larr; Prev</span>
+    {% endif %}
+    <span class="pagination-pos">page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="/labels?{% if query_string %}{{ query_string }}&{% endif %}page={{ page + 1 }}">Next &rarr;</a>
+    {% else %}
+    <span class="disabled">Next &rarr;</span>
+    {% endif %}
+  </nav>
+  {% endif %}
+  {% else %}
+  <p class="hint">{% if filters_active %}No labels match the current filter.{% else %}No labels yet.{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}
