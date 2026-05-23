@@ -22,6 +22,7 @@ class MarcRecord(Struct, frozen=True, forbid_unknown_fields=True):
     title: str
     title_main: str
     lccn: str | None = None
+    oclc: str | None = None
     isbns: tuple[str, ...] = ()
     title_part_number: str | None = None
     title_part_name: str | None = None

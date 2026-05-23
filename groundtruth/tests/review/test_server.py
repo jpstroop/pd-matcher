@@ -33,7 +33,7 @@ def test_serve_swallows_keyboard_interrupt(tmp_path: Path, monkeypatch: MonkeyPa
         raise KeyboardInterrupt
 
     monkeypatch.setattr(server, "uvicorn_run", _raise_interrupt)
-    server.serve(db_path, host="127.0.0.1", port=8000)
+    server.serve(db_path, tmp_path / "vault.jsonl", host="127.0.0.1", port=8000)
 
 
 def test_serve_propagates_non_interrupt_errors(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -44,9 +44,9 @@ def test_serve_propagates_non_interrupt_errors(tmp_path: Path, monkeypatch: Monk
 
     monkeypatch.setattr(server, "uvicorn_run", _raise_bind_error)
     with raises(OSError, match="address already in use"):
-        server.serve(db_path, host="127.0.0.1", port=8000)
+        server.serve(db_path, tmp_path / "vault.jsonl", host="127.0.0.1", port=8000)
 
 
 def test_serve_rejects_missing_database(tmp_path: Path) -> None:
     with raises(FileNotFoundError, match="review database not found"):
-        server.serve(tmp_path / "absent.db", host="127.0.0.1", port=8000)
+        server.serve(tmp_path / "absent.db", tmp_path / "vault.jsonl", host="127.0.0.1", port=8000)

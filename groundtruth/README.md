@@ -118,6 +118,7 @@ pdm run pd-groundtruth review --db data/review.db
 | flag | default | meaning |
 |---|---|---|
 | `--db` | *(required)* | The `review.db` produced by `build-queue`. |
+| `--vault` | `label_vault.jsonl` | The JSONL **label vault** (see below). Every accepted verdict is appended here in addition to `review.db`. |
 | `--host` | `127.0.0.1` | Interface to bind the local server. |
 | `--port` | `8000` | Port for the local server. |
 
@@ -161,6 +162,48 @@ on `…/stats`, counting each code of a pair's current label.
 
 **Track progress** at `…/stats`: labeled vs. remaining and the match / no_match /
 unsure tally, per language. Revisit or re-label any specific pair at `…/pair/{id}`.
+
+## The label vault
+
+`review.db` is a **transient working queue** — it is rebuilt every time
+`acquire` or `build-queue` runs (for example, when a new filter lands in
+`acquire`). To stop those rebuilds from destroying the human labels already
+adjudicated, every verdict is also persisted to a durable **label vault**:
+`groundtruth/label_vault.jsonl`. The vault is the canonical ground-truth
+dataset and is committed to git.
+
+- **Format.** JSONL, append-only, one verdict event per line, schema-versioned
+  (each row carries `"schema": 1`). Every line records the
+  `(marc_control_id, nypl_uuid)` pair, the verdict, any reason codes, the
+  optional note, the ISO-8601 `labeled_at` timestamp, the labeler, and the
+  MARC identifiers (`lccn`, `oclc`, `isbns`) captured at label time.
+- **Multi-label semantics.** Re-labels do not overwrite — they append a new
+  line. The "current" verdict for a pair is the last entry by file order;
+  earlier entries are kept as the audit trail.
+- **`review` writes here on every POST.** After the DB write succeeds, the
+  same verdict is appended to the vault using the DB-stamped timestamp so the
+  two stay in lockstep. A rare vault-write failure is logged but never fails
+  the HTTP request.
+- **`build-queue` reads here at the start.** Pairs that already have a vault
+  verdict are inserted into the new `review.db` *with* their verdict
+  pre-applied, so `next_unlabeled` skips them and `/stats` immediately
+  reflects the existing labels. A summary line at the end reports
+  `vault contributed N pre-applied labels; M new pairs queued`. Use the
+  back-arrow to revisit and re-label if needed.
+
+### One-shot migration: `seed-vault`
+
+A one-time-only command that exports every *current* label from a
+pre-existing `review.db` into the vault. Run it once before the next
+`build-queue` rebuild:
+
+```bash
+pdm run pd-groundtruth seed-vault --db data/review.db --vault label_vault.jsonl
+```
+
+`seed-vault` is idempotent: it skips entries already present with the same
+`(marc_control_id, nypl_uuid, labeled_at)` triple, so re-running it after a
+fresh round of labeling only adds the new events.
 
 ## Reference: what survives acquisition
 

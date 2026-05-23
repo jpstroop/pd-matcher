@@ -134,7 +134,8 @@ def test_add_label_keeps_history_across_relabels(tmp_path: Path) -> None:
         pair_id = db.insert_pair(_pair())
         first_label = db.add_label(pair_id, VERDICT_MATCH, note="initial")
         second_label = db.add_label(pair_id, VERDICT_NO_MATCH, note="corrected")
-        assert second_label > first_label
+        assert second_label.label_id > first_label.label_id
+        assert second_label.labeled_at != ""
         assert db.next_unlabeled() is None
 
 
@@ -316,6 +317,67 @@ def test_reason_counts_ignores_labels_without_reasons(tmp_path: Path) -> None:
         db.add_label(first, VERDICT_MATCH)
         db.add_label(second, VERDICT_NO_MATCH, reasons=("garbled",))
         assert db.reason_counts() == {(VERDICT_NO_MATCH, "garbled"): 1}
+
+
+def test_iter_current_labels_yields_only_latest_per_pair(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair(control_id="ctrl-a", nypl_uuid="uuid-a"))
+        db.add_label(pair_id, VERDICT_MATCH)
+        db.add_label(pair_id, VERDICT_NO_MATCH, note="changed", reasons=("diff_work",))
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        labels = list(db.iter_current_labels())
+    assert len(labels) == 1
+    assert labels[0].verdict == VERDICT_NO_MATCH
+    assert labels[0].note == "changed"
+    assert labels[0].reasons == ("diff_work",)
+    assert labels[0].marc_control_id == "ctrl-a"
+    assert labels[0].nypl_uuid == "uuid-a"
+
+
+def test_iter_current_labels_skips_unlabeled_pairs(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        a = db.insert_pair(_pair(control_id="ctrl-a", nypl_uuid="uuid-a"))
+        db.insert_pair(_pair(control_id="ctrl-b", nypl_uuid="uuid-b"))
+        db.add_label(a, VERDICT_MATCH)
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        labels = list(db.iter_current_labels())
+    assert [label.marc_control_id for label in labels] == ["ctrl-a"]
+
+
+def test_iter_current_labels_aggregates_reasons_in_deterministic_order(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair(control_id="ctrl-a", nypl_uuid="uuid-a"))
+        db.add_label(pair_id, VERDICT_NO_MATCH, reasons=("garbled", "diff_work"))
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        labels = list(db.iter_current_labels())
+    assert labels[0].reasons == ("diff_work", "garbled")
+
+
+def test_insert_existing_label_preserves_supplied_timestamp(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair())
+        db.insert_existing_label(
+            pair_id=pair_id,
+            verdict=VERDICT_MATCH,
+            labeled_at="2024-01-01T00:00:00+00:00",
+            note="from vault",
+            reasons=(),
+        )
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        labels = list(db.iter_current_labels())
+    assert labels[0].labeled_at == "2024-01-01T00:00:00+00:00"
+    assert labels[0].note == "from vault"
+
+
+def test_insert_existing_label_rejects_invalid_verdict(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair())
+        with raises(ValueError, match="invalid verdict"):
+            db.insert_existing_label(
+                pair_id=pair_id,
+                verdict="bogus",
+                labeled_at="2024-01-01T00:00:00+00:00",
+            )
 
 
 def test_init_schema_migrates_label_table_missing_reason(tmp_path: Path) -> None:

@@ -32,6 +32,7 @@ _TRAILING_PUNCT = " /:;,=."
 _YEAR_RE = re_compile(r"(\d{4})")
 _YEAR_MIN = 1450
 _YEAR_MAX = 2050
+_OCLC_PREFIX = "(OCoLC)"
 
 _LOGGER = getLogger(__name__)
 
@@ -143,6 +144,7 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
     control_id: str | None = None
     control_008: str | None = None
     lccn: str | None = None
+    oclc: str | None = None
     isbns: list[str] = []
     main_author: str | None = None
     added_authors: list[str] = []
@@ -175,6 +177,15 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
                 lccn = _first_subfield(child, "a")
         elif tag == "020":
             isbns.extend(_subfield_texts(child, "a"))
+        elif tag == "035":
+            if oclc is None:
+                for raw in _subfield_texts(child, "a"):
+                    stripped = raw.strip()
+                    if stripped.startswith(_OCLC_PREFIX):
+                        candidate = stripped[len(_OCLC_PREFIX) :].strip()
+                        if candidate:
+                            oclc = candidate
+                            break
         elif tag in {"100", "110", "111"}:
             if main_author is None:
                 main_author = _first_subfield(child, "a")
@@ -227,6 +238,7 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
         title_part_number=_clean(title_n, stats),
         title_part_name=_clean(title_p, stats),
         lccn=_clean(lccn, stats),
+        oclc=oclc,
         isbns=tuple(
             cleaned for cleaned in (_clean(v, stats) for v in isbns) if cleaned is not None
         ),

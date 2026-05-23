@@ -8,8 +8,17 @@ startup and closes it via the context manager (committing on the label write).
 The typed/business logic this layer touches — card projection, progress
 counts, verdict handling, filter parsing — lives in tested pure modules; the
 routes themselves are exercised under the deselected ``webui`` pytest marker.
+
+Every accepted verdict is appended to the JSONL label vault
+(:mod:`pd_groundtruth.label_vault`) immediately after the DB write. The vault
+is the durable, git-tracked source of truth: ``review.db`` is regenerated each
+time ``acquire`` / ``build-queue`` runs, but the vault survives. A vault-append
+failure is logged but does not fail the HTTP request; the DB write already
+succeeded and dropping the vault line is an integrity concern to surface, not
+a user-facing 500.
 """
 
+from logging import getLogger
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -18,7 +27,13 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from msgspec.json import decode as json_decode
+from pd_matcher.models import MarcRecord
 
+from pd_groundtruth.label_vault import SCHEMA_VERSION
+from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.label_vault import append_entry
+from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.review.filters import ReviewFilters
 from pd_groundtruth.review.filters import parse_filters
 from pd_groundtruth.review.reasons import NO_MATCH_REASONS
@@ -29,8 +44,12 @@ from pd_groundtruth.review.reasons import summarize_reasons
 from pd_groundtruth.review.view import build_card
 from pd_groundtruth.review_db import ReviewDb
 
+_LOGGER = getLogger(__name__)
+
 _TEMPLATES_DIR: Path = Path(__file__).parent / "templates"
 _DB_PATH_ATTR: str = "review_db_path"
+_VAULT_PATH_ATTR: str = "label_vault_path"
+_LABELER: str = "jpstroop"
 _REASON_FORM: list[str] = Form([])
 _REASON_CONTEXT: dict[str, tuple[ReasonCode, ...]] = {
     "no_match_reasons": NO_MATCH_REASONS,
@@ -44,6 +63,12 @@ def _db_path(request: Request) -> Path:
     return path
 
 
+def _vault_path(request: Request) -> Path:
+    """Return the configured label-vault path from application state."""
+    path: Path = getattr(request.app.state, _VAULT_PATH_ATTR)
+    return path
+
+
 def _redirect_to_next(filters: ReviewFilters) -> RedirectResponse:
     """Build a 303 redirect to ``/`` preserving the active filters."""
     query = filters.query_string()
@@ -51,17 +76,21 @@ def _redirect_to_next(filters: ReviewFilters) -> RedirectResponse:
     return RedirectResponse(url=location, status_code=303)
 
 
-def create_app(db_path: Path | None = None) -> FastAPI:
-    """Create the review FastAPI app, optionally binding ``db_path`` now.
+def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> FastAPI:
+    """Create the review FastAPI app, optionally binding paths now.
 
     Args:
         db_path: The review database path. May be left unset here and assigned
             later via :func:`set_db_path` (the CLI does this before launch).
+        vault_path: The JSONL label-vault path. May be left unset here and
+            assigned later via :func:`set_vault_path`.
     """
     app = FastAPI(title="pd-groundtruth review")
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
     if db_path is not None:
         set_db_path(app, db_path)
+    if vault_path is not None:
+        set_vault_path(app, vault_path)
 
     @app.get("/", response_class=HTMLResponse)
     def index(
@@ -134,7 +163,18 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         clean_note = note.strip() if note is not None and note.strip() else None
         clean_reasons = normalize_reasons(verdict, reason)
         with ReviewDb.connect(_db_path(request)) as db:
-            db.add_label(pair_id, verdict, note=clean_note, reasons=clean_reasons)
+            pair = db.get_pair(pair_id)
+            result = db.add_label(pair_id, verdict, note=clean_note, reasons=clean_reasons)
+        if pair is not None:
+            _append_vault_entry(
+                vault_path=_vault_path(request),
+                marc_json=pair.marc_json,
+                nypl_uuid=pair.nypl_uuid,
+                verdict=verdict,
+                reasons=clean_reasons,
+                note=clean_note,
+                labeled_at=result.labeled_at,
+            )
         return _redirect_to_next(filters)
 
     @app.get("/stats", response_class=HTMLResponse)
@@ -159,6 +199,50 @@ def set_db_path(app: FastAPI, db_path: Path) -> None:
     setattr(app.state, _DB_PATH_ATTR, db_path)
 
 
+def set_vault_path(app: FastAPI, vault_path: Path) -> None:
+    """Bind the label-vault path into ``app.state`` for per-request use."""
+    setattr(app.state, _VAULT_PATH_ATTR, vault_path)
+
+
+def _append_vault_entry(
+    *,
+    vault_path: Path,
+    marc_json: str,
+    nypl_uuid: str,
+    verdict: str,
+    reasons: tuple[str, ...],
+    note: str | None,
+    labeled_at: str,
+) -> None:
+    """Append one verdict to the vault, swallowing and logging any I/O failure.
+
+    The DB write has already succeeded by the time this is called; failing the
+    HTTP request because of a vault problem would punish the reviewer for an
+    operational hiccup, so we log loudly and move on. Repeat failures are easy
+    to spot in the logs and the DB still carries the verdict.
+    """
+    try:
+        marc = json_decode(marc_json.encode("utf-8"), type=MarcRecord)
+        entry = VaultEntry(
+            schema=SCHEMA_VERSION,
+            marc_control_id=marc.control_id,
+            nypl_uuid=nypl_uuid,
+            verdict=verdict,
+            reasons=reasons,
+            note=note,
+            labeled_at=labeled_at,
+            labeler=_LABELER,
+            marc_identifiers=extract_marc_identifiers(marc),
+        )
+        append_entry(vault_path, entry)
+    except Exception:
+        _LOGGER.exception(
+            "label vault append failed for marc=%s nypl=%s",
+            marc_json[:80],
+            nypl_uuid,
+        )
+
+
 app: FastAPI = create_app()
 
 
@@ -166,4 +250,5 @@ __all__ = [
     "app",
     "create_app",
     "set_db_path",
+    "set_vault_path",
 ]

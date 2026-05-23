@@ -15,6 +15,8 @@ from pd_matcher.models import MarcRecord
 from pytest import fixture
 from pytest import mark
 
+from pd_groundtruth.label_vault import current_entries
+from pd_groundtruth.label_vault import iter_entries
 from pd_groundtruth.review.app import create_app
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
@@ -33,6 +35,9 @@ def _pair(
         control_id=control_id,
         title="A Studied Title",
         title_main="A Studied Title",
+        lccn="40012345",
+        oclc="0001",
+        isbns=("9780000000000",),
         main_author="Doe, Jane",
         publisher="Acme Press",
         publication_year=1953,
@@ -65,18 +70,23 @@ def _pair(
 
 
 @fixture
-def client(tmp_path: Path) -> Iterator[TestClient]:
+def vault_path(tmp_path: Path) -> Path:
+    return tmp_path / "vault.jsonl"
+
+
+@fixture
+def client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
     db_path = tmp_path / "review.db"
     with ReviewDb.connect(db_path) as db:
         db.insert_pair(_pair(language="eng", control_id="eng-1", nypl_uuid="u-eng-1"))
         db.insert_pair(_pair(language="fre", control_id="fre-1", nypl_uuid="u-fre-1"))
-    app = create_app(db_path)
+    app = create_app(db_path, vault_path)
     with TestClient(app) as test_client:
         yield test_client
 
 
 @fixture
-def ebook_client(tmp_path: Path) -> Iterator[TestClient]:
+def ebook_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
     db_path = tmp_path / "review.db"
     with ReviewDb.connect(db_path) as db:
         db.insert_pair(
@@ -87,7 +97,7 @@ def ebook_client(tmp_path: Path) -> Iterator[TestClient]:
                 extent="1 online resource (xxi, 406 p.)",
             )
         )
-    app = create_app(db_path)
+    app = create_app(db_path, vault_path)
     with TestClient(app) as test_client:
         yield test_client
 
@@ -260,3 +270,64 @@ def test_card_renders_new_reason_chips(client: TestClient) -> None:
     assert "Reprint / different physical format" in response.text
     assert "Possibly whole vs. part / volume" in response.text
     assert "Looks like one issue of a periodical" in response.text
+
+
+def test_label_appends_to_vault(client: TestClient, vault_path: Path) -> None:
+    assert not vault_path.exists()
+    response = client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert vault_path.exists()
+    entries = list(iter_entries(vault_path))
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.marc_control_id == "eng-1"
+    assert entry.nypl_uuid == "u-eng-1"
+    assert entry.verdict == "match"
+    assert entry.reasons == ()
+    assert entry.labeler == "jpstroop"
+    assert entry.schema == 1
+    assert entry.marc_identifiers.lccn == "40012345"
+    assert entry.marc_identifiers.oclc == "0001"
+    assert entry.marc_identifiers.isbns == ("9780000000000",)
+
+
+def test_label_appends_one_line_per_post(client: TestClient, vault_path: Path) -> None:
+    client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    after_first = vault_path.read_text(encoding="utf-8")
+    client.post("/label", data={"pair_id": "2", "verdict": "no_match"}, follow_redirects=False)
+    after_second = vault_path.read_text(encoding="utf-8")
+    assert after_second.startswith(after_first)
+    assert len(after_second.splitlines()) == 2
+
+
+def test_label_relabel_preserves_history(client: TestClient, vault_path: Path) -> None:
+    client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "no_match", "reason": "diff_work"},
+        follow_redirects=False,
+    )
+    history = list(iter_entries(vault_path))
+    assert [event.verdict for event in history] == ["match", "no_match"]
+    latest = current_entries(vault_path)
+    assert latest[("eng-1", "u-eng-1")].verdict == "no_match"
+    assert latest[("eng-1", "u-eng-1")].reasons == ("diff_work",)
+
+
+def test_label_db_timestamp_matches_vault_timestamp(
+    client: TestClient, vault_path: Path, tmp_path: Path
+) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "no_match", "reason": "diff_work", "note": "hmm"},
+        follow_redirects=False,
+    )
+    [vault_entry] = list(iter_entries(vault_path))
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        [label] = list(db.iter_current_labels())
+    assert label.labeled_at == vault_entry.labeled_at
+    assert label.note == vault_entry.note == "hmm"

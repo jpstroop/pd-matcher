@@ -7,6 +7,28 @@ from pd_matcher.parsers.marc import iter_marc_records
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "tiny.marcxml"
 
+_MARC_NS = "http://www.loc.gov/MARC21/slim"
+
+
+def _write_xml(path: Path, body: str) -> None:
+    path.write_text(
+        f"<collection xmlns='{_MARC_NS}'>{body}</collection>",
+        encoding="utf-8",
+    )
+
+
+def _record(control_id: str, datafields: str = "") -> str:
+    return (
+        "<record>"
+        f"<controlfield tag='001'>{control_id}</controlfield>"
+        "<controlfield tag='008'>200718s1953    nyu           000 0 eng  </controlfield>"
+        "<datafield ind1='0' ind2='0' tag='245'>"
+        "<subfield code='a'>A Title</subfield>"
+        "</datafield>"
+        f"{datafields}"
+        "</record>"
+    )
+
 
 def test_iter_marc_records_returns_expected_first_record() -> None:
     records = list(iter_marc_records(FIXTURE))
@@ -137,6 +159,80 @@ def test_iter_marc_records_ignores_repeated_single_value_fields() -> None:
     assert first.lccn == "40012345"
     assert first.main_author == "Alpha, Alice"
     assert first.publisher == "Acme Press"
+
+
+def test_iter_marc_records_extracts_oclc_from_035_with_ocolc_prefix(tmp_path: Path) -> None:
+    path = tmp_path / "oclc.xml"
+    _write_xml(
+        path,
+        _record(
+            "oclc-1",
+            "<datafield ind1=' ' ind2=' ' tag='035'>"
+            "<subfield code='a'>(OCoLC)00012345</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].oclc == "00012345"
+
+
+def test_iter_marc_records_oclc_absent_when_no_035(tmp_path: Path) -> None:
+    path = tmp_path / "no_oclc.xml"
+    _write_xml(path, _record("no-oclc"))
+    records = list(iter_marc_records(path))
+    assert records[0].oclc is None
+
+
+def test_iter_marc_records_ignores_non_ocolc_035_prefixes(tmp_path: Path) -> None:
+    path = tmp_path / "non_ocolc.xml"
+    _write_xml(
+        path,
+        _record(
+            "non-ocolc",
+            "<datafield ind1=' ' ind2=' ' tag='035'>"
+            "<subfield code='a'>(DLC)sn 90123456</subfield>"
+            "</datafield>"
+            "<datafield ind1=' ' ind2=' ' tag='035'>"
+            "<subfield code='a'>(PrU)9988776655</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].oclc is None
+
+
+def test_iter_marc_records_skips_empty_ocolc_value_and_uses_next(tmp_path: Path) -> None:
+    path = tmp_path / "empty_then_real.xml"
+    _write_xml(
+        path,
+        _record(
+            "empty-then-real",
+            "<datafield ind1=' ' ind2=' ' tag='035'>"
+            "<subfield code='a'>(OCoLC)   </subfield>"
+            "<subfield code='a'>(OCoLC)99887766</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].oclc == "99887766"
+
+
+def test_iter_marc_records_keeps_first_ocolc_when_multiple_present(tmp_path: Path) -> None:
+    path = tmp_path / "multi.xml"
+    _write_xml(
+        path,
+        _record(
+            "multi",
+            "<datafield ind1=' ' ind2=' ' tag='035'>"
+            "<subfield code='a'>(OCoLC)11111111</subfield>"
+            "</datafield>"
+            "<datafield ind1=' ' ind2=' ' tag='035'>"
+            "<subfield code='a'>(OCoLC)22222222</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].oclc == "11111111"
 
 
 def test_iter_marc_records_repairs_mojibake_in_subfields_and_increments_counter() -> None:
