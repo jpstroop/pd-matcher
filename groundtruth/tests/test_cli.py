@@ -13,6 +13,9 @@ from pd_groundtruth.acquire import AcquireReport
 from pd_groundtruth.build_queue import BuildSummary
 from pd_groundtruth.cli import _configure_logging
 from pd_groundtruth.cli import app
+from pd_groundtruth.review_db import VERDICT_MATCH
+from pd_groundtruth.review_db import PairInsert
+from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import default_budget
 
 _RUNNER = CliRunner()
@@ -189,6 +192,170 @@ def test_build_queue_command_threads_log_file_to_build_queue(tmp_path: Path) -> 
     assert result.exit_code == 0
     _, kwargs = mock_build.call_args
     assert kwargs["log_file"] == target
+
+
+def _seed_existing_db(path: Path) -> None:
+    pair = PairInsert(
+        language="eng",
+        decade=1950,
+        score=0.95,
+        band="ge90",
+        source="banded",
+        marc_control_id="ctrl-x",
+        marc_json='{"control_id": "ctrl-x"}',
+        marc_title="t",
+        marc_author="a",
+        marc_publisher="p",
+        marc_year=1953,
+        nypl_uuid="u-x",
+        cce_title="t",
+        cce_author="a",
+        cce_publishers=None,
+        cce_claimants=None,
+        cce_reg_year=1953,
+        cce_was_renewed=True,
+        cce_regnum="R1",
+        evidence_json="{}",
+    )
+    with ReviewDb.connect(path) as db:
+        pair_id = db.insert_pair(pair)
+        db.add_label(pair_id, VERDICT_MATCH)
+
+
+def test_build_queue_refuses_to_silently_append_to_non_empty_db(tmp_path: Path) -> None:
+    out = tmp_path / "review.db"
+    _seed_existing_db(out)
+    with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+                "--out",
+                str(out),
+            ],
+        )
+    assert result.exit_code == 2
+    assert "already contains 1 pairs" in result.stderr
+    assert "--rebuild" in result.stderr
+    assert "--append" in result.stderr
+    mock_build.assert_not_called()
+    assert out.exists()
+
+
+def test_build_queue_rebuild_drops_existing_db_and_runs(tmp_path: Path) -> None:
+    out = tmp_path / "review.db"
+    _seed_existing_db(out)
+    assert out.exists()
+    with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+                "--out",
+                str(out),
+                "--rebuild",
+            ],
+        )
+    assert result.exit_code == 0
+    mock_build.assert_called_once()
+    _, kwargs = mock_build.call_args
+    assert kwargs["out_path"] == out
+
+
+def test_build_queue_append_proceeds_against_non_empty_db(tmp_path: Path) -> None:
+    out = tmp_path / "review.db"
+    _seed_existing_db(out)
+    with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+                "--out",
+                str(out),
+                "--append",
+            ],
+        )
+    assert result.exit_code == 0
+    mock_build.assert_called_once()
+    assert out.exists()
+
+
+def test_build_queue_succeeds_on_missing_db_with_no_flag(tmp_path: Path) -> None:
+    out = tmp_path / "review.db"
+    assert not out.exists()
+    with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+                "--out",
+                str(out),
+            ],
+        )
+    assert result.exit_code == 0
+    mock_build.assert_called_once()
+
+
+def test_build_queue_succeeds_on_empty_schema_only_db_with_no_flag(tmp_path: Path) -> None:
+    out = tmp_path / "review.db"
+    with ReviewDb.connect(out):
+        pass
+    assert out.exists()
+    with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+                "--out",
+                str(out),
+            ],
+        )
+    assert result.exit_code == 0
+    mock_build.assert_called_once()
+
+
+def test_build_queue_rejects_rebuild_and_append_together(tmp_path: Path) -> None:
+    out = tmp_path / "review.db"
+    _seed_existing_db(out)
+    with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+                "--out",
+                str(out),
+                "--rebuild",
+                "--append",
+            ],
+        )
+    assert result.exit_code == 2
+    assert "mutually exclusive" in result.stderr
+    mock_build.assert_not_called()
+    assert out.exists()
 
 
 def test_build_queue_command_scales_budget(tmp_path: Path) -> None:

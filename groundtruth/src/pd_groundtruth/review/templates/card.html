@@ -94,7 +94,8 @@
   const form = document.getElementById("label-form");
   const verdictField = document.getElementById("verdict-field");
   const noteField = document.getElementById("note-field");
-  const nextUrl = "/{% if filters.query_string() %}?{{ filters.query_string() }}{% endif %}";
+  const nextUrl = "/{% if filters.query_string() %}?{{ filters.query_string() | safe }}{% endif %}";
+  const skipUrl = "/{% set qs = filters.next_query_string(additional_skip_id=card.pair_id) %}{% if qs %}?{{ qs | safe }}{% endif %}";
   const backLink = document.getElementById("back-link");
   const chips = document.querySelectorAll(".reasons .chip");
 
@@ -107,7 +108,7 @@
   }
 
   function submitVerdict(verdict) {
-    if (!verdict) { window.location.href = nextUrl; return; }
+    if (!verdict) { window.location.href = skipUrl; return; }
     verdictField.value = verdict;
     form.querySelectorAll('input[name="reason"]').forEach(function (el) { el.remove(); });
     selectedReasons().forEach(function (code) {

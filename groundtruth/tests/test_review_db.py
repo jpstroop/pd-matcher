@@ -113,6 +113,30 @@ def test_next_unlabeled_returns_none_when_all_labeled(tmp_path: Path) -> None:
         assert db.next_unlabeled() is None
 
 
+def test_next_unlabeled_excludes_supplied_pair_ids(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        third = db.insert_pair(_pair(control_id="c", nypl_uuid="u-c"))
+        row = db.next_unlabeled(exclude_pair_ids=(first,))
+        assert row is not None
+        assert row.id == second
+        row = db.next_unlabeled(exclude_pair_ids=(first, second))
+        assert row is not None
+        assert row.id == third
+        assert db.next_unlabeled(exclude_pair_ids=(first, second, third)) is None
+
+
+def test_next_unlabeled_exclude_combines_with_language_filter(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        eng_a = db.insert_pair(_pair(language="eng", control_id="a", nypl_uuid="u-a"))
+        eng_b = db.insert_pair(_pair(language="eng", control_id="b", nypl_uuid="u-b"))
+        db.insert_pair(_pair(language="fre", control_id="c", nypl_uuid="u-c"))
+        row = db.next_unlabeled(language="eng", exclude_pair_ids=(eng_a,))
+        assert row is not None
+        assert row.id == eng_b
+
+
 def test_next_unlabeled_filters_by_language_and_band(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         db.insert_pair(_pair(language="eng", band="ge90", control_id="a", nypl_uuid="u-a"))

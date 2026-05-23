@@ -341,6 +341,7 @@ class ReviewDb:
         *,
         language: str | None = None,
         band: str | None = None,
+        exclude_pair_ids: tuple[int, ...] = (),
     ) -> ReviewPairRow | None:
         """Return the lowest-id ``review_pair`` with no current label.
 
@@ -348,17 +349,24 @@ class ReviewDb:
         (Phase 2b appends re-labels rather than deleting), so "unlabeled"
         means *no* label rows exist. Optional ``language`` / ``band``
         filters narrow the queue for focused review sessions.
+        ``exclude_pair_ids`` lets a caller skip an explicit set of ids (used
+        by the review UI to remember session-local skips so the Skip button
+        advances past the current pair without persisting that decision).
         """
         clauses: list[str] = [
             "rp.id NOT IN (SELECT pair_id FROM label)",
         ]
-        params: list[str] = []
+        params: list[str | int] = []
         if language is not None:
             clauses.append("rp.language = ?")
             params.append(language)
         if band is not None:
             clauses.append("rp.band = ?")
             params.append(band)
+        if exclude_pair_ids:
+            placeholders = ",".join("?" * len(exclude_pair_ids))
+            clauses.append(f"rp.id NOT IN ({placeholders})")
+            params.extend(exclude_pair_ids)
         where = " AND ".join(clauses)
         row = self._conn.execute(
             f"SELECT rp.* FROM review_pair rp WHERE {where} ORDER BY rp.id LIMIT 1",

@@ -105,11 +105,17 @@ pdm run pd-groundtruth build-queue \
 | `--pool` | *(required)* | The `acquire` output directory whose `<lang>/*.xml` shards form the candidate pool. |
 | `--index` | *(required)* | The LMDB index produced by `pd-matcher index build`. |
 | `--out` | *(required)* | Destination `review.db` SQLite file. |
+| `--rebuild` | off | Delete an existing `--out` database before writing. Destructive; required when the target already contains pairs and you want a clean rebuild. |
+| `--append` | off | Append into a non-empty `--out` database instead of erroring. Mutually exclusive with `--rebuild`. |
 | `--budget` | *(fills default caps)* | Target total number of pairs; scales the per-stratum caps proportionally. |
 | `--sample-per-lang` | `1500` | Reservoir size drawn from each language directory before matching. |
 | `--workers` | `8` | Number of spawn-pool worker processes. |
 | `--seed` | `42` | Seed for the reservoir samplers (reproducible queues). |
 | `-v` / `-vv` | off | `-v` adds per-worker throughput heartbeats (records/sec + ETA); `-vv` logs every match hit. |
+
+If `--out` already contains `review_pair` rows and neither `--rebuild` nor
+`--append` is set, `build-queue` exits with code 2 and an actionable message
+rather than silently merging old and new pairs.
 
 On completion it prints `records_sampled`, `records_matched`, `pairs_written`,
 and the per-stratum counts.
@@ -148,6 +154,13 @@ every keypress writes to `review.db`:
 On-screen buttons do the same. To step back and fix a verdict, press `b` (or
 `←`); it returns to the pair you most recently labeled and chains further back
 from there.
+
+Skips are **session-local**: each skipped `pair_id` is appended to the URL as a
+`?skip=<id>` parameter so the next request asks the database for the next
+unlabeled pair that is not in that list. The state lives in the URL only — close
+the tab and reopen, and skipped pairs are back in the queue. Labeling clears the
+skip list (the POST-redirect to `/` carries the language/band filter but drops
+`skip`), because committing a verdict ends one attention sweep.
 
 **Record *why* a no-match / unsure** (optional, never blocks the fast path). Each
 `no_match` / `unsure` reason is a chip you can toggle on or off; toggle any

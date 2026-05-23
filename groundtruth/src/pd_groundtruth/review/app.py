@@ -23,6 +23,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi import Form
+from fastapi import Query
 from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.responses import RedirectResponse
@@ -51,6 +52,7 @@ _DB_PATH_ATTR: str = "review_db_path"
 _VAULT_PATH_ATTR: str = "label_vault_path"
 _LABELER: str = "jpstroop"
 _REASON_FORM: list[str] = Form([])
+_SKIP_QUERY: list[int] = Query([])
 _REASON_CONTEXT: dict[str, tuple[ReasonCode, ...]] = {
     "no_match_reasons": NO_MATCH_REASONS,
     "unsure_reasons": UNSURE_REASONS,
@@ -94,11 +96,18 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
 
     @app.get("/", response_class=HTMLResponse)
     def index(
-        request: Request, language: str | None = None, band: str | None = None
+        request: Request,
+        language: str | None = None,
+        band: str | None = None,
+        skip: list[int] = _SKIP_QUERY,
     ) -> HTMLResponse:
-        filters = parse_filters(language, band)
+        filters = parse_filters(language, band, skip)
         with ReviewDb.connect(_db_path(request)) as db:
-            row = db.next_unlabeled(language=filters.language, band=filters.band)
+            row = db.next_unlabeled(
+                language=filters.language,
+                band=filters.band,
+                exclude_pair_ids=filters.skip_ids,
+            )
             counts = db.progress()
             back = db.previous_labeled(language=filters.language, band=filters.band)
         back_id = None if back is None else back.id
