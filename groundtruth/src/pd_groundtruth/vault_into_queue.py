@@ -1,26 +1,22 @@
 """One-shot backfill of vault-labeled pairs that are missing from a review DB.
 
-The label vault is the durable source of truth for human verdicts. The working
-``review.db`` is rebuilt by ``build-queue`` from a fresh stratified sample, so a
-vault entry whose ``(marc_control_id, nypl_uuid)`` pair was not sampled this
-round becomes invisible in the review UI even though the verdict is preserved
-on disk.
+The label vault is the durable source of truth for human verdicts. Since the
+``build-queue`` carryover fix (jpstroop/pd-matcher#33), the routine rebuild
+already includes every vault MARC that's still in the candidate pool, so this
+command is rarely needed in normal operation. It remains available as a
+recovery tool for cases where a queue was built without vault carryover (for
+example via a future ``--no-vault`` flag) or where the vault was modified out
+of band after a build.
 
-This module backfills those missing pairs into an existing ``review.db``: it
-trusts the vault (the matcher would not necessarily have proposed this exact
-pair from scratch), looks the MARC record up in the candidate pool, looks the
-CCE registration up in the LMDB index, scores the *specific* pair using the
+This module backfills missing pairs into an existing ``review.db``: it trusts
+the vault (the matcher would not necessarily have proposed this exact pair
+from scratch), looks the MARC record up in the candidate pool, looks the CCE
+registration up in the LMDB index, scores the *specific* pair using the
 matcher's per-pair scoring routine so the row carries a real
 ``(score, band, evidence)``, and inserts both the ``review_pair`` row and the
 existing vault label with the original ``labeled_at``.
-
-A durable fix that always preserves vault MARCs through ``build-queue``
-sampling is tracked separately (see ``jpstroop/pd-matcher#33``); this CLI is a
-tactical unblock for review sessions in the meantime.
 """
 
-from collections.abc import Callable
-from collections.abc import Iterator
 from logging import getLogger
 from pathlib import Path
 
@@ -29,34 +25,32 @@ from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
-from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import load_or_build_idf
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
-from pd_matcher.match.pipeline import _build_context
-from pd_matcher.match.pipeline import _score_candidate
 from pd_matcher.match.result import CandidateMatch
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
-from pd_matcher.parsers.marc import iter_marc_records
 
 from pd_groundtruth.build_queue import _build_pair_insert
 from pd_groundtruth.build_queue import _language_of
 from pd_groundtruth.build_queue import _load_calibrator
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
+from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import SOURCE_BANDED
 from pd_groundtruth.sampling import band_of
+from pd_groundtruth.vault_pair_resolver import IDF_CACHE_NAME
+from pd_groundtruth.vault_pair_resolver import CceLookupFn
+from pd_groundtruth.vault_pair_resolver import MarcLookupFn
+from pd_groundtruth.vault_pair_resolver import ScorePairFn
+from pd_groundtruth.vault_pair_resolver import build_marc_index
+from pd_groundtruth.vault_pair_resolver import make_pair_scorer
+from pd_groundtruth.vault_pair_resolver import resolve_vault_pairs
 
 _LOGGER = getLogger(__name__)
-
-_IDF_CACHE_NAME: str = "idf.msgpack"
-
-ScorePairFn = Callable[[MarcRecord, IndexedNyplRegRecord], CandidateMatch]
-MarcLookupFn = Callable[[str], MarcRecord | None]
-CceLookupFn = Callable[[str], IndexedNyplRegRecord | None]
 
 
 class BackfillSummary(Struct, frozen=True, forbid_unknown_fields=True):
@@ -68,130 +62,21 @@ class BackfillSummary(Struct, frozen=True, forbid_unknown_fields=True):
     missing_in_index: int
 
 
-def _iter_pool_shards(pool: Path) -> Iterator[Path]:
-    """Yield ``<lang>/*.xml`` shards under ``pool`` in deterministic order."""
-    for language_dir in sorted(pool.iterdir()):
-        if not language_dir.is_dir():
-            continue
-        yield from sorted(language_dir.glob("*.xml"))
-
-
-def build_marc_index(pool: Path, wanted: set[str]) -> dict[str, MarcRecord]:
-    """Return a ``control_id -> MarcRecord`` map for every ``wanted`` id in ``pool``.
-
-    Streams each shard once with the existing :func:`iter_marc_records` parser,
-    keeping only records whose ``control_id`` is in ``wanted`` so memory stays
-    bounded by the size of the missing set rather than the pool. Stops scanning
-    early once every wanted id has been resolved.
-
-    Args:
-        pool: Root directory whose ``<lang>/*.xml`` shards form the candidate
-            pool (mirrors ``build-queue --pool``).
-        wanted: The MARC control ids to materialize.
-
-    Returns:
-        A dict with one entry per resolved id; missing ids are simply absent.
-    """
-    if not wanted:
-        return {}
-    found: dict[str, MarcRecord] = {}
-    remaining = set(wanted)
-    for shard in _iter_pool_shards(pool):
-        for record in iter_marc_records(shard):
-            if record.control_id in remaining:
-                found[record.control_id] = record
-                remaining.discard(record.control_id)
-                if not remaining:
-                    return found
-    return found
-
-
-def _make_pair_scorer(
-    *,
-    matching_config: MatchingConfig,
-    pairings: CompiledPairings,
-    idf: IdfTable,
-    calibrator: PlattCalibrator | None,
-) -> ScorePairFn:
-    """Bind the matcher's per-pair scoring routine into a one-arg callable.
-
-    Reuses :func:`pd_matcher.match.pipeline._score_candidate` so the rebuilt
-    rows carry the *same* evidence/scores the production matcher would emit if
-    it ever proposed the pair (the matcher's candidate retrieval wouldn't
-    necessarily surface it from scratch, which is exactly why the vault has to
-    be honored verbatim here).
-    """
-    combiner = WeightedMeanCombiner(config=matching_config)
-
-    def scorer(marc: MarcRecord, candidate: IndexedNyplRegRecord) -> CandidateMatch:
-        ctx = _build_context(marc, idf, matching_config)
-        return _score_candidate(marc, candidate, ctx, combiner, calibrator, pairings)
-
-    return scorer
-
-
-def _backfill_missing(
-    *,
-    db: ReviewDb,
-    missing: dict[tuple[str, str], VaultEntry],
-    marc_lookup: MarcLookupFn,
-    cce_lookup: CceLookupFn,
-    score_pair: ScorePairFn,
-) -> BackfillSummary:
-    """Persist one row + label per resolvable missing vault entry.
-
-    Skips with a WARNING when the MARC record is no longer in the pool (e.g.
-    purged by an updated filter or removed upstream) or when the CCE record is
-    no longer in the index (NYPL re-issue or index rebuild). Either skip leaves
-    the vault entry untouched on disk so it can still be reconciled later.
-    """
-    backfilled = 0
-    missing_in_pool = 0
-    missing_in_index = 0
-    for (marc_id, nypl_uuid), entry in missing.items():
-        marc = marc_lookup(marc_id)
-        if marc is None:
-            missing_in_pool += 1
-            _LOGGER.warning(
-                "vault.marc_not_in_pool marc_control_id=%s nypl_uuid=%s",
-                marc_id,
-                nypl_uuid,
-            )
-            continue
-        cce = cce_lookup(nypl_uuid)
-        if cce is None:
-            missing_in_index += 1
-            _LOGGER.warning(
-                "vault.cce_not_in_index marc_control_id=%s nypl_uuid=%s",
-                marc_id,
-                nypl_uuid,
-            )
-            continue
-        candidate = score_pair(marc, cce)
-        score = candidate.combined.calibrated
-        pair = _build_pair_insert(
-            marc,
-            cce,
-            candidate.evidence,
-            language=_language_of(marc),
-            score=score,
-            band=band_of(score),
-            source=SOURCE_BANDED,
-        )
-        pair_id = db.insert_pair(pair)
-        db.insert_existing_label(
-            pair_id=pair_id,
-            verdict=entry.verdict,
-            labeled_at=entry.labeled_at,
-            note=entry.note,
-            reasons=entry.reasons,
-        )
-        backfilled += 1
-    return BackfillSummary(
-        backfilled=backfilled,
-        already_present=0,
-        missing_in_pool=missing_in_pool,
-        missing_in_index=missing_in_index,
+def _vault_pair_builder(
+    marc: MarcRecord,
+    cce: IndexedNyplRegRecord,
+    candidate: CandidateMatch,
+) -> PairInsert:
+    """Project a scored vault pair into a :class:`PairInsert` for backfill rows."""
+    score = candidate.combined.calibrated
+    return _build_pair_insert(
+        marc,
+        cce,
+        candidate.evidence,
+        language=_language_of(marc),
+        score=score,
+        band=band_of(score),
+        source=SOURCE_BANDED,
     )
 
 
@@ -233,26 +118,35 @@ def run_backfill(
                 missing_in_pool=0,
                 missing_in_index=0,
             )
-        partial = _backfill_missing(
-            db=db,
-            missing=missing,
+        resolved, summary = resolve_vault_pairs(
+            vault=missing,
             marc_lookup=marc_lookup,
             cce_lookup=cce_lookup,
             score_pair=score_pair,
+            build_pair=_vault_pair_builder,
         )
+        for resolved_pair in resolved:
+            pair_id = db.insert_pair(resolved_pair.pair)
+            db.insert_existing_label(
+                pair_id=pair_id,
+                verdict=resolved_pair.entry.verdict,
+                labeled_at=resolved_pair.entry.labeled_at,
+                note=resolved_pair.entry.note,
+                reasons=resolved_pair.entry.reasons,
+            )
     _LOGGER.info(
         "vault.backfill complete backfilled=%d already_present=%d "
         "missing_in_pool=%d missing_in_index=%d",
-        partial.backfilled,
+        summary.resolved,
         already_present,
-        partial.missing_in_pool,
-        partial.missing_in_index,
+        summary.missing_in_pool,
+        summary.missing_in_index,
     )
     return BackfillSummary(
-        backfilled=partial.backfilled,
+        backfilled=summary.resolved,
         already_present=already_present,
-        missing_in_pool=partial.missing_in_pool,
-        missing_in_index=partial.missing_in_index,
+        missing_in_pool=summary.missing_in_pool,
+        missing_in_index=summary.missing_in_index,
     )
 
 
@@ -299,7 +193,7 @@ def vault_into_queue(
         len(marc_by_id),
     )
 
-    idf_cache_path = index_path.parent / _IDF_CACHE_NAME
+    idf_cache_path = index_path.parent / IDF_CACHE_NAME
     idf = load_or_build_idf(idf_cache_path, lambda: NyplIndexLookup(index_path))
     calibrator = _load_calibrator(index_path.parent)
     pairings = compile_pairings(pairing_config)
@@ -318,6 +212,25 @@ def vault_into_queue(
             cce_lookup=lookup.get_registration,
             score_pair=score_pair,
         )
+
+
+def _make_pair_scorer(
+    *,
+    matching_config: MatchingConfig,
+    pairings: CompiledPairings,
+    idf: IdfTable,
+    calibrator: PlattCalibrator | None,
+) -> ScorePairFn:
+    """Local indirection so tests can monkey-patch the scorer factory.
+
+    Delegates to :func:`pd_groundtruth.vault_pair_resolver.make_pair_scorer`.
+    """
+    return make_pair_scorer(
+        matching_config=matching_config,
+        pairings=pairings,
+        idf=idf,
+        calibrator=calibrator,
+    )
 
 
 __all__ = [

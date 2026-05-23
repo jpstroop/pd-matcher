@@ -40,8 +40,14 @@ from pd_groundtruth.build_queue import _join
 from pd_groundtruth.build_queue import _sample_language
 from pd_groundtruth.build_queue import _write_sample_chunks
 from pd_groundtruth.build_queue import build_queue
+from pd_groundtruth.label_vault import SCHEMA_VERSION
+from pd_groundtruth.label_vault import MarcIdentifiers
+from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import BudgetModel
+from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
+from pd_groundtruth.vault_pair_resolver import ResolveSummary
 
 _MARC_NS = "http://www.loc.gov/MARC21/slim"
 _MARCXML_TEMPLATE = (
@@ -442,6 +448,385 @@ def test_build_queue_threads_log_file_to_run_match(
         log_file=target,
     )
     assert seen_log_file == [target]
+
+
+def _vault_entry(
+    control_id: str,
+    nypl_uuid: str,
+    *,
+    verdict: str = "match",
+    labeled_at: str = "2026-05-22T10:00:00+00:00",
+    reasons: tuple[str, ...] = (),
+    note: str | None = None,
+) -> VaultEntry:
+    return VaultEntry(
+        schema=SCHEMA_VERSION,
+        marc_control_id=control_id,
+        nypl_uuid=nypl_uuid,
+        verdict=verdict,
+        reasons=reasons,
+        note=note,
+        labeled_at=labeled_at,
+        labeler="jpstroop",
+        marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+    )
+
+
+def _pair_for(control_id: str, uuid: str, *, score: float = 0.95, band: str = "ge90") -> PairInsert:
+    return PairInsert(
+        language="eng",
+        decade=1950,
+        score=score,
+        band=band,
+        source="banded",
+        marc_control_id=control_id,
+        marc_json="{}",
+        marc_title="t",
+        marc_author=None,
+        marc_publisher=None,
+        marc_year=1953,
+        nypl_uuid=uuid,
+        cce_title="CCE",
+        cce_author=None,
+        cce_publishers=None,
+        cce_claimants=None,
+        cce_reg_year=1953,
+        cce_was_renewed=True,
+        cce_regnum="R1",
+        evidence_json="{}",
+    )
+
+
+def test_writer_injects_vault_pairs_outside_per_stratum_caps(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    budget = BudgetModel(caps={("eng", "ge90"): 0, ("eng", "below"): 0})
+
+    resolved = (
+        ResolvedVaultPair(
+            entry=_vault_entry("ctrl-a", "uuid-a", verdict="match"),
+            pair=_pair_for("ctrl-a", "uuid-a"),
+        ),
+        ResolvedVaultPair(
+            entry=_vault_entry("ctrl-b", "uuid-b", verdict="no_match", reasons=("diff_work",)),
+            pair=_pair_for("ctrl-b", "uuid-b"),
+        ),
+    )
+
+    with StratifyingResultWriter(
+        db_path=db_path, budget=budget, seed=1, vault_pairs=resolved
+    ) as writer:
+        writer.write(
+            _marc(control_id="not-in-vault"), _match(0.95), _ASSESSMENT, _cce("uuid-other")
+        )
+
+    with ReviewDb.connect(db_path) as db:
+        progress = db.progress()
+        labels = list(db.iter_current_labels())
+        keys = db.pair_keys()
+    assert progress.total == 2
+    assert progress.labeled == 2
+    assert {label.marc_control_id for label in labels} == {"ctrl-a", "ctrl-b"}
+    assert ("not-in-vault", "uuid-other") not in keys
+
+
+def test_writer_vault_injection_preserves_verdict_metadata(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    entry = _vault_entry(
+        "ctrl-a",
+        "uuid-a",
+        verdict="no_match",
+        reasons=("diff_work", "diff_edition"),
+        note="careful read",
+        labeled_at="2026-05-22T11:00:00+00:00",
+    )
+    pair = _pair_for("ctrl-a", "uuid-a", score=0.42, band="below")
+    resolved = (ResolvedVaultPair(entry=entry, pair=pair),)
+    with StratifyingResultWriter(
+        db_path=db_path,
+        budget=BudgetModel(caps={}),
+        seed=1,
+        vault_pairs=resolved,
+    ):
+        pass
+
+    with ReviewDb.connect(db_path) as db:
+        labels = list(db.iter_current_labels())
+    assert len(labels) == 1
+    only = labels[0]
+    assert only.verdict == "no_match"
+    assert only.labeled_at == "2026-05-22T11:00:00+00:00"
+    assert only.note == "careful read"
+    assert set(only.reasons) == {"diff_work", "diff_edition"}
+
+
+def test_build_queue_carries_vault_pair_through_rebuild(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    from pd_groundtruth.label_vault import append_entry
+
+    pool = tmp_path / "pool"
+    (pool / "eng").mkdir(parents=True)
+    _write_shard(pool / "eng" / "shard_1.xml", "vault-marc", "Title V")
+    _write_shard(pool / "eng" / "shard_2.xml", "other-marc", "Title O")
+
+    vault_path = tmp_path / "vault.jsonl"
+    vault_entry = _vault_entry("vault-marc", "vault-uuid", verdict="match")
+    append_entry(vault_path, vault_entry)
+
+    captured_resolve: dict[str, object] = {}
+    captured_sample_marcs: list[list[str]] = []
+
+    def _fake_resolve(**_kwargs: object) -> tuple[list[ResolvedVaultPair], ResolveSummary]:
+        captured_resolve["called"] = True
+        return (
+            [ResolvedVaultPair(entry=vault_entry, pair=_pair_for("vault-marc", "vault-uuid"))],
+            ResolveSummary(resolved=1, missing_in_pool=0, missing_in_index=0),
+        )
+
+    monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
+    monkeypatch.setattr(bq, "resolve_vault_for_build", _fake_resolve)
+
+    def _fake_run_match(**kwargs: object) -> RunReport:
+        factory = kwargs["writer_factory"]
+        prepared_dir = kwargs["prepared_dir"]
+        assert isinstance(prepared_dir, Path)
+        from pickle import load as pickle_load
+
+        with (prepared_dir / "chunk_00000.pkl").open("rb") as handle:
+            chunk = pickle_load(handle)
+        captured_sample_marcs.append([record.control_id for record in chunk])
+        assert callable(factory)
+        writer = factory(tmp_path / "ignored.csv")
+        with writer:
+            pass
+        return RunReport(
+            records_processed=len(chunk),
+            records_written=len(chunk),
+            records_enqueued=len(chunk),
+            duration_seconds=0.0,
+            by_status={},
+            interrupted=False,
+        )
+
+    monkeypatch.setattr(bq, "run_match", _fake_run_match)
+
+    out_path = tmp_path / "review.db"
+    summary = build_queue(
+        pool=pool,
+        index_path=tmp_path / "idx" / "nypl.lmdb",
+        out_path=out_path,
+        vault_path=vault_path,
+        budget=BudgetModel(caps={("eng", "ge90"): 5, ("eng", "below"): 5}),
+        matching_config=_MATCHING_CONFIG,
+        pairing_config=_PAIRING_CONFIG,
+        ruleset=_RULESET,
+        copyright_config=_COPYRIGHT_CONFIG,
+        seed=42,
+        workers=1,
+        sample_per_lang=10,
+    )
+
+    assert captured_resolve == {"called": True}
+    assert summary.vault_resolved == 1
+    assert summary.vault_missing_in_pool == 0
+    assert summary.vault_missing_in_index == 0
+    assert captured_sample_marcs == [["other-marc"]]
+    assert summary.records_sampled == 1
+    assert summary.pairs_written == 1
+    assert summary.stratum_counts["eng/ge90"] == 1
+    with ReviewDb.connect(out_path) as db:
+        labels = list(db.iter_current_labels())
+    assert len(labels) == 1
+    assert labels[0].marc_control_id == "vault-marc"
+    assert labels[0].verdict == "match"
+
+
+def test_build_queue_excludes_vault_marcs_from_sample(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    pool = tmp_path / "pool"
+    (pool / "eng").mkdir(parents=True)
+    _write_shard(pool / "eng" / "shard_1.xml", "vault-a", "T1")
+    _write_shard(pool / "eng" / "shard_2.xml", "vault-b", "T2")
+    _write_shard(pool / "eng" / "shard_3.xml", "non-vault", "T3")
+
+    entry_a = _vault_entry("vault-a", "uuid-a")
+    entry_b = _vault_entry("vault-b", "uuid-b")
+
+    monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
+    monkeypatch.setattr(
+        bq,
+        "resolve_vault_for_build",
+        lambda **_kwargs: (
+            [
+                ResolvedVaultPair(entry=entry_a, pair=_pair_for("vault-a", "uuid-a")),
+                ResolvedVaultPair(entry=entry_b, pair=_pair_for("vault-b", "uuid-b")),
+            ],
+            ResolveSummary(resolved=2, missing_in_pool=0, missing_in_index=0),
+        ),
+    )
+
+    seen_marcs: list[list[str]] = []
+
+    def _fake_run_match(**kwargs: object) -> RunReport:
+        prepared_dir = kwargs["prepared_dir"]
+        assert isinstance(prepared_dir, Path)
+        from pickle import load as pickle_load
+
+        with (prepared_dir / "chunk_00000.pkl").open("rb") as handle:
+            chunk = pickle_load(handle)
+        seen_marcs.append([record.control_id for record in chunk])
+        factory = kwargs["writer_factory"]
+        assert callable(factory)
+        with factory(tmp_path / "ignored.csv"):
+            pass
+        return RunReport(
+            records_processed=len(chunk),
+            records_written=0,
+            records_enqueued=len(chunk),
+            duration_seconds=0.0,
+            by_status={},
+            interrupted=False,
+        )
+
+    monkeypatch.setattr(bq, "run_match", _fake_run_match)
+
+    build_queue(
+        pool=pool,
+        index_path=tmp_path / "idx" / "nypl.lmdb",
+        out_path=tmp_path / "review.db",
+        vault_path=tmp_path / "vault.jsonl",
+        budget=BudgetModel(caps={("eng", "ge90"): 5}),
+        matching_config=_MATCHING_CONFIG,
+        pairing_config=_PAIRING_CONFIG,
+        ruleset=_RULESET,
+        copyright_config=_COPYRIGHT_CONFIG,
+        seed=1,
+        workers=1,
+        sample_per_lang=10,
+    )
+    assert seen_marcs == [["non-vault"]]
+
+
+class _NullCceLookup:
+    def __enter__(self) -> _NullCceLookup:
+        return self
+
+    def __exit__(self, *_args: object) -> None: ...
+
+    def get_registration(self, _uuid: str) -> object:
+        return None
+
+
+def test_build_queue_reports_vault_entries_missing_from_pool(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    from pd_groundtruth.label_vault import append_entry
+
+    pool = tmp_path / "pool"
+    (pool / "eng").mkdir(parents=True)
+    _write_shard(pool / "eng" / "shard_1.xml", "in-pool", "Present")
+    vault_path = tmp_path / "vault.jsonl"
+    append_entry(vault_path, _vault_entry("missing-marc", "uuid-x"))
+
+    from pd_groundtruth import build_queue_vault as bqv
+
+    monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
+    monkeypatch.setattr(bqv, "NyplIndexLookup", lambda _p: _NullCceLookup())
+
+    def _fake_run_match(**kwargs: object) -> RunReport:
+        factory = kwargs["writer_factory"]
+        assert callable(factory)
+        with factory(tmp_path / "ignored.csv"):
+            pass
+        return RunReport(
+            records_processed=1,
+            records_written=0,
+            records_enqueued=1,
+            duration_seconds=0.0,
+            by_status={},
+            interrupted=False,
+        )
+
+    monkeypatch.setattr(bq, "run_match", _fake_run_match)
+
+    summary = build_queue(
+        pool=pool,
+        index_path=tmp_path / "idx" / "nypl.lmdb",
+        out_path=tmp_path / "review.db",
+        vault_path=vault_path,
+        budget=BudgetModel(caps={("eng", "ge90"): 1}),
+        matching_config=_MATCHING_CONFIG,
+        pairing_config=_PAIRING_CONFIG,
+        ruleset=_RULESET,
+        copyright_config=_COPYRIGHT_CONFIG,
+        seed=1,
+        workers=1,
+        sample_per_lang=10,
+    )
+    assert summary.vault_resolved == 0
+    assert summary.vault_missing_in_pool == 1
+    assert summary.vault_missing_in_index == 0
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        assert db.stratum_counts() == {}
+
+
+def test_build_queue_reports_vault_entry_missing_from_index(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    from pd_groundtruth.label_vault import append_entry
+
+    pool = tmp_path / "pool"
+    (pool / "eng").mkdir(parents=True)
+    _write_shard(pool / "eng" / "shard_1.xml", "have-marc", "Present")
+    vault_path = tmp_path / "vault.jsonl"
+    append_entry(vault_path, _vault_entry("have-marc", "uuid-gone"))
+
+    from pd_groundtruth import build_queue_vault as bqv
+
+    monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
+    monkeypatch.setattr(bqv, "compile_pairings", lambda _pairing: object())
+    monkeypatch.setattr(bqv, "make_pair_scorer", lambda **_kw: lambda _m, _c: _match(0.95))
+    monkeypatch.setattr(bqv, "NyplIndexLookup", lambda _p: _NullCceLookup())
+
+    def _fake_run_match(**kwargs: object) -> RunReport:
+        factory = kwargs["writer_factory"]
+        assert callable(factory)
+        with factory(tmp_path / "ignored.csv"):
+            pass
+        return RunReport(
+            records_processed=0,
+            records_written=0,
+            records_enqueued=0,
+            duration_seconds=0.0,
+            by_status={},
+            interrupted=False,
+        )
+
+    monkeypatch.setattr(bq, "run_match", _fake_run_match)
+
+    summary = build_queue(
+        pool=pool,
+        index_path=tmp_path / "idx" / "nypl.lmdb",
+        out_path=tmp_path / "review.db",
+        vault_path=vault_path,
+        budget=BudgetModel(caps={("eng", "ge90"): 1}),
+        matching_config=_MATCHING_CONFIG,
+        pairing_config=_PAIRING_CONFIG,
+        ruleset=_RULESET,
+        copyright_config=_COPYRIGHT_CONFIG,
+        seed=1,
+        workers=1,
+        sample_per_lang=10,
+    )
+    assert summary.vault_resolved == 0
+    assert summary.vault_missing_in_index == 1
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        assert db.stratum_counts() == {}
 
 
 def test_build_queue_cleans_up_prepared_dir(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

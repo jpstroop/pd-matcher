@@ -218,12 +218,20 @@ labeled)`. The vault grows monotonically; `review.db` is disposable.
   same verdict is appended to the vault using the DB-stamped timestamp so the
   two stay in lockstep. A rare vault-write failure is logged but never fails
   the HTTP request.
-- **`build-queue` reads here at the start.** Pairs that already have a vault
-  verdict are inserted into the new `review.db` *with* their verdict
-  pre-applied, so `next_unlabeled` skips them and `/stats` immediately
-  reflects the existing labels. A summary line at the end reports
-  `vault contributed N pre-applied labels; M new pairs queued`. Use the
-  back-arrow to revisit and re-label if needed.
+- **`build-queue` always carries the vault forward.** At the start of the
+  run, every current vault entry is resolved against the candidate pool and
+  the LMDB index, scored with the matcher's per-pair routine, and queued for
+  unconditional insertion into the new `review.db` with the original verdict
+  pre-applied (preserving `labeled_at`). Vault MARCs are then *excluded* from
+  the per-language reservoir so the matcher doesn't propose a competing pair
+  for the same record. The result: a rebuilt queue carries every persistable
+  vault verdict regardless of `--sample-per-lang`. The end-of-run summary
+  reads `vault pre-applied: P pairs (of M resolved); Q non-vault pairs
+  queued`. A vault entry whose MARC is no longer in the pool, or whose CCE
+  is no longer in the index, is logged with a WARNING and skipped for this
+  build — the vault file itself is never modified, so a future build can
+  pick it up if the underlying data returns. Use the back-arrow to revisit
+  and re-label if needed.
 
 ### One-shot migration: `seed-vault`
 
@@ -241,11 +249,11 @@ fresh round of labeling only adds the new events.
 
 ### Recovery: `vault-into-queue`
 
-A tactical bridge that backfills vault entries whose `(marc_control_id,
-nypl_uuid)` pair is **not** present in an existing `review.db`. This happens
-because `build-queue`'s stratified sampling can miss MARC records that were
-labeled in a previous round, leaving those verdicts invisible in the review
-UI even though they are safely persisted in the vault.
+After the build-queue carryover fix (jpstroop/pd-matcher#33), this command is
+rarely needed in normal operation — it remains available as a recovery tool.
+Use it when an existing `review.db` is missing vault entries it should
+contain, for example because the queue was built with vault carryover
+disabled, or because the vault file was modified out of band after the build.
 
 ```bash
 pdm run pd-groundtruth vault-into-queue \
@@ -272,10 +280,6 @@ a WARNING and skipped; the vault file is never modified.
 
 The final summary reads `backfilled N vault pairs; M MARC records not found
 in pool; K CCE records not found in index; P already present (skipped)`.
-
-This is a **tactical unblock** until `build-queue` always includes vault MARCs
-in its sample (see `jpstroop/pd-matcher#33`); once that lands, this command
-becomes unnecessary.
 
 ## Reference: what survives acquisition
 
