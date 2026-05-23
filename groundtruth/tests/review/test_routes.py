@@ -146,6 +146,12 @@ def test_back_link_preserves_filter(client: TestClient) -> None:
     assert "/pair/2?language=fre" in nxt.text
 
 
+def test_card_links_marc_control_id_to_princeton_catalog(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'href="https://catalog.princeton.edu/catalog/eng-1"' in response.text
+
+
 def test_card_renders_reason_chips(client: TestClient) -> None:
     response = client.get("/")
     assert "Different work / title collision" in response.text
