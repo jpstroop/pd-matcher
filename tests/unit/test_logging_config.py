@@ -1,6 +1,8 @@
 """Tests for :mod:`pd_matcher.logging_config`."""
 
 from json import loads
+from pathlib import Path
+from re import search
 
 from _pytest.capture import CaptureFixture
 from pytest import mark
@@ -10,6 +12,8 @@ from structlog.contextvars import bind_contextvars
 from structlog.contextvars import clear_contextvars
 
 from pd_matcher.logging_config import configure_logging
+
+_ANSI_RE = r"\x1b\["
 
 
 @mark.parametrize("level", ["DEBUG", "info", "Warning", "ERROR"])
@@ -76,3 +80,72 @@ def test_reconfiguration_clears_previous_handlers(capsys: CaptureFixture[str]) -
     assert len(lines) == 1
     payload: dict[str, object] = loads(lines[0])
     assert payload["message"] == "once"
+
+
+def test_configure_logging_returns_log_file_path(tmp_path: Path) -> None:
+    """The function returns the ``log_file`` argument unchanged."""
+    clear_contextvars()
+    target = tmp_path / "sub" / "run.log"
+    returned = configure_logging(level="INFO", json_output=False, log_file=target)
+    assert returned == target
+
+
+def test_configure_logging_returns_none_without_file() -> None:
+    """When no log file is supplied the function returns ``None``."""
+    clear_contextvars()
+    returned = configure_logging(level="INFO", json_output=False)
+    assert returned is None
+
+
+def test_log_file_receives_console_lines_without_ansi(
+    capsys: CaptureFixture[str], tmp_path: Path
+) -> None:
+    """File sink captures the rendered line with ANSI escapes stripped."""
+    clear_contextvars()
+    target = tmp_path / "run.log"
+    configure_logging(level="INFO", json_output=False, log_file=target)
+    get_logger("pd_matcher.test").info("hello", foo="bar")
+    captured = capsys.readouterr()
+    assert "hello" in captured.err
+    file_contents = target.read_text(encoding="utf-8")
+    assert "hello" in file_contents
+    assert "foo" in file_contents
+    assert "bar" in file_contents
+    assert search(_ANSI_RE, file_contents) is None
+
+
+def test_log_file_receives_json_lines_when_json_output(
+    capsys: CaptureFixture[str], tmp_path: Path
+) -> None:
+    """File sink captures JSON-rendered lines when ``json_output`` is true."""
+    clear_contextvars()
+    target = tmp_path / "run.log"
+    configure_logging(level="INFO", json_output=True, log_file=target)
+    get_logger("pd_matcher.test").info("payload", marc_id="abc")
+    capsys.readouterr()
+    line = target.read_text(encoding="utf-8").strip().splitlines()[-1]
+    payload: dict[str, object] = loads(line)
+    assert payload["message"] == "payload"
+    assert payload["marc_id"] == "abc"
+
+
+def test_log_file_creates_parent_directory(tmp_path: Path) -> None:
+    """A missing parent directory for ``log_file`` is created on demand."""
+    clear_contextvars()
+    target = tmp_path / "new" / "nested" / "run.log"
+    configure_logging(level="INFO", json_output=False, log_file=target)
+    get_logger("pd_matcher.test").info("hello")
+    assert target.exists()
+
+
+def test_log_file_appends_across_reconfigurations(tmp_path: Path) -> None:
+    """Reopening the same path appends rather than truncating prior content."""
+    clear_contextvars()
+    target = tmp_path / "run.log"
+    configure_logging(level="INFO", json_output=False, log_file=target)
+    get_logger("pd_matcher.test").info("first")
+    configure_logging(level="INFO", json_output=False, log_file=target)
+    get_logger("pd_matcher.test").info("second")
+    contents = target.read_text(encoding="utf-8")
+    assert "first" in contents
+    assert "second" in contents

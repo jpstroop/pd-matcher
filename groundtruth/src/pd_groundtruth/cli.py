@@ -1,8 +1,13 @@
 """Typer entry point for the ground-truth acquisition tool."""
 
+from datetime import UTC
 from datetime import date
+from datetime import datetime
 from logging import INFO
-from logging import basicConfig
+from logging import FileHandler
+from logging import Formatter
+from logging import StreamHandler
+from logging import getLogger
 from pathlib import Path
 from typing import Annotated
 
@@ -40,6 +45,43 @@ _DEFAULT_REVIEW_HOST = "127.0.0.1"
 _DEFAULT_REVIEW_PORT = 8000
 _DEFAULT_VAULT_PATH = Path("label_vault.jsonl")
 _LABELER = "jpstroop"
+_LOG_DIR_NAME = "logs"
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+
+
+def _utc_timestamp() -> str:
+    """Return a filename-safe UTC timestamp (e.g. ``20260523-004530``)."""
+    return datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+
+
+def _configure_logging(command: str, log_file: Path | None) -> Path:
+    """Install stdout + file log handlers and return the resolved file path.
+
+    Resolves the path to ``log_file`` when supplied or
+    ``logs/{command}_{utc-timestamp}.log`` otherwise, creates the parent
+    directory, wires up one stream handler and one file handler at INFO
+    with a uniform format string, and echoes the path to stderr so users
+    see where the run is being persisted.
+    """
+    path = (
+        log_file
+        if log_file is not None
+        else Path(_LOG_DIR_NAME) / (f"{command}_{_utc_timestamp()}.log")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    formatter = Formatter(_LOG_FORMAT)
+    stream_handler = StreamHandler()
+    stream_handler.setFormatter(formatter)
+    file_handler = FileHandler(path, mode="w", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    root = getLogger()
+    for existing in list(root.handlers):
+        root.removeHandler(existing)
+    root.setLevel(INFO)
+    root.addHandler(stream_handler)
+    root.addHandler(file_handler)
+    echo(f"logging to file: {path}", err=True)
+    return path
 
 
 @app.callback()
@@ -72,9 +114,13 @@ def acquire_command(
     max_dumps: Annotated[
         int | None, Option("--max-dumps", help="Cap the number of dumps processed.")
     ] = None,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
 ) -> None:
     """Stream dumps and write eligible records as per-language MARCXML shards."""
-    basicConfig(level=INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    _configure_logging("acquire", log_file)
     resolved_min_year = default_min_year() if min_year is None else min_year
     report = acquire(
         out_dir=out_dir,
@@ -134,9 +180,13 @@ def build_queue_command(
             help="Increase matcher logging: -v per-worker heartbeats, -vv per-record hits.",
         ),
     ] = 0,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
 ) -> None:
     """Match a stratified pool sample and write a SQLite review queue."""
-    basicConfig(level=INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    resolved_log_file = _configure_logging("build-queue", log_file)
     resolved_budget = default_budget() if budget is None else scale_budget(default_budget(), budget)
     summary = build_queue(
         pool=pool,
@@ -152,6 +202,7 @@ def build_queue_command(
         workers=workers,
         sample_per_lang=sample_per_lang,
         verbosity=verbose,
+        log_file=resolved_log_file,
     )
     strata = " ".join(f"{label}={count}" for label, count in sorted(summary.stratum_counts.items()))
     echo(
@@ -178,8 +229,13 @@ def review_command(
     port: Annotated[int, Option("--port", help="Port for the local review server.")] = (
         _DEFAULT_REVIEW_PORT
     ),
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
 ) -> None:
     """Launch the local keyboard-driven review UI over a review database."""
+    _configure_logging("review", log_file)
     echo(f"serving review UI for {db} (vault: {vault}) at http://{host}:{port}")
     serve(db, vault, host=host, port=port)
 
@@ -194,6 +250,10 @@ def seed_vault_command(
         Path,
         Option("--vault", help="JSONL label vault to append into (created if absent)."),
     ] = _DEFAULT_VAULT_PATH,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
 ) -> None:
     """One-shot migration: dump every current label from ``--db`` into ``--vault``.
 
@@ -201,7 +261,7 @@ def seed_vault_command(
     ``nypl_uuid`` + ``labeled_at``) are skipped. Different ``labeled_at`` for
     the same pair is treated as a new event and appended.
     """
-    basicConfig(level=INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    _configure_logging("seed-vault", log_file)
     existing = current_entries(vault)
     seeded = 0
     skipped = 0

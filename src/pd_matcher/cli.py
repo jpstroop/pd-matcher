@@ -10,7 +10,9 @@ reported on stderr with these exit codes:
 * ``130`` — interrupted by SIGINT
 """
 
+from datetime import UTC
 from datetime import date
+from datetime import datetime
 from importlib.resources import as_file
 from importlib.resources import files
 from json import dumps
@@ -83,6 +85,29 @@ class _LogSettings:
 
 
 _LOG_SETTINGS: _LogSettings = _LogSettings()
+_LOG_DIR_NAME: str = "logs"
+
+
+def _utc_timestamp() -> str:
+    """Return a filename-safe UTC timestamp (e.g. ``20260523-004530``)."""
+    return datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+
+
+def _resolve_log_file(command: str, override: Path | None) -> Path:
+    """Pick the log file path for ``command`` honoring ``--log-file``.
+
+    Args:
+        command: Command name embedded in the auto-generated filename.
+        override: Explicit path from ``--log-file``; when ``None`` the path
+            is auto-generated under ``logs/`` relative to CWD.
+
+    Returns:
+        The resolved path. The parent directory is *not* created here;
+        :func:`configure_logging` does that just before opening the file.
+    """
+    if override is not None:
+        return override
+    return Path(_LOG_DIR_NAME) / f"{command}_{_utc_timestamp()}.log"
 
 
 app: Typer = Typer(
@@ -126,6 +151,22 @@ def _main(
         from logging import getLogger
 
         getLogger().setLevel(WARNING)
+
+
+def _enable_log_file(command: str, override: Path | None) -> Path:
+    """Resolve and attach the per-invocation log file, echo it to stderr.
+
+    Reconfigures logging with the resolved file path and echoes a short
+    notice so users see where the run's output is being persisted.
+    """
+    path = _resolve_log_file(command, override)
+    configure_logging(
+        level=_LOG_SETTINGS.level,
+        json_output=_LOG_SETTINGS.json_logs,
+        log_file=path,
+    )
+    echo(f"logging to file: {path}", err=True)
+    return path
 
 
 def _fail(message: str, *, code: int = _RUNTIME_ERROR_EXIT_CODE) -> Exit:
@@ -324,6 +365,10 @@ def index_build(
         bool,
         Option("--force/--no-force", help="Rebuild even if the existing index is current."),
     ] = False,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
 ) -> None:
     """Build the LMDB index from NYPL registration and renewal sources.
 
@@ -333,6 +378,7 @@ def index_build(
             --ren-dir data/nypl-ren/data \\
             --out caches/nypl.lmdb
     """
+    _enable_log_file("index-build", log_file)
     if not reg_dir.is_dir():
         raise _fail(f"--reg-dir does not exist or is not a directory: {reg_dir}")
     if not ren_dir.is_dir():
@@ -350,12 +396,17 @@ def index_info(
         Path,
         Option("--lmdb-path", help="LMDB environment directory to inspect."),
     ],
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
 ) -> None:
     """Print counts, build time, and source hashes for an existing index.
 
     Examples:
         pd-matcher index info --lmdb-path caches/nypl.lmdb
     """
+    _enable_log_file("index-info", log_file)
     if not lmdb_path.exists():
         raise _fail(f"--lmdb-path does not exist: {lmdb_path}")
     try:
@@ -385,6 +436,10 @@ def prepare_marc_command(
         bool,
         Option("--force/--no-force", help="Rebuild even when the prepared cache is current."),
     ] = False,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
 ) -> None:
     """Stream MARCXML into re-runnable pickled chunks for `match --prepared`.
 
@@ -393,6 +448,7 @@ def prepare_marc_command(
             --marc data/candidates/eng \\
             --out caches/prepared-eng
     """
+    _enable_log_file("prepare-marc", log_file)
     if chunk_size < 1:
         raise _fail(
             f"--chunk-size: must be a positive integer (got {chunk_size})",
@@ -453,6 +509,10 @@ def match(
             ),
         ),
     ] = None,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
 ) -> None:
     """Match MARC records against the NYPL index and write a CSV report.
 
@@ -463,6 +523,7 @@ def match(
             --out /tmp/results.csv \\
             --workers 4
     """
+    resolved_log_file = _enable_log_file("match", log_file)
     as_of_year = _parse_as_of(as_of)
     if (marc is None) == (prepared is None):
         raise _fail(
@@ -534,6 +595,7 @@ def match(
             verbosity=verbose,
             log_level=_LOG_SETTINGS.level,
             json_logs=_LOG_SETTINGS.json_logs,
+            log_file=resolved_log_file,
         )
     except OSError as exc:
         raise _fail(f"match run failed: {exc}") from exc
@@ -602,6 +664,10 @@ def eval_(
             ),
         ),
     ] = 1,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
 ) -> None:
     """Evaluate the matcher against the ground-truth pairs.
 
@@ -612,6 +678,7 @@ def eval_(
             --report /tmp/eval.json \\
             --workers 8
     """
+    _enable_log_file("eval", log_file)
     as_of_year = _parse_as_of(as_of)
     year_window = _validate_year_window(year_window)
     sample = _validate_sample(sample)

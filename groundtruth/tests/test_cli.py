@@ -1,6 +1,9 @@
 """Unit tests for the typer CLI wiring (acquisition mocked)."""
 
 from datetime import date
+from logging import getLogger
+from os import chdir
+from os import getcwd
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,6 +11,7 @@ from typer.testing import CliRunner
 
 from pd_groundtruth.acquire import AcquireReport
 from pd_groundtruth.build_queue import BuildSummary
+from pd_groundtruth.cli import _configure_logging
 from pd_groundtruth.cli import app
 from pd_groundtruth.sampling import default_budget
 
@@ -106,6 +110,85 @@ def test_build_queue_command_defaults(tmp_path: Path) -> None:
     assert kwargs["vault_path"] == Path("label_vault.jsonl")
     assert "pairs_written=5" in result.stdout
     assert "eng/ge90=3" in result.stdout
+
+
+def test_configure_logging_with_explicit_path_writes_to_it(tmp_path: Path) -> None:
+    target = tmp_path / "sub" / "explicit.log"
+    resolved = _configure_logging("acquire", target)
+    assert resolved == target
+    getLogger("pd_groundtruth.test").info("hello vault")
+    contents = target.read_text(encoding="utf-8")
+    assert "hello vault" in contents
+    assert "pd_groundtruth.test" in contents
+
+
+def test_configure_logging_auto_path_lands_under_logs_dir(tmp_path: Path) -> None:
+    original = getcwd()
+    chdir(tmp_path)
+    try:
+        resolved = _configure_logging("build-queue", None)
+    finally:
+        chdir(original)
+    assert resolved.parent == Path("logs")
+    assert resolved.name.startswith("build-queue_")
+    assert resolved.name.endswith(".log")
+    assert (tmp_path / resolved).exists()
+
+
+def test_acquire_command_auto_creates_log_file(tmp_path: Path) -> None:
+    original = getcwd()
+    chdir(tmp_path)
+    try:
+        with patch("pd_groundtruth.cli.acquire", return_value=_report()):
+            result = _RUNNER.invoke(app, ["acquire", "--out-dir", str(tmp_path / "out")])
+    finally:
+        chdir(original)
+    assert result.exit_code == 0
+    log_dir = tmp_path / "logs"
+    assert log_dir.is_dir()
+    log_files = list(log_dir.glob("acquire_*.log"))
+    assert len(log_files) == 1
+    contents = log_files[0].read_text(encoding="utf-8")
+    assert "INFO" in contents or "WARNING" in contents or contents == ""
+
+
+def test_acquire_command_honors_explicit_log_file(tmp_path: Path) -> None:
+    target = tmp_path / "explicit" / "run.log"
+    with patch("pd_groundtruth.cli.acquire", return_value=_report()):
+        result = _RUNNER.invoke(
+            app,
+            [
+                "acquire",
+                "--out-dir",
+                str(tmp_path / "out"),
+                "--log-file",
+                str(target),
+            ],
+        )
+    assert result.exit_code == 0
+    assert target.exists()
+
+
+def test_build_queue_command_threads_log_file_to_build_queue(tmp_path: Path) -> None:
+    target = tmp_path / "queue.log"
+    with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+                "--out",
+                str(tmp_path / "review.db"),
+                "--log-file",
+                str(target),
+            ],
+        )
+    assert result.exit_code == 0
+    _, kwargs = mock_build.call_args
+    assert kwargs["log_file"] == target
 
 
 def test_build_queue_command_scales_budget(tmp_path: Path) -> None:

@@ -57,6 +57,11 @@ All commands below are run from this `groundtruth/` directory.
 
 ## Usage
 
+Every command below writes a log file to `logs/{command}_{utc-timestamp}.log` in
+addition to streaming the same lines to the console. Override the path with
+`--log-file PATH` (the parent directory is created if missing). The `logs/`
+directory is gitignored.
+
 ### 1. `acquire` — download and filter MARC
 
 ```bash
