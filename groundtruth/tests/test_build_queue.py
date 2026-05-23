@@ -400,6 +400,50 @@ def test_build_queue_drives_run_match_and_summarizes(
     assert _MATCHING_CONFIG.min_combined_score != 0.0
 
 
+def test_build_queue_threads_log_file_to_run_match(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    pool = tmp_path / "pool"
+    (pool / "eng").mkdir(parents=True)
+    _write_shard(pool / "eng" / "shard_1.xml", "id-1", "Title One")
+    monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
+
+    seen_log_file: list[Path | None] = []
+
+    def _fake_run_match(**kwargs: object) -> RunReport:
+        log_file = kwargs.get("log_file")
+        assert log_file is None or isinstance(log_file, Path)
+        seen_log_file.append(log_file)
+        return RunReport(
+            records_processed=1,
+            records_written=0,
+            records_enqueued=1,
+            duration_seconds=0.0,
+            by_status={},
+            interrupted=False,
+        )
+
+    monkeypatch.setattr(bq, "run_match", _fake_run_match)
+    target = tmp_path / "queue.log"
+    build_queue(
+        pool=pool,
+        index_path=tmp_path / "idx" / "nypl.lmdb",
+        out_path=tmp_path / "review.db",
+        vault_path=tmp_path / "vault.jsonl",
+        budget=BudgetModel(caps={("eng", "ge90"): 1}),
+        matching_config=_MATCHING_CONFIG,
+        pairing_config=_PAIRING_CONFIG,
+        ruleset=_RULESET,
+        copyright_config=_COPYRIGHT_CONFIG,
+        seed=1,
+        workers=1,
+        sample_per_lang=10,
+        log_file=target,
+    )
+    assert seen_log_file == [target]
+
+
 def test_build_queue_cleans_up_prepared_dir(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     pool = tmp_path / "pool"
     (pool / "eng").mkdir(parents=True)

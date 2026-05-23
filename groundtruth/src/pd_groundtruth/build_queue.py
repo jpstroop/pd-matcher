@@ -395,6 +395,7 @@ def build_queue(
     workers: int,
     sample_per_lang: int,
     verbosity: int = 0,
+    log_file: Path | None = None,
 ) -> BuildSummary:
     """Build the stratified review queue and persist it to ``out_path``.
 
@@ -420,6 +421,8 @@ def build_queue(
         workers: Number of matcher worker processes (``>= 1``).
         sample_per_lang: Reservoir size per language directory.
         verbosity: Forwarded to ``run_match`` (``-v`` worker heartbeats).
+        log_file: Optional log file path forwarded to ``run_match`` so spawn
+            workers append their log lines to the same file as the parent.
 
     Returns:
         A populated :class:`BuildSummary`.
@@ -457,6 +460,7 @@ def build_queue(
             workers=workers,
             writer_factory=factory,
             verbosity=verbosity,
+            log_file=log_file,
         )
     finally:
         rmtree(prepared_dir, ignore_errors=True)

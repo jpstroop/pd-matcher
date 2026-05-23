@@ -94,6 +94,7 @@ def _spawn_workers(
     verbosity: int,
     log_level: str,
     json_logs: bool,
+    log_file: Path | None,
 ) -> list[SpawnProcess]:
     """Spawn the configured number of worker processes and return them."""
     processes: list[SpawnProcess] = []
@@ -117,6 +118,7 @@ def _spawn_workers(
                 "verbosity": verbosity,
                 "log_level": log_level,
                 "json_logs": json_logs,
+                "log_file": log_file,
             },
         )
         process.start()
@@ -141,6 +143,7 @@ def _worker_entry(
     verbosity: int = 0,
     log_level: str = "INFO",
     json_logs: bool = False,
+    log_file: Path | None = None,
 ) -> None:
     """Top-level callable executed inside each spawned worker process.
 
@@ -151,7 +154,7 @@ def _worker_entry(
     :func:`worker_main`) so the heavy lifting remains reachable from
     in-process tests, which configure logging themselves.
     """
-    configure_logging(level=log_level, json_output=json_logs)
+    configure_logging(level=log_level, json_output=json_logs, log_file=log_file)
     is_shutdown = _shutdown_predicate(shutdown_event)
     worker_main(
         index_path=index_path,
@@ -240,6 +243,7 @@ def run_match(
     verbosity: int = 0,
     log_level: str = "INFO",
     json_logs: bool = False,
+    log_file: Path | None = None,
 ) -> RunReport:
     """Run the full match pipeline over one input source and return a summary.
 
@@ -277,6 +281,8 @@ def run_match(
         log_level: Log level reconfigured inside each spawned worker (which
             do not inherit the parent's logging config).
         json_logs: Whether spawned workers emit JSON logs.
+        log_file: Optional log file path reopened in append mode inside each
+            spawned worker so worker output is co-located with the parent's.
 
     Returns:
         A :class:`RunReport` describing the run.
@@ -316,6 +322,7 @@ def run_match(
             verbosity=verbosity,
             log_level=log_level,
             json_logs=json_logs,
+            log_file=log_file,
         )
         writer_process = ctx.Process(
             target=_writer_entry,

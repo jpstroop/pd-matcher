@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 
 from pd_matcher.cli import _eval_workers_upper_bound
 from pd_matcher.cli import _parse_as_of
+from pd_matcher.cli import _resolve_log_file
 from pd_matcher.cli import _validate_eval_workers
 from pd_matcher.cli import _validate_sample
 from pd_matcher.cli import _validate_year_window
@@ -1653,6 +1654,49 @@ def test_as_of_past_year_affects_moving_wall(tmp_path: Path) -> None:
     with out_late.open(encoding="utf-8") as fp:
         late_statuses = {row["copyright_status"] for row in DictReader(fp)}
     assert "PD_BY_AGE_PRE_95_YEARS" in late_statuses
+
+
+def test_resolve_log_file_returns_override_when_supplied(tmp_path: Path) -> None:
+    """``--log-file`` overrides the auto-generated path verbatim."""
+    target = tmp_path / "custom.log"
+    assert _resolve_log_file("match", target) == target
+
+
+def test_resolve_log_file_auto_generates_under_logs_dir() -> None:
+    """Without an override the path is ``logs/{command}_*.log``."""
+    resolved = _resolve_log_file("match", None)
+    assert resolved.parent == Path("logs")
+    assert resolved.name.startswith("match_")
+    assert resolved.name.endswith(".log")
+
+
+def test_match_writes_log_file_with_explicit_path(tmp_path: Path) -> None:
+    """``match --log-file`` lands log lines at the requested path."""
+    index_path = _build_index(tmp_path)
+    target = tmp_path / "match-run.log"
+    out_csv = tmp_path / "out.csv"
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(out_csv),
+            "--workers",
+            "1",
+            "--min-score",
+            "1.0",
+            "--log-file",
+            str(target),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert target.exists()
+    contents = target.read_text(encoding="utf-8")
+    assert "match.pool.start" in contents or "match.pool.complete" in contents
 
 
 def test_parse_as_of_none_returns_current_year() -> None:
