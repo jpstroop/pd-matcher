@@ -70,6 +70,42 @@
     table.stats th, table.stats td { text-align: left; padding: .4rem .8rem;
                                      border-bottom: 1px solid var(--line); }
     .big { font-size: 2rem; font-weight: 700; }
+    .verdict { display: inline-block; padding: .1rem .55rem; border-radius: 999px;
+               font-size: .78rem; font-weight: 600; }
+    .verdict-match { background: #e9f6ec; color: var(--match); }
+    .verdict-no_match { background: #fdecea; color: var(--no); }
+    .verdict-unsure { background: #fff3cd; color: #664d03; }
+    table.labels-table { border-collapse: collapse; width: 100%; font-size: .88rem;
+                          table-layout: auto; }
+    table.labels-table th, table.labels-table td {
+      text-align: left; padding: .4rem .55rem; border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    table.labels-table thead th { font-size: .72rem; text-transform: uppercase;
+                                  letter-spacing: .06em; color: var(--muted); }
+    table.labels-table tbody tr:nth-child(even) { background: #fafafb; }
+    table.labels-table tbody tr:hover { background: #eef1ff; }
+    table.labels-table a { color: var(--accent); text-decoration: none; }
+    table.labels-table a:hover { text-decoration: underline; }
+    .reasons-cell { display: flex; flex-wrap: wrap; gap: .25rem; }
+    .reason-chip { font-size: .72rem; padding: .1rem .45rem; cursor: default; }
+    .filters-bar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: end;
+                    margin: .6rem 0 .9rem; }
+    .filters-bar label { display: flex; flex-direction: column; font-size: .72rem;
+                          color: var(--muted); gap: .15rem; }
+    .filters-bar select, .filters-bar input[type=text] {
+      padding: .3rem .5rem; font-size: .85rem; border: 1px solid var(--line);
+      border-radius: 6px; background: #fff;
+    }
+    .filters-bar button { padding: .35rem .9rem; font-size: .85rem; font-weight: 600;
+                           border: 1px solid var(--line); border-radius: 6px;
+                           background: #fff; color: var(--accent); cursor: pointer; }
+    .filter-summary { color: var(--muted); }
+    .pagination { display: flex; justify-content: flex-end; gap: .8rem;
+                   align-items: center; margin-top: .8rem; font-size: .85rem; }
+    .pagination a { color: var(--accent); text-decoration: none; }
+    .pagination .disabled { color: var(--muted); }
+    .pagination-pos { color: var(--muted); }
   </style>
 </head>
 <body>
@@ -78,6 +114,7 @@
     {% if counts %}
     <span class="tally">labeled <strong>{{ counts.labeled }}</strong> / remaining <strong>{{ counts.remaining }}</strong> of {{ counts.total }}</span>
     {% endif %}
+    <span class="tally"><a href="/labels">labels</a></span>
     <span class="tally"><a href="/stats{% if filters %}?{{ filters.query_string() }}{% endif %}">stats</a></span>
     {% if filters and (filters.language or filters.band) %}
     <span class="tally">filter:

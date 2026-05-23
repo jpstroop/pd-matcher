@@ -7,6 +7,7 @@ from pytest import raises
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
 from pd_groundtruth.review_db import VERDICT_UNSURE
+from pd_groundtruth.review_db import LabelFilters
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
 
@@ -460,3 +461,126 @@ def test_init_schema_backfills_scalar_reason_into_label_reason(tmp_path: Path) -
     with ReviewDb.connect(db_path) as db:
         rows = db._conn.execute("SELECT COUNT(*) FROM label_reason").fetchone()[0]
         assert rows == 1
+
+
+def test_iter_labeled_pairs_returns_latest_label_per_pair(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        db.add_label(pair_id, VERDICT_MATCH)
+        db.add_label(pair_id, VERDICT_NO_MATCH, reasons=("diff_work",))
+        rows = db.iter_labeled_pairs()
+    assert len(rows) == 1
+    assert rows[0].pair_id == pair_id
+    assert rows[0].verdict == VERDICT_NO_MATCH
+    assert rows[0].reason_codes == ("diff_work",)
+
+
+def test_iter_labeled_pairs_excludes_unlabeled_rows(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        labeled = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        db.add_label(labeled, VERDICT_MATCH)
+        rows = db.iter_labeled_pairs()
+    assert [row.pair_id for row in rows] == [labeled]
+
+
+def test_iter_labeled_pairs_filters_by_verdict(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        a = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        b = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        db.add_label(a, VERDICT_MATCH)
+        db.add_label(b, VERDICT_NO_MATCH)
+        rows = db.iter_labeled_pairs(LabelFilters(verdict=VERDICT_MATCH))
+    assert [row.pair_id for row in rows] == [a]
+
+
+def test_iter_labeled_pairs_filters_by_reason_excludes_label_without_reason(
+    tmp_path: Path,
+) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        with_reason = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        without_reason = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        db.add_label(with_reason, VERDICT_NO_MATCH, reasons=("diff_work",))
+        db.add_label(without_reason, VERDICT_NO_MATCH)
+        rows = db.iter_labeled_pairs(LabelFilters(reason="diff_work"))
+    assert [row.pair_id for row in rows] == [with_reason]
+
+
+def test_iter_labeled_pairs_filters_by_language(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        eng = db.insert_pair(_pair(language="eng", control_id="a", nypl_uuid="u-a"))
+        fre = db.insert_pair(_pair(language="fre", control_id="b", nypl_uuid="u-b"))
+        db.add_label(eng, VERDICT_MATCH)
+        db.add_label(fre, VERDICT_MATCH)
+        rows = db.iter_labeled_pairs(LabelFilters(language="fre"))
+    assert [row.pair_id for row in rows] == [fre]
+
+
+def test_iter_labeled_pairs_filters_by_substring_against_marc_title(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        match_id = db.insert_pair(_pair(control_id="ctrl-x", nypl_uuid="u-a"))
+        db.insert_pair(_pair(control_id="ctrl-y", nypl_uuid="u-b"))
+        db.add_label(match_id, VERDICT_MATCH)
+        db.add_label(2, VERDICT_MATCH)
+        rows = db.iter_labeled_pairs(LabelFilters(q="A TITLE"))
+    assert {row.pair_id for row in rows} == {match_id, 2}
+
+
+def test_iter_labeled_pairs_filters_by_substring_against_control_id(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        target = db.insert_pair(_pair(control_id="needle-1", nypl_uuid="u-a"))
+        db.insert_pair(_pair(control_id="other-2", nypl_uuid="u-b"))
+        db.add_label(target, VERDICT_MATCH)
+        db.add_label(2, VERDICT_MATCH)
+        rows = db.iter_labeled_pairs(LabelFilters(q="needle"))
+    assert [row.pair_id for row in rows] == [target]
+
+
+def test_iter_labeled_pairs_pagination_slices_results(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        for i in range(5):
+            pair_id = db.insert_pair(_pair(control_id=f"ctrl-{i}", nypl_uuid=f"u-{i}"))
+            db.add_label(pair_id, VERDICT_MATCH)
+        first_page = db.iter_labeled_pairs(page_size=2, page=1)
+        second_page = db.iter_labeled_pairs(page_size=2, page=2)
+        third_page = db.iter_labeled_pairs(page_size=2, page=3)
+    assert len(first_page) == 2
+    assert len(second_page) == 2
+    assert len(third_page) == 1
+    seen = {row.pair_id for row in first_page + second_page + third_page}
+    assert seen == {1, 2, 3, 4, 5}
+
+
+def test_iter_labeled_pairs_rejects_invalid_page_args(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        with raises(ValueError, match="page must be >= 1"):
+            db.iter_labeled_pairs(page=0)
+        with raises(ValueError, match="page_size must be >= 1"):
+            db.iter_labeled_pairs(page_size=0)
+
+
+def test_count_labeled_pairs_matches_iter_results_across_filters(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        a = db.insert_pair(_pair(language="eng", control_id="a", nypl_uuid="u-a"))
+        b = db.insert_pair(_pair(language="eng", control_id="b", nypl_uuid="u-b"))
+        c = db.insert_pair(_pair(language="fre", control_id="c", nypl_uuid="u-c"))
+        db.add_label(a, VERDICT_MATCH)
+        db.add_label(b, VERDICT_NO_MATCH, reasons=("diff_work",))
+        db.add_label(c, VERDICT_MATCH)
+        for filters in (
+            LabelFilters(),
+            LabelFilters(verdict=VERDICT_MATCH),
+            LabelFilters(language="eng"),
+            LabelFilters(verdict=VERDICT_MATCH, language="eng"),
+            LabelFilters(reason="diff_work"),
+            LabelFilters(q="title"),
+        ):
+            assert db.count_labeled_pairs(filters) == len(db.iter_labeled_pairs(filters)), filters
+
+
+def test_iter_labeled_pairs_aggregates_multiple_reason_codes(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        db.add_label(pair_id, VERDICT_NO_MATCH, reasons=("garbled", "diff_work"))
+        rows = db.iter_labeled_pairs()
+    assert rows[0].reason_codes == ("diff_work", "garbled")

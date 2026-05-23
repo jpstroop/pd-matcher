@@ -18,6 +18,8 @@ succeeded and dropping the vault line is an integrity concern to surface, not
 a user-facing 500.
 """
 
+from datetime import UTC
+from datetime import datetime
 from logging import getLogger
 from pathlib import Path
 
@@ -36,13 +38,17 @@ from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import append_entry
 from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.review.filters import ReviewFilters
+from pd_groundtruth.review.filters import label_filters_active
+from pd_groundtruth.review.filters import label_filters_query_string
 from pd_groundtruth.review.filters import parse_filters
+from pd_groundtruth.review.filters import parse_label_filters
 from pd_groundtruth.review.reasons import NO_MATCH_REASONS
 from pd_groundtruth.review.reasons import UNSURE_REASONS
 from pd_groundtruth.review.reasons import ReasonCode
 from pd_groundtruth.review.reasons import normalize_reasons
 from pd_groundtruth.review.reasons import summarize_reasons
 from pd_groundtruth.review.view import build_card
+from pd_groundtruth.review.view import build_labeled_row
 from pd_groundtruth.review_db import ReviewDb
 
 _LOGGER = getLogger(__name__)
@@ -57,6 +63,10 @@ _REASON_CONTEXT: dict[str, tuple[ReasonCode, ...]] = {
     "no_match_reasons": NO_MATCH_REASONS,
     "unsure_reasons": UNSURE_REASONS,
 }
+_LANGUAGE_CHOICES: tuple[str, ...] = ("eng", "fre", "ger", "spa", "ita")
+_VERDICT_CHOICES: tuple[str, ...] = ("match", "no_match", "unsure")
+_LABELS_PAGE_SIZE: int = 100
+_ALL_REASON_CODES: tuple[ReasonCode, ...] = NO_MATCH_REASONS + UNSURE_REASONS
 
 
 def _db_path(request: Request) -> Path:
@@ -198,6 +208,51 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
             request,
             "stats.html",
             {"counts": counts, "filters": filters, "reason_summary": reason_summary},
+        )
+
+    @app.get("/labels", response_class=HTMLResponse)
+    def labels(
+        request: Request,
+        verdict: str | None = None,
+        language: str | None = None,
+        reason: str | None = None,
+        q: str | None = None,
+        page: int = 1,
+    ) -> HTMLResponse:
+        label_filters = parse_label_filters(verdict, language, reason, q)
+        current_page = max(page, 1)
+        with ReviewDb.connect(_db_path(request)) as db:
+            counts = db.progress()
+            total_labeled = counts.labeled
+            filtered_total = db.count_labeled_pairs(label_filters)
+            db_rows = db.iter_labeled_pairs(
+                label_filters, page_size=_LABELS_PAGE_SIZE, page=current_page
+            )
+        now = datetime.now(UTC)
+        rows = tuple(build_labeled_row(row, now) for row in db_rows)
+        total_pages = max(1, (filtered_total + _LABELS_PAGE_SIZE - 1) // _LABELS_PAGE_SIZE)
+        capped_page = min(current_page, total_pages)
+        return templates.TemplateResponse(
+            request,
+            "labels.html",
+            {
+                "rows": rows,
+                "counts": counts,
+                "label_filters": label_filters,
+                "filters_active": label_filters_active(label_filters),
+                "filtered_total": filtered_total,
+                "total_labeled": total_labeled,
+                "page": capped_page,
+                "total_pages": total_pages,
+                "page_size": _LABELS_PAGE_SIZE,
+                "language_choices": _LANGUAGE_CHOICES,
+                "verdict_choices": _VERDICT_CHOICES,
+                "reason_choices": _ALL_REASON_CODES,
+                "query_string": label_filters_query_string(label_filters),
+                "query_string_for": lambda drop=None: label_filters_query_string(
+                    label_filters, drop=drop
+                ),
+            },
         )
 
     return app

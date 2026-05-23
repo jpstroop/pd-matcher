@@ -1,5 +1,9 @@
 """Unit tests for the pure review view model."""
 
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
+
 from msgspec.json import encode as json_encode
 from pd_matcher.models import MarcRecord
 
@@ -7,8 +11,10 @@ from pd_groundtruth.review.view import RENEWAL_NOT_RENEWED
 from pd_groundtruth.review.view import RENEWAL_RENEWED
 from pd_groundtruth.review.view import RENEWAL_UNKNOWN
 from pd_groundtruth.review.view import build_card
+from pd_groundtruth.review.view import build_labeled_row
 from pd_groundtruth.review.view import parse_evidence
 from pd_groundtruth.review.view import render_renewal_label
+from pd_groundtruth.review_db import LabeledPairRow
 from pd_groundtruth.review_db import ReviewPairRow
 
 
@@ -143,3 +149,82 @@ def test_build_card_online_resource_match_is_case_insensitive() -> None:
         marc = _marc(extent=extent)
         card = build_card(_row(marc, evidence_json="{}"))
         assert card.marc_is_online_resource is True, extent
+
+
+def _labeled_row(
+    *,
+    pair_id: int = 1,
+    language: str = "eng",
+    marc_control_id: str = "ctrl-a",
+    marc_title: str | None = "A short title",
+    cce_title: str | None = "CCE title",
+    verdict: str = "no_match",
+    reason_codes: tuple[str, ...] = (),
+    labeled_at: str = "2026-05-23T11:30:00+00:00",
+) -> LabeledPairRow:
+    return LabeledPairRow(
+        pair_id=pair_id,
+        language=language,
+        marc_control_id=marc_control_id,
+        marc_title=marc_title,
+        cce_title=cce_title,
+        verdict=verdict,
+        reason_codes=reason_codes,
+        labeled_at=labeled_at,
+    )
+
+
+def test_build_labeled_row_truncates_long_titles_with_ellipsis() -> None:
+    long_title = "x" * 120
+    now = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
+    row = build_labeled_row(_labeled_row(marc_title=long_title, cce_title=long_title), now)
+    assert row.marc_title == long_title
+    assert len(row.marc_title_short) == 60
+    assert row.marc_title_short.endswith("…")
+    assert row.cce_title_short.endswith("…")
+
+
+def test_build_labeled_row_preserves_short_titles_unchanged() -> None:
+    now = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
+    row = build_labeled_row(_labeled_row(marc_title="Short", cce_title="Also short"), now)
+    assert row.marc_title_short == "Short"
+    assert row.cce_title_short == "Also short"
+
+
+def test_build_labeled_row_handles_null_titles() -> None:
+    now = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
+    row = build_labeled_row(_labeled_row(marc_title=None, cce_title=None), now)
+    assert row.marc_title == ""
+    assert row.cce_title == ""
+    assert row.marc_title_short == ""
+    assert row.cce_title_short == ""
+
+
+def test_build_labeled_row_resolves_reason_codes_to_labels() -> None:
+    now = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
+    row = build_labeled_row(
+        _labeled_row(verdict="no_match", reason_codes=("diff_work", "garbled")),
+        now,
+    )
+    assert row.reason_codes == ("diff_work", "garbled")
+    assert row.reason_labels == (
+        "Different work / title collision",
+        "Garbled transcription",
+    )
+
+
+def test_build_labeled_row_falls_back_to_code_when_label_unknown() -> None:
+    now = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
+    row = build_labeled_row(
+        _labeled_row(verdict="match", reason_codes=("legacy_code",)),
+        now,
+    )
+    assert row.reason_labels == ("legacy_code",)
+
+
+def test_build_labeled_row_renders_relative_time() -> None:
+    now = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
+    past = (now - timedelta(hours=3)).isoformat()
+    row = build_labeled_row(_labeled_row(labeled_at=past), now)
+    assert row.labeled_relative == "3h ago"
+    assert row.labeled_at == past

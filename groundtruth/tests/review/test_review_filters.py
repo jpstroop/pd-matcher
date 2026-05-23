@@ -1,6 +1,9 @@
 """Unit tests for review-filter parsing and URL round-tripping."""
 
+from pd_groundtruth.review.filters import label_filters_active
+from pd_groundtruth.review.filters import label_filters_query_string
 from pd_groundtruth.review.filters import parse_filters
+from pd_groundtruth.review.filters import parse_label_filters
 
 
 def test_parse_filters_passes_through_set_values() -> None:
@@ -66,3 +69,46 @@ def test_next_query_string_threads_filters_and_skip_ids() -> None:
 def test_next_query_string_without_additional_id_includes_existing_skips() -> None:
     filters = parse_filters(None, None, [4, 5])
     assert filters.next_query_string() == "skip=4&skip=5"
+
+
+def test_parse_label_filters_passes_through_set_values() -> None:
+    filters = parse_label_filters("match", "eng", "diff_work", "acme")
+    assert filters.verdict == "match"
+    assert filters.language == "eng"
+    assert filters.reason == "diff_work"
+    assert filters.q == "acme"
+
+
+def test_parse_label_filters_blanks_become_none() -> None:
+    filters = parse_label_filters("  ", "", None, "")
+    assert filters.verdict is None
+    assert filters.language is None
+    assert filters.reason is None
+    assert filters.q is None
+
+
+def test_label_filters_active_detects_any_set_filter() -> None:
+    assert not label_filters_active(parse_label_filters(None, None, None, None))
+    assert label_filters_active(parse_label_filters("match", None, None, None))
+    assert label_filters_active(parse_label_filters(None, "eng", None, None))
+    assert label_filters_active(parse_label_filters(None, None, "diff_work", None))
+    assert label_filters_active(parse_label_filters(None, None, None, "acme"))
+
+
+def test_label_filters_query_string_renders_all_set_keys() -> None:
+    filters = parse_label_filters("match", "eng", "diff_work", "acme")
+    qs = label_filters_query_string(filters)
+    assert "verdict=match" in qs
+    assert "language=eng" in qs
+    assert "reason=diff_work" in qs
+    assert "q=acme" in qs
+
+
+def test_label_filters_query_string_empty_when_no_filters() -> None:
+    assert label_filters_query_string(parse_label_filters(None, None, None, None)) == ""
+
+
+def test_label_filters_query_string_drop_excludes_one_key() -> None:
+    filters = parse_label_filters("match", "eng", None, None)
+    assert label_filters_query_string(filters, drop="verdict") == "language=eng"
+    assert label_filters_query_string(filters, drop="language") == "verdict=match"
