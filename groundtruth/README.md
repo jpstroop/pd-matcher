@@ -172,6 +172,22 @@ adjudicated, every verdict is also persisted to a durable **label vault**:
 `groundtruth/label_vault.jsonl`. The vault is the canonical ground-truth
 dataset and is committed to git.
 
+### Roles at a glance
+
+| | `data/review.db` | `label_vault.jsonl` |
+|---|---|---|
+| **Purpose** | Working queue for the Tinder app | Canonical, durable record of human verdicts |
+| **Format** | SQLite (binary) | JSONL (one verdict per line, append-only) |
+| **Lifetime** | Transient — rebuilt by `build-queue` | Permanent — committed to git |
+| **Holds** | Candidate pairs + labels for *this* run | Every verdict ever rendered, across runs |
+| **Source of truth?** | No (derived) | **Yes** |
+| **Survives a pipeline rerun?** | No (overwritten) | Yes (append-only) |
+| **What to publish** | Never | The matches subset: `jq -c 'select(.verdict=="match")' label_vault.jsonl` |
+
+When `build-queue` rebuilds `review.db`, it consults the vault and pre-applies
+every known verdict, so the working queue is `(new candidate pool) − (already
+labeled)`. The vault grows monotonically; `review.db` is disposable.
+
 - **Format.** JSONL, append-only, one verdict event per line, schema-versioned
   (each row carries `"schema": 1`). Every line records the
   `(marc_control_id, nypl_uuid)` pair, the verdict, any reason codes, the
