@@ -52,6 +52,22 @@ def test_edition_unsure_validates_per_verdict() -> None:
     assert not is_valid_reason(VERDICT_NO_MATCH, "edition_unsure")
 
 
+def test_generic_title_valid_for_no_match_only() -> None:
+    assert is_valid_reason(VERDICT_NO_MATCH, "generic_title")
+    assert not is_valid_reason(VERDICT_UNSURE, "generic_title")
+
+
+def test_translation_valid_for_both_no_match_and_unsure() -> None:
+    assert is_valid_reason(VERDICT_NO_MATCH, "translation")
+    assert is_valid_reason(VERDICT_UNSURE, "translation")
+
+
+def test_new_unsure_chips_valid_for_unsure_only() -> None:
+    for code in ("pub_differs", "reprint_or_format", "whole_or_part", "periodical_issue"):
+        assert is_valid_reason(VERDICT_UNSURE, code), code
+        assert not is_valid_reason(VERDICT_NO_MATCH, code), code
+
+
 def test_summarize_reasons_orders_by_vocab_and_drops_zero() -> None:
     counts = {
         (VERDICT_NO_MATCH, "wrong_year_edition"): 3,
@@ -69,3 +85,24 @@ def test_summarize_reasons_orders_by_vocab_and_drops_zero() -> None:
 
 def test_summarize_reasons_empty_when_no_counts() -> None:
     assert summarize_reasons({}) == ()
+
+
+def test_summarize_reasons_keeps_no_match_before_unsure_with_new_codes() -> None:
+    counts = {
+        (VERDICT_UNSURE, "pub_differs"): 4,
+        (VERDICT_NO_MATCH, "generic_title"): 2,
+        (VERDICT_UNSURE, "translation"): 3,
+        (VERDICT_NO_MATCH, "translation"): 1,
+    }
+    summary = summarize_reasons(counts)
+    verdicts_in_order = [row.verdict for row in summary]
+    no_match_count = verdicts_in_order.count(VERDICT_NO_MATCH)
+    assert verdicts_in_order[:no_match_count] == [VERDICT_NO_MATCH] * no_match_count
+    assert verdicts_in_order[no_match_count:] == [VERDICT_UNSURE] * (
+        len(verdicts_in_order) - no_match_count
+    )
+    pairs = {(row.verdict, row.code) for row in summary}
+    assert (VERDICT_NO_MATCH, "translation") in pairs
+    assert (VERDICT_UNSURE, "translation") in pairs
+    assert (VERDICT_NO_MATCH, "generic_title") in pairs
+    assert (VERDICT_UNSURE, "pub_differs") in pairs

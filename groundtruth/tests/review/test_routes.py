@@ -22,7 +22,13 @@ from pd_groundtruth.review_db import ReviewDb
 pytestmark = mark.webui
 
 
-def _pair(*, language: str, control_id: str, nypl_uuid: str) -> PairInsert:
+def _pair(
+    *,
+    language: str,
+    control_id: str,
+    nypl_uuid: str,
+    extent: str | None = None,
+) -> PairInsert:
     marc = MarcRecord(
         control_id=control_id,
         title="A Studied Title",
@@ -30,6 +36,7 @@ def _pair(*, language: str, control_id: str, nypl_uuid: str) -> PairInsert:
         main_author="Doe, Jane",
         publisher="Acme Press",
         publication_year=1953,
+        extent=extent,
         language_code=language,
         country_code="nyu",
     )
@@ -63,6 +70,23 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     with ReviewDb.connect(db_path) as db:
         db.insert_pair(_pair(language="eng", control_id="eng-1", nypl_uuid="u-eng-1"))
         db.insert_pair(_pair(language="fre", control_id="fre-1", nypl_uuid="u-fre-1"))
+    app = create_app(db_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
+def ebook_client(tmp_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="eng-ebook-1",
+                nypl_uuid="u-eng-ebook-1",
+                extent="1 online resource (xxi, 406 p.)",
+            )
+        )
     app = create_app(db_path)
     with TestClient(app) as test_client:
         yield test_client
@@ -212,3 +236,27 @@ def test_empty_queue_page_when_all_labeled(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "All done" in response.text
+
+
+def test_ebook_badge_renders_for_online_resource(ebook_client: TestClient) -> None:
+    response = ebook_client.get("/")
+    assert response.status_code == 200
+    assert '<span class="badge-ebook">E-book reprint</span>' in response.text
+
+
+def test_ebook_badge_absent_for_physical_pairs(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "E-book reprint" not in response.text
+    assert '<span class="badge-ebook">' not in response.text
+
+
+def test_card_renders_new_reason_chips(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Generic title" in response.text
+    assert "Looks right but publisher differs" in response.text
+    assert "Possibly a translation vs. original" in response.text
+    assert "Reprint / different physical format" in response.text
+    assert "Possibly whole vs. part / volume" in response.text
+    assert "Looks like one issue of a periodical" in response.text

@@ -16,6 +16,7 @@ def _marc(
     *,
     title: str = "The Full Title : a subtitle",
     title_main: str = "The Full Title",
+    extent: str | None = None,
 ) -> MarcRecord:
     return MarcRecord(
         control_id="ctrl-1",
@@ -28,6 +29,7 @@ def _marc(
         edition="2nd ed.",
         publisher="Acme Press",
         publication_year=1953,
+        extent=extent,
         series_titles=("Acme Studies",),
         language_code="eng",
         country_code="nyu",
@@ -116,3 +118,28 @@ def test_build_card_carries_evidence_bars() -> None:
         ("title.token_set", 1.0),
         ("name.author", 0.25),
     ]
+
+
+def test_build_card_flags_online_resource_extent() -> None:
+    marc = _marc(extent="1 online resource (xxi, 406 p.)")
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_is_online_resource is True
+
+
+def test_build_card_does_not_flag_physical_extent() -> None:
+    marc = _marc(extent="xxiv, 841 p")
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_is_online_resource is False
+
+
+def test_build_card_does_not_flag_missing_extent() -> None:
+    marc = _marc(extent=None)
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_is_online_resource is False
+
+
+def test_build_card_online_resource_match_is_case_insensitive() -> None:
+    for extent in ("Online Resource (1 vol.)", "1 ONLINE RESOURCE (PDF)"):
+        marc = _marc(extent=extent)
+        card = build_card(_row(marc, evidence_json="{}"))
+        assert card.marc_is_online_resource is True, extent
