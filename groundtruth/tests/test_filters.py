@@ -6,6 +6,7 @@ from pytest import mark
 
 from pd_groundtruth.filters import Ineligibility
 from pd_groundtruth.filters import classify
+from pd_groundtruth.filters import is_electronic_resource
 from pd_groundtruth.filters import is_eligible
 from pd_groundtruth.filters import language_of
 from pd_groundtruth.filters import year_of
@@ -214,3 +215,140 @@ def test_language_of_missing_008_returns_none() -> None:
 def test_language_of_short_008_returns_none() -> None:
     record = _build_record(field_008="750101s1950")
     assert language_of(record) is None
+
+
+_BASELINE_LEADER = "00000nam a2200000 a 4500"
+_BASELINE_008 = "750101s1955    xxu           000 0 eng d"
+
+
+def _wrap_record(inner: str, *, namespaced: bool = False) -> _Element:
+    """Wrap raw child XML in a ``<record>``, optionally namespaced."""
+    if namespaced:
+        xml = f'<record xmlns="{_MARC_NS}">{inner}</record>'
+    else:
+        xml = f"<record>{inner}</record>"
+    return fromstring(xml.encode("utf-8"))
+
+
+def _baseline_record_inner(extra: str = "") -> str:
+    """Return the inner XML of a baseline eligible monograph plus extras."""
+    return (
+        f"<leader>{_BASELINE_LEADER}</leader>"
+        f'<controlfield tag="008">{_BASELINE_008}</controlfield>'
+        f'<datafield tag="245"><subfield code="a">A valid title</subfield></datafield>'
+        f"{extra}"
+    )
+
+
+def test_is_electronic_resource_007_byte0_c_flags() -> None:
+    record = _wrap_record(
+        _baseline_record_inner('<controlfield tag="007">cr||||||||||||</controlfield>')
+    )
+    assert is_electronic_resource(record) is Ineligibility.ELECTRONIC_RESOURCE
+
+
+def test_is_electronic_resource_338_b_cr_flags() -> None:
+    record = _wrap_record(
+        _baseline_record_inner('<datafield tag="338"><subfield code="b">cr</subfield></datafield>')
+    )
+    assert is_electronic_resource(record) is Ineligibility.ELECTRONIC_RESOURCE
+
+
+def test_is_electronic_resource_245_h_electronic_resource_flags() -> None:
+    record = _wrap_record(
+        "<leader>" + _BASELINE_LEADER + "</leader>"
+        f'<controlfield tag="008">{_BASELINE_008}</controlfield>'
+        '<datafield tag="245">'
+        '<subfield code="a">A valid title</subfield>'
+        '<subfield code="h">[electronic resource]</subfield>'
+        "</datafield>"
+    )
+    assert is_electronic_resource(record) is Ineligibility.ELECTRONIC_RESOURCE
+
+
+def test_is_electronic_resource_300_a_online_resource_flags() -> None:
+    extent = "1 online resource (xii, 245 pages)"
+    record = _wrap_record(
+        _baseline_record_inner(
+            f'<datafield tag="300"><subfield code="a">{extent}</subfield></datafield>'
+        )
+    )
+    assert is_electronic_resource(record) is Ineligibility.ELECTRONIC_RESOURCE
+
+
+def test_is_electronic_resource_eligible_when_no_indicators() -> None:
+    record = _wrap_record(
+        _baseline_record_inner(
+            '<controlfield tag="007">ta</controlfield>'
+            '<datafield tag="338"><subfield code="b">nc</subfield></datafield>'
+            '<datafield tag="300"><subfield code="a">245 pages ; 24 cm</subfield></datafield>'
+        )
+    )
+    assert is_electronic_resource(record) is Ineligibility.ELIGIBLE
+
+
+@mark.parametrize("text", ["Electronic Resource", "ELECTRONIC RESOURCE", "[Electronic Resource]"])
+def test_is_electronic_resource_245_h_case_insensitive(text: str) -> None:
+    record = _wrap_record(
+        "<leader>" + _BASELINE_LEADER + "</leader>"
+        f'<controlfield tag="008">{_BASELINE_008}</controlfield>'
+        '<datafield tag="245">'
+        '<subfield code="a">A valid title</subfield>'
+        f'<subfield code="h">{text}</subfield>'
+        "</datafield>"
+    )
+    assert is_electronic_resource(record) is Ineligibility.ELECTRONIC_RESOURCE
+
+
+@mark.parametrize(
+    "text",
+    ["Online Resource", "ONLINE RESOURCE", "1 Online Resource (PDF)"],
+)
+def test_is_electronic_resource_300_a_case_insensitive(text: str) -> None:
+    record = _wrap_record(
+        _baseline_record_inner(
+            f'<datafield tag="300"><subfield code="a">{text}</subfield></datafield>'
+        )
+    )
+    assert is_electronic_resource(record) is Ineligibility.ELECTRONIC_RESOURCE
+
+
+def test_is_electronic_resource_multi_007_one_electronic_flags() -> None:
+    record = _wrap_record(
+        _baseline_record_inner(
+            '<controlfield tag="007">ta</controlfield>'
+            '<controlfield tag="007">cr||||||||||||</controlfield>'
+        )
+    )
+    assert is_electronic_resource(record) is Ineligibility.ELECTRONIC_RESOURCE
+
+
+def test_is_electronic_resource_multi_338_one_online_flags() -> None:
+    record = _wrap_record(
+        _baseline_record_inner(
+            '<datafield tag="338"><subfield code="b">nc</subfield></datafield>'
+            '<datafield tag="338"><subfield code="b">cr</subfield></datafield>'
+        )
+    )
+    assert is_electronic_resource(record) is Ineligibility.ELECTRONIC_RESOURCE
+
+
+@mark.parametrize("body", ["", "   "])
+def test_is_electronic_resource_007_empty_or_blank_does_not_flag(body: str) -> None:
+    record = _wrap_record(_baseline_record_inner(f'<controlfield tag="007">{body}</controlfield>'))
+    assert is_electronic_resource(record) is Ineligibility.ELIGIBLE
+
+
+def test_is_electronic_resource_338_b_other_code_does_not_flag() -> None:
+    record = _wrap_record(
+        _baseline_record_inner('<datafield tag="338"><subfield code="b">nc</subfield></datafield>')
+    )
+    assert is_electronic_resource(record) is Ineligibility.ELIGIBLE
+
+
+def test_classify_otherwise_eligible_record_with_007_c_returns_electronic_resource() -> None:
+    record = _wrap_record(
+        _baseline_record_inner('<controlfield tag="007">cr||||||||||||</controlfield>')
+    )
+    assert classify(record, _MIN_YEAR) is Ineligibility.ELECTRONIC_RESOURCE
+    assert is_eligible(record, _MIN_YEAR) is False

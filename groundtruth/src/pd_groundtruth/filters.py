@@ -33,6 +33,11 @@ _CCE_MAX_YEAR = 1977
 _SUPPORTED_LANGUAGES = frozenset({"eng", "fre", "ger", "spa", "ita"})
 _NON_GOVERNMENT_CODES = frozenset({" ", "|"})
 
+_FIELD_007_ELECTRONIC_RESOURCE_CODE = "c"
+_FIELD_338_ONLINE_RESOURCE_CARRIER = "cr"
+_FIELD_245_ELECTRONIC_RESOURCE_MARKER = "electronic resource"
+_FIELD_300_ONLINE_RESOURCE_MARKER = "online resource"
+
 
 class Ineligibility(Enum):
     """Reason a record was rejected, suitable for logging and counters."""
@@ -41,6 +46,7 @@ class Ineligibility(Enum):
     MISSING_LEADER = "missing_leader"
     NOT_A_BOOK = "not_a_book"
     NOT_A_MONOGRAPH = "not_a_monograph"
+    ELECTRONIC_RESOURCE = "electronic_resource"
     MISSING_008 = "missing_008"
     UNSUPPORTED_LANGUAGE = "unsupported_language"
     YEAR_OUT_OF_RANGE = "year_out_of_range"
@@ -78,6 +84,22 @@ def _find_datafield(record: _Element, tag: str) -> _Element | None:
     return None
 
 
+def _find_all_controlfields(record: _Element, tag: str) -> list[_Element]:
+    """Return every ``controlfield`` with the given ``tag`` attribute."""
+    return [
+        child
+        for child in record
+        if _local_name(child) == "controlfield" and child.get("tag") == tag
+    ]
+
+
+def _find_all_datafields(record: _Element, tag: str) -> list[_Element]:
+    """Return every ``datafield`` with the given ``tag`` attribute."""
+    return [
+        child for child in record if _local_name(child) == "datafield" and child.get("tag") == tag
+    ]
+
+
 def _leader_text(record: _Element) -> str | None:
     """Return the leader text, or ``None`` if absent or empty."""
     leader = _find_local(record, "leader")
@@ -95,6 +117,72 @@ def is_monograph(record: _Element) -> Ineligibility:
         return Ineligibility.NOT_A_BOOK
     if leader[_LEADER_BIBLIOGRAPHIC_LEVEL_POSITION] != _LEADER_MONOGRAPH_LEVEL:
         return Ineligibility.NOT_A_MONOGRAPH
+    return Ineligibility.ELIGIBLE
+
+
+def is_electronic_resource(record: _Element) -> Ineligibility:
+    """Detect digital-reissue MARC records via belt-and-suspenders indicators.
+
+    A record is flagged as an electronic resource when *any* of the following
+    hold:
+
+    1. A ``<controlfield tag="007">`` whose first byte is ``c`` (the dedicated
+       electronic-resource indicator in MARC 007 byte 0).
+    2. A ``<datafield tag="338">`` with a ``<subfield code="b">`` whose stripped
+       lowercase text equals ``cr`` (the RDA carrier code for "online
+       resource").
+    3. A ``<datafield tag="245">`` with a ``<subfield code="h">`` whose
+       lowercase text contains ``electronic resource`` (the AACR2 general
+       material designation, typically rendered as ``[electronic resource]``).
+    4. A ``<datafield tag="300">`` with a ``<subfield code="a">`` whose
+       lowercase text contains ``online resource`` (the extent-string proxy
+       used by many cataloging chains).
+
+    Args:
+        record: A raw MARCXML ``<record>`` element (namespaced or not).
+
+    Returns:
+        ``Ineligibility.ELECTRONIC_RESOURCE`` when any indicator fires,
+        otherwise ``Ineligibility.ELIGIBLE``.
+    """
+    for controlfield in _find_all_controlfields(record, "007"):
+        text = controlfield.text
+        if text is None:
+            continue
+        stripped = text.strip()
+        if len(stripped) >= 1 and stripped[0] == _FIELD_007_ELECTRONIC_RESOURCE_CODE:
+            return Ineligibility.ELECTRONIC_RESOURCE
+
+    for datafield in _find_all_datafields(record, "338"):
+        for child in datafield:
+            if (
+                _local_name(child) == "subfield"
+                and child.get("code") == "b"
+                and child.text is not None
+                and child.text.strip().lower() == _FIELD_338_ONLINE_RESOURCE_CARRIER
+            ):
+                return Ineligibility.ELECTRONIC_RESOURCE
+
+    for datafield in _find_all_datafields(record, "245"):
+        for child in datafield:
+            if (
+                _local_name(child) == "subfield"
+                and child.get("code") == "h"
+                and child.text is not None
+                and _FIELD_245_ELECTRONIC_RESOURCE_MARKER in child.text.lower()
+            ):
+                return Ineligibility.ELECTRONIC_RESOURCE
+
+    for datafield in _find_all_datafields(record, "300"):
+        for child in datafield:
+            if (
+                _local_name(child) == "subfield"
+                and child.get("code") == "a"
+                and child.text is not None
+                and _FIELD_300_ONLINE_RESOURCE_MARKER in child.text.lower()
+            ):
+                return Ineligibility.ELECTRONIC_RESOURCE
+
     return Ineligibility.ELIGIBLE
 
 
@@ -202,6 +290,9 @@ def classify(record: _Element, min_year: int) -> Ineligibility:
     monograph = is_monograph(record)
     if monograph is not Ineligibility.ELIGIBLE:
         return monograph
+    electronic = is_electronic_resource(record)
+    if electronic is not Ineligibility.ELIGIBLE:
+        return electronic
     language_and_year = check_language_and_year(record, min_year)
     if language_and_year is not Ineligibility.ELIGIBLE:
         return language_and_year
