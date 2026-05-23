@@ -9,6 +9,63 @@ It is a standalone PDM subproject because it carries heavier dependencies
 (`requests`, `fastapi`, `uvicorn`) and a relaxed coverage bar, so its
 configuration never touches the core's strict `pyproject.toml`.
 
+## Background
+
+`pd-matcher` (the parent project) determines whether a U.S.-published book is
+**in the public domain** by matching its MARC bibliographic record against the
+**U.S. Copyright Office's Catalog of Copyright Entries (CCE)**: roughly, a book
+published 1923–1977 is PD if it was either not registered for copyright, or
+registered but never renewed at the 28-year mark. Cornell's "Copyright Term and
+the Public Domain" chart codifies the full rule set.
+
+The matcher's pipeline is fuzzy by necessity — titles get transcribed differently
+across the two corpora, authors get truncated, OCR garbles characters, and the
+CCE's renewal records are partial. To know how *good* the matcher's calls are
+(and to improve them), we need a labeled corpus: pairs of
+`(MARC record, CCE registration)` where a human has confirmed **match**,
+**no_match**, or **unsure**. That labeled corpus is the **ground truth**, and
+producing it is what this subproject exists to do.
+
+Who reads the labels:
+
+- **The matcher itself** — for calibrating score thresholds (where does
+  confidence become reliable?) and measuring precision/recall on each release.
+- **The future learned scorer** — a gradient-boosted model that will replace
+  the hand-tuned scoring weights. It needs both positive examples (matches) and
+  hard negatives (high-scoring `no_match` pairs) to train.
+- **The published PD dataset** — a downstream artifact filtered from the vault
+  (`verdict == "match"`), aimed at libraries, archives, and digitization
+  programs that need to know which titles in their collections are PD.
+
+## Glossary
+
+| term | meaning |
+|---|---|
+| **MARC** | MAchine-Readable Cataloging — the dominant library bibliographic format. Princeton's `bibdata` exports their catalog as **MARCXML**. A "record" describes one bibliographic item (book, score, recording, …); fields are numbered (245 = title, 008 = fixed-length metadata, etc.). |
+| **CCE** | Catalog of Copyright Entries — the U.S. Copyright Office's published register of copyright registrations and renewals, 1891–1977. The matching authority for pre-1978 U.S. copyright status. |
+| **NYPL** | The New York Public Library transcribed the CCE volumes into structured XML/TSV. We consume their transcriptions, not the original LoC PDFs. |
+| **LMDB** | Lightning Memory-Mapped Database — the on-disk key-value store the matcher uses for its CCE index. Fast random reads across multiple worker processes; built once by `pd-matcher index build`. |
+| **Moving wall** | The lower bound on publication years we care about. Anything ≤ `today.year − 95` is already PD by age (no Cornell branch to evaluate), so the wall advances every January 1. As of 2026, the wall is 1931. |
+| **Cornell categories** | The Cornell "Copyright Term" chart's PD-status rows. The matcher cares mostly about **Category 2** (U.S. works published 1923–1977 without notice or registration) and **Category 3** (registered but not renewed). |
+| **Confidence band** | A discrete bucket the matcher assigns to each score: `ge90` (≥ 0.90), `b80_90`, `b70_80`, `below` (< 0.70). Labels stratify across bands so we don't only label easy high-confidence pairs. |
+| **Stratified sample** | A sampling scheme that takes a *fixed* number of items from each `(language, band)` cell, instead of sampling proportionally. Spreads labeling effort across the score range and across all languages. |
+| **Pair** | One `(MARC record, CCE registration)` candidate to be labeled. The matcher proposes; the human disposes. |
+| **Vault** | `label_vault.jsonl` — the durable, git-tracked, append-only record of every human verdict ever rendered. Source of truth for the ground truth. |
+
+## Commands at a glance
+
+| command | purpose |
+|---|---|
+| `pdm run pd-groundtruth acquire …` | Download Princeton's MARC dumps and filter to books in scope (language, year, format). Writes MARCXML shards. |
+| `pdm run pd-groundtruth build-queue …` | Run the matcher on the filtered shards, stratified-sample the resulting pairs, and write a `review.db`. Auto-includes every in-pool vault label. |
+| `pdm run pd-groundtruth review …` | Serve the local web UI for labeling pairs. Every verdict writes both to `review.db` and to the vault. |
+| `pdm run pd-groundtruth seed-vault …` | One-shot migration: dump every current label from a pre-existing `review.db` into the vault. Idempotent. |
+| `pdm run pd-groundtruth vault-into-queue …` | Recovery tool: backfill an existing `review.db` with vault entries that aren't already present. Rarely needed after the build-queue carryover fix; see "Recovery" below. |
+
+The labeling workflow itself — what each verdict means, when to use each
+reason chip, how to handle translations and reprints — is in
+[`LABELING_GUIDE.md`](LABELING_GUIDE.md).
+
 ## How it fits together
 
 Building the corpus is a three-stage pipeline. Each stage is one command, and
@@ -181,6 +238,20 @@ on `…/stats`, counting each code of a pair's current label.
 **Track progress** at `…/stats`: labeled vs. remaining and the match / no_match /
 unsure tally, per language. Revisit or re-label any specific pair at `…/pair/{id}`.
 
+**Spot-check the training set** at `…/labels`: a flat table of every labeled
+pair (most recent first), with the verdict, reason chips, language, and
+relative time. Filters in the header narrow by `verdict`, `language`, `reason`,
+or a free-text substring (`?q=…`); 100 rows per page. Click any `pair_id` to
+jump to `/pair/{id}` and re-label. This is the tool for catching systematic
+mistakes — for example, scanning all `match` verdicts to see if any landed on
+records that shouldn't have been labeled.
+
+**For the decision rules** (when to call something `match` vs `no_match` vs
+`unsure`, how translations and reprints work, what each reason chip means),
+read [`LABELING_GUIDE.md`](LABELING_GUIDE.md). The guide is short and
+opinionated; consult it the first time you sit down to label and any time a
+new edge case appears.
+
 ## The label vault
 
 `review.db` is a **transient working queue** — it is rebuilt every time
@@ -233,6 +304,74 @@ labeled)`. The vault grows monotonically; `review.db` is disposable.
   pick it up if the underlying data returns. Use the back-arrow to revisit
   and re-label if needed.
 
+### Data model
+
+**`review.db`** (SQLite) — three tables:
+
+```sql
+review_pair (id PK, language, decade, score, band, source,
+             marc_control_id, marc_json, marc_title, marc_author,
+             marc_publisher, marc_year,
+             nypl_uuid, cce_title, cce_author, cce_publishers,
+             cce_claimants, cce_reg_year, cce_was_renewed, cce_regnum,
+             evidence_json, created_at)
+label       (id PK, pair_id FK→review_pair, verdict, reason, note,
+             labeled_at)
+label_reason (label_id FK→label, code, PRIMARY KEY (label_id, code))
+```
+
+Notes:
+
+- `review_pair.marc_json` is the lossless serialized `MarcRecord` from the
+  matcher; the denormalized `marc_*` columns are convenience copies for cheap
+  list-rendering.
+- `evidence_json` is the per-scorer `{name: normalized_score}` map the matcher
+  produced for that pair (drives the evidence bars in the card).
+- `label` is **append-only**. Re-labeling a pair inserts a new row; the
+  "current" verdict for a pair is the one with the largest `label.id` for that
+  `pair_id` (or equivalently, the latest `labeled_at` with a tie-break on
+  insertion order). `label.reason` (singular TEXT) is a legacy column kept for
+  compatibility; reasons are read from `label_reason`.
+- `label_reason` is a normalized many-to-one: zero or more codes per label.
+
+**`label_vault.jsonl`** — one JSON object per line, append-only:
+
+```json
+{
+  "schema": 1,
+  "marc_control_id": "9912345678906421",
+  "nypl_uuid": "129B8D87-6CB2-1014-A20E-B9D6251C946A",
+  "verdict": "match",
+  "reasons": ["pub_differs"],
+  "note": null,
+  "labeled_at": "2026-05-23T12:59:45.522659+00:00",
+  "labeler": "jpstroop",
+  "marc_identifiers": {
+    "lccn": "58059853",
+    "oclc": null,
+    "isbns": []
+  }
+}
+```
+
+Field semantics:
+
+- `schema` — integer; bumped only on breaking shape changes. Older lines stay
+  valid forever (append-only).
+- `(marc_control_id, nypl_uuid)` — the natural key. Multiple entries with the
+  same key represent a re-label history; the **last** line wins as the current
+  verdict for that pair.
+- `reasons` — empty tuple for `match`; zero-or-more controlled codes otherwise
+  (see [`LABELING_GUIDE.md`](LABELING_GUIDE.md) for the vocabulary).
+- `labeler` — string identifier of who labeled (today, always `"jpstroop"`;
+  reserved for future multi-reviewer setups).
+- `marc_identifiers` — durable IDs captured at label time so the published
+  matches dataset can cross-walk to LCCN / OCLC / ISBN later.
+
+The vault is **the** source of truth. `review.db` is a queryable, derivable
+working copy that the labeling app needs for fast pair-by-pair access; the
+vault is what survives every rebuild.
+
 ### One-shot migration: `seed-vault`
 
 A one-time-only command that exports every *current* label from a
@@ -280,6 +419,104 @@ a WARNING and skipped; the vault file is never modified.
 
 The final summary reads `backfilled N vault pairs; M MARC records not found
 in pool; K CCE records not found in index; P already present (skipped)`.
+
+## Common workflows
+
+Recipes for situations that come up in practice. Each is a short, self-contained
+sequence; nothing here is required reading.
+
+### First-time setup
+
+Build a fresh CCE index, acquire MARC, build the queue, and start labeling.
+
+```bash
+# from the repo root: build the CCE index once
+pdm run pd-matcher index build --out caches/nypl.lmdb \
+    --reg-dir data/nypl-reg/xml --ren-dir data/nypl-ren/data
+
+# from groundtruth/
+pdm install
+pdm run pd-groundtruth acquire     --out-dir data/candidates
+pdm run pd-groundtruth build-queue --pool data/candidates \
+                                   --index ../caches/nypl.lmdb \
+                                   --out  data/review.db
+pdm run pd-groundtruth review      --db   data/review.db
+```
+
+Open <http://127.0.0.1:8000> and start labeling.
+
+### Resume labeling tomorrow
+
+Nothing special; the DB and vault hold all state.
+
+```bash
+pdm run pd-groundtruth review --db data/review.db
+```
+
+### Rebuild the candidate set after an upstream change
+
+When the e-book filter changes, Princeton publishes a new bibdata snapshot,
+the moving wall advances, or the matcher's scoring changes — pull fresh MARC
+and rebuild the queue. The vault auto-carries-over your existing labels.
+
+```bash
+rm -rf data/candidates
+pdm run pd-groundtruth acquire     --out-dir data/candidates
+pdm run pd-groundtruth build-queue --pool   data/candidates \
+                                   --index  ../caches/nypl.lmdb \
+                                   --out    data/review.db \
+                                   --rebuild
+pdm run pd-groundtruth review      --db     data/review.db
+```
+
+`--rebuild` is required when `data/review.db` already contains pairs;
+`build-queue` refuses to silently append (which is how 28 e-book records
+contaminated a previous queue). Use `--append` if you actually want the old
+behavior.
+
+### Spot-check the training set for a systematic mistake
+
+Open <http://127.0.0.1:8000/labels>. Filter the table by verdict
+(`?verdict=match`), language (`?language=eng`), or reason
+(`?reason=diff_work`). Use the `?q=` substring search to find by title or
+control ID. Click any `pair_id` to jump into `/pair/{id}` and re-label.
+
+### Purge a bad subset of labels from the vault
+
+If you discover you've labeled records that violate scope (e.g., an entire
+class of records that should have been filtered out at `acquire` time and
+slipped through), the vault is the source of truth and needs cleaning. Pattern:
+
+1. Identify the offending vault keys `(marc_control_id, nypl_uuid)`. Often
+   you can derive them from `review.db` via the `marc_json.extent` or another
+   denormalized column.
+2. Archive the vault before mutating it.
+3. Rewrite the vault, keeping only entries whose key is **not** in the offender
+   set.
+4. Rebuild the queue (`build-queue --rebuild`); vault carryover applies only
+   the surviving labels.
+
+There is no built-in `vault prune` subcommand today; the operation is
+intentionally manual because purges are rare and you should look at what
+you're removing. A worked example lives in the commit message of the
+"vault: purge 28 e-book entries; rebuild from clean 129" commit.
+
+### Revisit a single previously labeled pair
+
+Navigate to `/pair/{id}` (or click the pair ID from the `/labels` table).
+The card looks the same as a fresh one; labeling it again appends a new row
+to `label` (and a new line to the vault). The "current" verdict is the
+latest, but the history is preserved.
+
+### Reset everything and start fresh (rare)
+
+Deletes the labeled corpus. Don't do this unless you're sure.
+
+```bash
+rm data/review.db label_vault.jsonl
+```
+
+Followed by a fresh acquire + build-queue + review.
 
 ## Reference: what survives acquisition
 
