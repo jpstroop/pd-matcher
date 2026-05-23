@@ -21,6 +21,8 @@ RENEWAL_RENEWED: str = "Renewed"
 RENEWAL_NOT_RENEWED: str = "Not renewed"
 RENEWAL_UNKNOWN: str = "unknown"
 
+_ONLINE_RESOURCE_MARKER: str = "online resource"
+
 
 class EvidenceBar(Struct, frozen=True, forbid_unknown_fields=True):
     """One per-field evidence reading for a horizontal score bar."""
@@ -52,6 +54,7 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     marc_lccn: str | None
     marc_language_code: str | None
     marc_country_code: str | None
+    marc_is_online_resource: bool
 
     cce_title: str | None
     cce_author: str | None
@@ -98,6 +101,20 @@ def _title_main_if_distinct(marc: MarcRecord) -> str | None:
     return None
 
 
+def _is_online_resource(extent: str | None) -> bool:
+    """Return ``True`` when ``extent`` flags the MARC record as a digital reissue.
+
+    A MARC 300 ``extent`` containing ``online resource`` (case-insensitive)
+    marks the record as an e-book / digital reprint, which usually describes
+    the wrong artifact for the matcher (year and publisher come from the
+    reissue, not the original publication). The card shows a badge so the
+    reviewer can adjust expectations accordingly.
+    """
+    if extent is None:
+        return False
+    return _ONLINE_RESOURCE_MARKER in extent.lower()
+
+
 def build_card(row: ReviewPairRow) -> ReviewCard:
     """Project a persisted :class:`ReviewPairRow` into a :class:`ReviewCard`.
 
@@ -126,6 +143,7 @@ def build_card(row: ReviewPairRow) -> ReviewCard:
         marc_lccn=marc.lccn,
         marc_language_code=marc.language_code,
         marc_country_code=marc.country_code,
+        marc_is_online_resource=_is_online_resource(marc.extent),
         cce_title=row.cce_title,
         cce_author=row.cce_author,
         cce_publishers=row.cce_publishers,

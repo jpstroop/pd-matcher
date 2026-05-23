@@ -19,6 +19,7 @@
   <section class="panel">
     <h2>MARC (Princeton)</h2>
     <div class="field"><div class="k">title</div><div class="v title">{{ card.marc_title }}</div></div>
+    {% if card.marc_is_online_resource %}<div class="field"><span class="badge-ebook">E-book reprint</span></div>{% endif %}
     {% if card.marc_title_main %}<div class="field"><div class="k">title main</div><div class="v">{{ card.marc_title_main }}</div></div>{% endif %}
     {% if card.marc_statement_of_responsibility %}<div class="field"><div class="k">statement of responsibility</div><div class="v">{{ card.marc_statement_of_responsibility }}</div></div>{% endif %}
     {% if card.marc_main_author %}<div class="field"><div class="k">main author</div><div class="v">{{ card.marc_main_author }}</div></div>{% endif %}

@@ -27,12 +27,21 @@ NO_MATCH_REASONS: tuple[ReasonCode, ...] = (
     ReasonCode(code="translation", label="Translation / different language"),
     ReasonCode(code="garbled", label="Garbled transcription"),
     ReasonCode(code="publisher_only", label="Publisher-only overlap"),
+    ReasonCode(code="generic_title", label="Generic title — likely a collision"),
 )
 
 UNSURE_REASONS: tuple[ReasonCode, ...] = (
     ReasonCode(code="insufficient_data", label="Insufficient data on one side"),
     ReasonCode(code="plausible_unverified", label="Plausible but unverified"),
     ReasonCode(code="edition_unsure", label="Unsure about edition"),
+    ReasonCode(code="translation", label="Possibly a translation vs. original"),
+    ReasonCode(code="pub_differs", label="Looks right but publisher differs"),
+    ReasonCode(
+        code="reprint_or_format",
+        label="Reprint / different physical format (e-book, microform)",
+    ),
+    ReasonCode(code="whole_or_part", label="Possibly whole vs. part / volume"),
+    ReasonCode(code="periodical_issue", label="Looks like one issue of a periodical"),
 )
 
 _BY_VERDICT: dict[str, tuple[ReasonCode, ...]] = {
