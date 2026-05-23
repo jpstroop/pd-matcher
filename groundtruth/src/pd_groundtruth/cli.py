@@ -16,6 +16,7 @@ from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.models import MarcRecord
+from typer import Exit
 from typer import Option
 from typer import Typer
 from typer import echo
@@ -139,6 +140,29 @@ def acquire_command(
     )
 
 
+def _existing_pair_count(path: Path) -> int:
+    """Return the number of ``review_pair`` rows in ``path``, or 0 if absent/empty.
+
+    Treats any non-existent file, empty file, or file lacking the ``review_pair``
+    table as having zero pairs; this keeps fresh-file and schema-only-file runs
+    on the no-flag happy path.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return 0
+    from sqlite3 import OperationalError
+    from sqlite3 import connect as sqlite_connect
+
+    connection = sqlite_connect(path)
+    try:
+        try:
+            row = connection.execute("SELECT COUNT(*) FROM review_pair").fetchone()
+        except OperationalError:
+            return 0
+        return int(row[0])
+    finally:
+        connection.close()
+
+
 @app.command(name="build-queue")
 def build_queue_command(
     pool: Annotated[
@@ -180,12 +204,39 @@ def build_queue_command(
             help="Increase matcher logging: -v per-worker heartbeats, -vv per-record hits.",
         ),
     ] = 0,
+    rebuild: Annotated[
+        bool,
+        Option(
+            "--rebuild",
+            help="Delete the target --out database before writing (destructive).",
+        ),
+    ] = False,
+    append: Annotated[
+        bool,
+        Option(
+            "--append",
+            help="Append to a non-empty --out database (today's silent behavior, now opt-in).",
+        ),
+    ] = False,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
     ] = None,
 ) -> None:
     """Match a stratified pool sample and write a SQLite review queue."""
+    if rebuild and append:
+        echo("--rebuild and --append are mutually exclusive.", err=True)
+        raise Exit(code=2)
+    existing = _existing_pair_count(out)
+    if existing > 0 and not rebuild and not append:
+        echo(
+            f"review.db at {out} already contains {existing} pairs. "
+            f"Pass --rebuild to drop and recreate, or --append to add to it.",
+            err=True,
+        )
+        raise Exit(code=2)
+    if rebuild and out.exists():
+        out.unlink()
     resolved_log_file = _configure_logging("build-queue", log_file)
     resolved_budget = default_budget() if budget is None else scale_budget(default_budget(), budget)
     summary = build_queue(

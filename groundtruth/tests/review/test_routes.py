@@ -86,6 +86,18 @@ def client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
 
 
 @fixture
+def skip_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(_pair(language="eng", control_id="s-1", nypl_uuid="u-s-1"))
+        db.insert_pair(_pair(language="eng", control_id="s-2", nypl_uuid="u-s-2"))
+        db.insert_pair(_pair(language="eng", control_id="s-3", nypl_uuid="u-s-3"))
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
 def ebook_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
     db_path = tmp_path / "review.db"
     with ReviewDb.connect(db_path) as db:
@@ -331,3 +343,48 @@ def test_label_db_timestamp_matches_vault_timestamp(
         [label] = list(db.iter_current_labels())
     assert label.labeled_at == vault_entry.labeled_at
     assert label.note == vault_entry.note == "hmm"
+
+
+def test_skip_query_excludes_single_pair(skip_client: TestClient) -> None:
+    response = skip_client.get("/", params={"skip": 1})
+    assert response.status_code == 200
+    assert "s-2" in response.text
+    assert "s-1" not in response.text
+
+
+def test_skip_query_excludes_multiple_pairs(skip_client: TestClient) -> None:
+    response = skip_client.get("/", params=[("skip", 1), ("skip", 2)])
+    assert response.status_code == 200
+    assert "s-3" in response.text
+    assert "s-1" not in response.text
+    assert "s-2" not in response.text
+
+
+def test_skip_query_empty_returns_all_done(skip_client: TestClient) -> None:
+    response = skip_client.get("/", params=[("skip", 1), ("skip", 2), ("skip", 3)])
+    assert response.status_code == 200
+    assert "All done" in response.text
+
+
+def test_label_redirect_does_not_carry_skip_state(skip_client: TestClient) -> None:
+    response = skip_client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    nxt = skip_client.get("/")
+    assert "s-2" in nxt.text
+
+
+def test_card_renders_skip_url_with_current_pair_id_appended(skip_client: TestClient) -> None:
+    response = skip_client.get("/", params={"skip": 1})
+    assert response.status_code == 200
+    assert 'skipUrl = "/?skip=1&skip=2"' in response.text
+
+
+def test_card_skip_url_includes_filters(skip_client: TestClient) -> None:
+    response = skip_client.get("/", params={"language": "eng"})
+    assert response.status_code == 200
+    assert 'skipUrl = "/?language=eng&skip=1"' in response.text
