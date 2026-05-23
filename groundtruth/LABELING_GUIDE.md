@@ -52,9 +52,10 @@ artifacts of the reissue, not as scoring failures. Use `reprint_or_format` on
 the unsure side if the underlying work looks right but the digital reissue
 muddies the comparison.
 
-E-book reprints will be filtered out at acquire time once
-[#30](https://github.com/jpstroop/pd-matcher/issues/30) lands; after that
-these pairs will not reach the review queue at all. The
+E-book reprints are filtered out at acquire time
+([#30](https://github.com/jpstroop/pd-matcher/issues/30)). If you ever see
+the yellow **E-book reprint** badge on a card, it means the filter missed an
+indicator — please note the `pair_id` so we can extend the filter. The
 [label vault](README.md#the-label-vault) (implemented in
 [#28](https://github.com/jpstroop/pd-matcher/issues/28)) is what makes that
 rebuild safe — every adjudicated verdict is persisted to

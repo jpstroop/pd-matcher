@@ -232,18 +232,23 @@ A record survives only if **all** of the following hold (decided directly off th
 raw leader, 008, and 245):
 
 1. **Monograph book** — leader position 6 is `a` and position 7 is `m`.
-2. **Supported language** — 008 positions 35:38 are one of `eng`, `fre`, `ger`,
+2. **Not an electronic resource** — excluded if MARC 007 byte 0 is `c`, MARC
+   338 $b is `cr`, MARC 245 $h contains "electronic resource", or MARC 300 $a
+   contains "online resource". These are digital reprints of older works (the
+   MARC describes the digital reissue, not the original artifact registered
+   at the Copyright Office).
+3. **Supported language** — 008 positions 35:38 are one of `eng`, `fre`, `ger`,
    `spa`, `ita` (the languages the CCE index covers).
-3. **Publication year in window** — 008 positions 7:11 parse as a 4-digit integer
+4. **Publication year in window** — 008 positions 7:11 parse as a 4-digit integer
    in the inclusive range `[min_year, 1977]`. Partial/unknown values (`uuuu`,
    `||||`, blanks) are rejected. The lower bound is the **moving wall** (below);
    `1977` is the last CCE renewal year of interest.
-4. **Not a government publication** — 008 position 28 must be blank (`" "`) or
+5. **Not a government publication** — 008 position 28 must be blank (`" "`) or
    `"|"`; any coded value (`a c f i l m o s u z` …) is dropped. Government works
    are public domain by statute and were never registered in the CCE, so they are
    pure noise — an early live run found ~95% of survivors were government
    publications, drowning out the records we need.
-5. **Has a title** — a 245 data field with a non-empty subfield `a`.
+6. **Has a title** — a 245 data field with a non-empty subfield `a`.
 
 Records are matched by element *local name*, so both the MARC21 slim namespace
 and the no-namespace serialization work.
