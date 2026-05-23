@@ -13,3 +13,4 @@ dist/
 build/
 .pdm-python
 .pdm-build/
+label_vault.jsonl.pre-ebook-purge
