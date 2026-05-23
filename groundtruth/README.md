@@ -239,6 +239,44 @@ pdm run pd-groundtruth seed-vault --db data/review.db --vault label_vault.jsonl
 `(marc_control_id, nypl_uuid, labeled_at)` triple, so re-running it after a
 fresh round of labeling only adds the new events.
 
+### Recovery: `vault-into-queue`
+
+A tactical bridge that backfills vault entries whose `(marc_control_id,
+nypl_uuid)` pair is **not** present in an existing `review.db`. This happens
+because `build-queue`'s stratified sampling can miss MARC records that were
+labeled in a previous round, leaving those verdicts invisible in the review
+UI even though they are safely persisted in the vault.
+
+```bash
+pdm run pd-groundtruth vault-into-queue \
+  --db data/review.db \
+  --vault label_vault.jsonl \
+  --pool data/candidates \
+  --index ../caches/nypl.lmdb
+```
+
+| flag | meaning |
+|---|---|
+| `--db` | Existing review database to backfill in place. |
+| `--vault` | JSONL label vault whose entries seed the missing set. |
+| `--pool` | The `acquire` output directory; needed to materialize the MARC record for each missing entry. |
+| `--index` | The LMDB index produced by `pd-matcher index build`; needed to materialize the CCE registration for each missing entry. |
+
+For each missing entry, the command looks the MARC up in `--pool`, looks the
+CCE registration up in `--index`, scores the **specific** pair with the
+matcher's per-pair scoring routine so the row carries real `(score, band,
+evidence)`, and inserts both the `review_pair` row and the pre-existing vault
+verdict (preserving the original `labeled_at`). Vault entries whose MARC is
+no longer in the pool or whose CCE is no longer in the index are logged with
+a WARNING and skipped; the vault file is never modified.
+
+The final summary reads `backfilled N vault pairs; M MARC records not found
+in pool; K CCE records not found in index; P already present (skipped)`.
+
+This is a **tactical unblock** until `build-queue` always includes vault MARCs
+in its sample (see `jpstroop/pd-matcher#33`); once that lands, this command
+becomes unnecessary.
+
 ## Reference: what survives acquisition
 
 This section explains the *why* behind `acquire`'s filtering and sampling. You do
