@@ -54,10 +54,12 @@ muddies the comparison.
 
 E-book reprints will be filtered out at acquire time once
 [#30](https://github.com/jpstroop/pd-matcher/issues/30) lands; after that
-these pairs will not reach the review queue at all. That work depends on
-[#28](https://github.com/jpstroop/pd-matcher/issues/28) (label vault)
-shipping first, so the human labels already produced survive the
-inevitable `review.db` rebuild.
+these pairs will not reach the review queue at all. The
+[label vault](README.md#the-label-vault) (implemented in
+[#28](https://github.com/jpstroop/pd-matcher/issues/28)) is what makes that
+rebuild safe — every adjudicated verdict is persisted to
+`label_vault.jsonl` and re-applied automatically the next time
+`build-queue` runs.
 
 ## When to use each chip
 
