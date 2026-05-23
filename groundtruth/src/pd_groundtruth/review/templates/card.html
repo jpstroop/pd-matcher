@@ -11,7 +11,7 @@
   <span>lang {{ card.language }}</span>
   {% if card.decade is not none %}<span>{{ card.decade }}s</span>{% endif %}
   <span>pair #{{ card.pair_id }}</span>
-  <span>marc {{ card.marc_control_id }}</span>
+  <span>marc <a href="https://catalog.princeton.edu/catalog/{{ card.marc_control_id }}" target="_blank" rel="noopener noreferrer">{{ card.marc_control_id }}</a></span>
   <span>nypl {{ card.nypl_uuid }}</span>
 </div>
 
