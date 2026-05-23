@@ -54,6 +54,8 @@ from pd_matcher.models import MarcRecord
 from pd_matcher.parsers.marc import iter_marc_records
 from pd_matcher.workers import run_match
 
+from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.progress import render_kept_suffix
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
@@ -148,18 +150,43 @@ class StratifyingResultWriter:
     so :meth:`__exit__` can draw a seeded reservoir per language for the
     :data:`pd_groundtruth.sampling.SOURCE_BELOW_SAMPLE` bucket. Order does not
     matter, so this works under ``imap``-style unordered delivery.
+
+    When a vault entry exists for an inserted pair's
+    ``(marc_control_id, nypl_uuid)`` key, the writer also inserts a ``label``
+    row using that vault entry's verdict / reasons / note / ``labeled_at`` so a
+    rebuilt queue still reports the pair as labeled and ``next_unlabeled`` skips
+    it. The reviewer can step back to re-label if needed.
     """
 
-    __slots__ = ("_below_buffer", "_budget", "_db", "_db_path", "_kept", "_seed", "_seen")
+    __slots__ = (
+        "_below_buffer",
+        "_budget",
+        "_db",
+        "_db_path",
+        "_kept",
+        "_seed",
+        "_seen",
+        "_vault",
+        "_vault_applied",
+    )
 
-    def __init__(self, *, db_path: Path, budget: BudgetModel, seed: int) -> None:
+    def __init__(
+        self,
+        *,
+        db_path: Path,
+        budget: BudgetModel,
+        seed: int,
+        vault: dict[tuple[str, str], VaultEntry] | None = None,
+    ) -> None:
         self._db_path = db_path
         self._budget = budget
         self._seed = seed
+        self._vault: dict[tuple[str, str], VaultEntry] = vault or {}
         self._db: ReviewDb | None = None
         self._kept: dict[tuple[str, str], int] = {}
         self._below_buffer: dict[str, list[_BufferedCandidate]] = {}
         self._seen: int = 0
+        self._vault_applied: int = 0
 
     def __enter__(self) -> Self:
         """Open (creating schema) the review database."""
@@ -178,6 +205,12 @@ class StratifyingResultWriter:
             self._finalize_below_sample(db)
             db.commit()
             self._log_fill()
+            new_pairs = sum(self._kept.values()) - self._vault_applied
+            _LOGGER.info(
+                "vault contributed %d pre-applied labels; %d new pairs queued",
+                self._vault_applied,
+                new_pairs,
+            )
         db.__exit__(exc_type, exc, tb)
         self._db = None
 
@@ -222,7 +255,7 @@ class StratifyingResultWriter:
             band=band,
             source=SOURCE_BANDED,
         )
-        db.insert_pair(pair)
+        self._insert_with_vault(db, pair)
         self._kept[key] = self._kept.get(key, 0) + 1
         if self._seen % _FILL_LOG_INTERVAL == 0:
             self._log_fill()
@@ -233,9 +266,24 @@ class StratifyingResultWriter:
             cap = self._budget.cap_for(language, BAND_BELOW)
             language_seed = self._seed ^ hash(language)
             for candidate in reservoir_sample(candidates, cap, language_seed):
-                db.insert_pair(candidate.pair)
+                self._insert_with_vault(db, candidate.pair)
                 key = (language, BAND_BELOW)
                 self._kept[key] = self._kept.get(key, 0) + 1
+
+    def _insert_with_vault(self, db: ReviewDb, pair: PairInsert) -> None:
+        """Insert one pair; if the vault has a verdict for it, also pre-apply it."""
+        pair_id = db.insert_pair(pair)
+        entry = self._vault.get((pair.marc_control_id, pair.nypl_uuid))
+        if entry is None:
+            return
+        db.insert_existing_label(
+            pair_id=pair_id,
+            verdict=entry.verdict,
+            labeled_at=entry.labeled_at,
+            note=entry.note,
+            reasons=entry.reasons,
+        )
+        self._vault_applied += 1
 
     def _log_fill(self) -> None:
         """Emit the kept-per-stratum fill readout."""
@@ -255,15 +303,26 @@ class StratifyingWriterFactory(Struct, frozen=True, forbid_unknown_fields=True):
     the run's ``output_path``; that path is ignored here because the review
     database location travels with the factory. Carrying only paths, the
     budget, and the seed keeps every attribute picklable across ``spawn``.
+
+    ``vault_path`` is read inside the writer process (so the parent never
+    needs to ship the parsed vault across the process boundary) — the factory
+    only carries the path.
     """
 
     db_path: Path
     budget: BudgetModel
     seed: int
+    vault_path: Path
 
     def __call__(self, _output_path: Path) -> StratifyingResultWriter:
         """Construct the writer; ``_output_path`` is unused by design."""
-        return StratifyingResultWriter(db_path=self.db_path, budget=self.budget, seed=self.seed)
+        vault = current_entries(self.vault_path)
+        return StratifyingResultWriter(
+            db_path=self.db_path,
+            budget=self.budget,
+            seed=self.seed,
+            vault=vault,
+        )
 
 
 class BuildSummary(Struct, frozen=True, forbid_unknown_fields=True):
@@ -326,6 +385,7 @@ def build_queue(
     pool: Path,
     index_path: Path,
     out_path: Path,
+    vault_path: Path,
     budget: BudgetModel,
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
@@ -349,6 +409,8 @@ def build_queue(
         pool: Root directory whose ``<lang>/*.xml`` shards form the pool.
         index_path: LMDB env produced by ``pd-matcher index build``.
         out_path: Destination SQLite review database.
+        vault_path: JSONL label vault; current entries are pre-applied to the
+            queue so previously-labeled pairs stay labeled across rebuilds.
         budget: Per-(language, band) caps.
         matching_config: Active config; the score floor is forced to ``0.0``.
         pairing_config: Active field-pairing config.
@@ -377,7 +439,9 @@ def build_queue(
         idf = load_or_build_idf(idf_cache_path, lambda: NyplIndexLookup(index_path))
         calibrator = _load_calibrator(index_path.parent)
         floored_config = replace(matching_config, min_combined_score=0.0)
-        factory = StratifyingWriterFactory(db_path=out_path, budget=budget, seed=seed)
+        factory = StratifyingWriterFactory(
+            db_path=out_path, budget=budget, seed=seed, vault_path=vault_path
+        )
         _LOGGER.info("matching start: total=%d workers=%d", manifest.total_records, workers)
         report = run_match(
             prepared_dir=prepared_dir,

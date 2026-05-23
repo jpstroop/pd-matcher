@@ -6,9 +6,11 @@ from logging import basicConfig
 from pathlib import Path
 from typing import Annotated
 
+from msgspec.json import decode as json_decode
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
+from pd_matcher.models import MarcRecord
 from typer import Option
 from typer import Typer
 from typer import echo
@@ -17,8 +19,14 @@ from pd_groundtruth.acquire import acquire
 from pd_groundtruth.acquire import default_min_year
 from pd_groundtruth.build_queue import build_queue
 from pd_groundtruth.build_queue import load_default_ruleset
+from pd_groundtruth.label_vault import SCHEMA_VERSION
+from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.label_vault import append_entry
+from pd_groundtruth.label_vault import current_entries
+from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.review.server import serve
+from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import default_budget
 from pd_groundtruth.sampling import scale_budget
 
@@ -30,6 +38,8 @@ _DEFAULT_WORKERS = 8
 _DEFAULT_SAMPLE_PER_LANG = 1500
 _DEFAULT_REVIEW_HOST = "127.0.0.1"
 _DEFAULT_REVIEW_PORT = 8000
+_DEFAULT_VAULT_PATH = Path("label_vault.jsonl")
+_LABELER = "jpstroop"
 
 
 @app.callback()
@@ -93,6 +103,13 @@ def build_queue_command(
         Path, Option("--index", help="LMDB env produced by `pd-matcher index build`.")
     ],
     out: Annotated[Path, Option("--out", help="Destination SQLite review database.")],
+    vault: Annotated[
+        Path,
+        Option(
+            "--vault",
+            help="JSONL label vault; existing verdicts are pre-applied to the queue.",
+        ),
+    ] = _DEFAULT_VAULT_PATH,
     budget: Annotated[
         int | None,
         Option("--budget", help="Target total pairs; scales the default caps proportionally."),
@@ -125,6 +142,7 @@ def build_queue_command(
         pool=pool,
         index_path=index,
         out_path=out,
+        vault_path=vault,
         budget=resolved_budget,
         matching_config=_load_default_matching_config(),
         pairing_config=_load_default_pairing_config(),
@@ -147,6 +165,13 @@ def build_queue_command(
 @app.command(name="review")
 def review_command(
     db: Annotated[Path, Option("--db", help="SQLite review database produced by `build-queue`.")],
+    vault: Annotated[
+        Path,
+        Option(
+            "--vault",
+            help="JSONL label vault; each accepted verdict is appended here.",
+        ),
+    ] = _DEFAULT_VAULT_PATH,
     host: Annotated[
         str, Option("--host", help="Interface to bind the local review server.")
     ] = _DEFAULT_REVIEW_HOST,
@@ -155,5 +180,50 @@ def review_command(
     ),
 ) -> None:
     """Launch the local keyboard-driven review UI over a review database."""
-    echo(f"serving review UI for {db} at http://{host}:{port}")
-    serve(db, host=host, port=port)
+    echo(f"serving review UI for {db} (vault: {vault}) at http://{host}:{port}")
+    serve(db, vault, host=host, port=port)
+
+
+@app.command(name="seed-vault")
+def seed_vault_command(
+    db: Annotated[
+        Path,
+        Option("--db", help="SQLite review database whose current labels to dump."),
+    ],
+    vault: Annotated[
+        Path,
+        Option("--vault", help="JSONL label vault to append into (created if absent)."),
+    ] = _DEFAULT_VAULT_PATH,
+) -> None:
+    """One-shot migration: dump every current label from ``--db`` into ``--vault``.
+
+    Idempotent: entries already present (matching ``marc_control_id`` +
+    ``nypl_uuid`` + ``labeled_at``) are skipped. Different ``labeled_at`` for
+    the same pair is treated as a new event and appended.
+    """
+    basicConfig(level=INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    existing = current_entries(vault)
+    seeded = 0
+    skipped = 0
+    with ReviewDb.connect(db) as connection:
+        for label in connection.iter_current_labels():
+            key = (label.marc_control_id, label.nypl_uuid)
+            present = existing.get(key)
+            if present is not None and present.labeled_at == label.labeled_at:
+                skipped += 1
+                continue
+            marc = json_decode(label.marc_json.encode("utf-8"), type=MarcRecord)
+            entry = VaultEntry(
+                schema=SCHEMA_VERSION,
+                marc_control_id=label.marc_control_id,
+                nypl_uuid=label.nypl_uuid,
+                verdict=label.verdict,
+                reasons=label.reasons,
+                note=label.note,
+                labeled_at=label.labeled_at,
+                labeler=_LABELER,
+                marc_identifiers=extract_marc_identifiers(marc),
+            )
+            append_entry(vault, entry)
+            seeded += 1
+    echo(f"seeded {seeded} labels; skipped {skipped} already-present")

@@ -103,6 +103,7 @@ def test_build_queue_command_defaults(tmp_path: Path) -> None:
     assert kwargs["workers"] == 8
     assert kwargs["sample_per_lang"] == 1500
     assert kwargs["budget"].caps == default_budget().caps
+    assert kwargs["vault_path"] == Path("label_vault.jsonl")
     assert "pairs_written=5" in result.stdout
     assert "eng/ge90=3" in result.stdout
 
@@ -119,6 +120,8 @@ def test_build_queue_command_scales_budget(tmp_path: Path) -> None:
                 str(tmp_path / "nypl.lmdb"),
                 "--out",
                 str(tmp_path / "review.db"),
+                "--vault",
+                str(tmp_path / "vault.jsonl"),
                 "--budget",
                 "200",
                 "--seed",
@@ -135,4 +138,5 @@ def test_build_queue_command_scales_budget(tmp_path: Path) -> None:
     assert kwargs["seed"] == 7
     assert kwargs["workers"] == 4
     assert kwargs["sample_per_lang"] == 500
+    assert kwargs["vault_path"] == tmp_path / "vault.jsonl"
     assert kwargs["budget"].total() < default_budget().total()

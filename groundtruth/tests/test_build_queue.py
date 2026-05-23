@@ -179,6 +179,7 @@ def test_factory_is_picklable_and_builds_writer(tmp_path: Path) -> None:
         db_path=tmp_path / "review.db",
         budget=BudgetModel(caps={("eng", "ge90"): 1}),
         seed=7,
+        vault_path=tmp_path / "vault.jsonl",
     )
     restored: StratifyingWriterFactory = pickle_loads(__import__("pickle").dumps(factory))
     writer = restored(tmp_path / "ignored.csv")
@@ -194,6 +195,71 @@ def test_writer_accepts_banded_until_cap(tmp_path: Path) -> None:
     with ReviewDb.connect(db_path) as db:
         counts = db.stratum_counts()
     assert counts[("eng", "ge90")] == 2
+
+
+def test_writer_preapplies_vault_labels_for_known_pairs(tmp_path: Path) -> None:
+    from pd_groundtruth.label_vault import SCHEMA_VERSION
+    from pd_groundtruth.label_vault import MarcIdentifiers
+    from pd_groundtruth.label_vault import VaultEntry
+
+    db_path = tmp_path / "review.db"
+    budget = BudgetModel(caps={("eng", "ge90"): 2})
+    vault_entry = VaultEntry(
+        schema=SCHEMA_VERSION,
+        marc_control_id="c0",
+        nypl_uuid="uuid-1",
+        verdict="match",
+        reasons=(),
+        note="from vault",
+        labeled_at="2026-05-22T10:00:00+00:00",
+        labeler="jpstroop",
+        marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+    )
+    vault = {("c0", "uuid-1"): vault_entry}
+    with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1, vault=vault) as writer:
+        writer.write(_marc(control_id="c0"), _match(0.95), _ASSESSMENT, _cce())
+        writer.write(_marc(control_id="c1"), _match(0.95), _ASSESSMENT, _cce("uuid-other"))
+
+    with ReviewDb.connect(db_path) as db:
+        progress = db.progress()
+        assert progress.total == 2
+        assert progress.labeled == 1
+        assert progress.match == 1
+        labels = list(db.iter_current_labels())
+    assert len(labels) == 1
+    assert labels[0].marc_control_id == "c0"
+    assert labels[0].verdict == "match"
+    assert labels[0].labeled_at == "2026-05-22T10:00:00+00:00"
+    assert labels[0].note == "from vault"
+
+
+def test_writer_preapplies_vault_labels_to_below_sample(tmp_path: Path) -> None:
+    from pd_groundtruth.label_vault import SCHEMA_VERSION
+    from pd_groundtruth.label_vault import MarcIdentifiers
+    from pd_groundtruth.label_vault import VaultEntry
+
+    db_path = tmp_path / "review.db"
+    budget = BudgetModel(caps={("eng", "below"): 2})
+    vault_entry = VaultEntry(
+        schema=SCHEMA_VERSION,
+        marc_control_id="c0",
+        nypl_uuid="uuid-1",
+        verdict="no_match",
+        reasons=("diff_work",),
+        note=None,
+        labeled_at="2026-05-22T11:00:00+00:00",
+        labeler="jpstroop",
+        marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+    )
+    vault = {("c0", "uuid-1"): vault_entry}
+    with StratifyingResultWriter(db_path=db_path, budget=budget, seed=42, vault=vault) as writer:
+        writer.write(_marc(control_id="c0"), _match(0.3), _ASSESSMENT, _cce())
+        writer.write(_marc(control_id="c1"), _match(0.3), _ASSESSMENT, _cce("uuid-other"))
+
+    with ReviewDb.connect(db_path) as db:
+        labels = list(db.iter_current_labels())
+    found = {label.marc_control_id for label in labels}
+    assert "c0" in found
 
 
 def test_writer_persists_snapshot_fields(tmp_path: Path) -> None:
@@ -260,6 +326,7 @@ def test_build_queue_rejects_zero_workers(tmp_path: Path) -> None:
             pool=tmp_path,
             index_path=tmp_path / "idx",
             out_path=tmp_path / "out.db",
+            vault_path=tmp_path / "vault.jsonl",
             budget=BudgetModel(caps={}),
             matching_config=_MATCHING_CONFIG,
             pairing_config=_PAIRING_CONFIG,
@@ -310,6 +377,7 @@ def test_build_queue_drives_run_match_and_summarizes(
         pool=pool,
         index_path=tmp_path / "idx" / "nypl.lmdb",
         out_path=out_path,
+        vault_path=tmp_path / "vault.jsonl",
         budget=BudgetModel(caps={("eng", "ge90"): 5, ("eng", "below"): 5}),
         matching_config=_MATCHING_CONFIG,
         pairing_config=_PAIRING_CONFIG,
@@ -359,6 +427,7 @@ def test_build_queue_cleans_up_prepared_dir(tmp_path: Path, monkeypatch: MonkeyP
         pool=pool,
         index_path=tmp_path / "idx" / "nypl.lmdb",
         out_path=tmp_path / "review.db",
+        vault_path=tmp_path / "vault.jsonl",
         budget=BudgetModel(caps={("eng", "ge90"): 1}),
         matching_config=_MATCHING_CONFIG,
         pairing_config=_PAIRING_CONFIG,

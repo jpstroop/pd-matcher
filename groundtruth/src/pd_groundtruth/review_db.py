@@ -13,6 +13,7 @@ holds verdicts in an append-only log keyed on ``pair_id`` so re-labels keep
 history; the "current" label is the latest by ``(labeled_at, id)``.
 """
 
+from collections.abc import Iterator
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
@@ -73,6 +74,26 @@ CREATE INDEX IF NOT EXISTS ix_review_pair_lang_band ON review_pair (language, ba
 CREATE INDEX IF NOT EXISTS ix_label_pair ON label (pair_id);
 CREATE INDEX IF NOT EXISTS ix_label_reason_label ON label_reason (label_id);
 """
+
+
+class LabelInsertResult(Struct, frozen=True, forbid_unknown_fields=True):
+    """Identifier and timestamp for one freshly inserted ``label`` row."""
+
+    label_id: int
+    labeled_at: str
+
+
+class CurrentLabelRow(Struct, frozen=True, forbid_unknown_fields=True):
+    """The current verdict for one pair joined with its reasons and MARC blob."""
+
+    pair_id: int
+    marc_control_id: str
+    nypl_uuid: str
+    marc_json: str
+    verdict: str
+    note: str | None
+    labeled_at: str
+    reasons: tuple[str, ...]
 
 
 class PairInsert(Struct, frozen=True, forbid_unknown_fields=True):
@@ -465,8 +486,8 @@ class ReviewDb:
         verdict: str,
         note: str | None = None,
         reasons: tuple[str, ...] = (),
-    ) -> int:
-        """Append a verdict for ``pair_id`` and return the new ``label.id``.
+    ) -> LabelInsertResult:
+        """Append a verdict for ``pair_id`` and return the new label's id + timestamp.
 
         ``reasons`` is zero or more controlled reason codes (see
         :mod:`pd_groundtruth.review.reasons`), each written as its own
@@ -474,6 +495,93 @@ class ReviewDb:
         stored as-is — the caller is responsible for validating them against
         the verdict's vocabulary. The legacy scalar ``label.reason`` column is
         left ``NULL``; reasons live only in ``label_reason`` going forward.
+
+        The returned :class:`LabelInsertResult` exposes the ISO-8601 timestamp
+        stamped onto the row so the caller (review UI) can pass the exact same
+        value to the label vault and keep DB and vault in lockstep.
+
+        Raises:
+            ValueError: If ``verdict`` is not one of ``match``,
+                ``no_match``, or ``unsure``.
+        """
+        if verdict not in _VALID_VERDICTS:
+            raise ValueError(f"invalid verdict {verdict!r}")
+        labeled_at = _now()
+        cursor = self._conn.execute(
+            "INSERT INTO label (pair_id, verdict, note, labeled_at) VALUES (?, ?, ?, ?)",
+            (pair_id, verdict, note, labeled_at),
+        )
+        row_id = cursor.lastrowid
+        if row_id is None:  # pragma: no cover
+            raise RuntimeError("INSERT did not return a rowid")
+        self._conn.executemany(
+            "INSERT INTO label_reason (label_id, code) VALUES (?, ?)",
+            [(row_id, code) for code in reasons],
+        )
+        return LabelInsertResult(label_id=row_id, labeled_at=labeled_at)
+
+    def iter_current_labels(self) -> Iterator[CurrentLabelRow]:
+        """Yield one :class:`CurrentLabelRow` per labeled pair, latest verdict only.
+
+        The "current" label is the one with ``MAX(id)`` per ``pair_id`` (the
+        monotonic action order used elsewhere). Reasons are aggregated into a
+        tuple ordered by ``label_reason.code`` so the result is deterministic
+        across runs.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT
+                rp.id AS pair_id,
+                rp.marc_control_id AS marc_control_id,
+                rp.nypl_uuid AS nypl_uuid,
+                rp.marc_json AS marc_json,
+                cur.verdict AS verdict,
+                cur.note AS note,
+                cur.labeled_at AS labeled_at,
+                cur.id AS label_id
+            FROM review_pair rp
+            JOIN (
+                SELECT l.id, l.pair_id, l.verdict, l.note, l.labeled_at
+                FROM label l
+                JOIN (
+                    SELECT pair_id, MAX(id) AS max_id FROM label GROUP BY pair_id
+                ) latest
+                  ON l.pair_id = latest.pair_id AND l.id = latest.max_id
+            ) cur
+              ON cur.pair_id = rp.id
+            ORDER BY rp.id
+            """
+        ).fetchall()
+        for row in rows:
+            reason_rows = self._conn.execute(
+                "SELECT code FROM label_reason WHERE label_id = ? ORDER BY code",
+                (row["label_id"],),
+            ).fetchall()
+            yield CurrentLabelRow(
+                pair_id=row["pair_id"],
+                marc_control_id=row["marc_control_id"],
+                nypl_uuid=row["nypl_uuid"],
+                marc_json=row["marc_json"],
+                verdict=row["verdict"],
+                note=row["note"],
+                labeled_at=row["labeled_at"],
+                reasons=tuple(reason_row["code"] for reason_row in reason_rows),
+            )
+
+    def insert_existing_label(
+        self,
+        pair_id: int,
+        verdict: str,
+        labeled_at: str,
+        note: str | None = None,
+        reasons: tuple[str, ...] = (),
+    ) -> int:
+        """Insert a label whose verdict came from outside this database.
+
+        Used by ``build-queue`` to pre-apply labels carried over from the label
+        vault: the verdict / reasons / note / ``labeled_at`` come from the
+        vault entry verbatim, so a rebuilt queue still reports the pair as
+        labeled without inventing a new timestamp.
 
         Raises:
             ValueError: If ``verdict`` is not one of ``match``,
@@ -483,7 +591,7 @@ class ReviewDb:
             raise ValueError(f"invalid verdict {verdict!r}")
         cursor = self._conn.execute(
             "INSERT INTO label (pair_id, verdict, note, labeled_at) VALUES (?, ?, ?, ?)",
-            (pair_id, verdict, note, _now()),
+            (pair_id, verdict, note, labeled_at),
         )
         row_id = cursor.lastrowid
         if row_id is None:  # pragma: no cover
@@ -524,6 +632,8 @@ __all__ = [
     "VERDICT_MATCH",
     "VERDICT_NO_MATCH",
     "VERDICT_UNSURE",
+    "CurrentLabelRow",
+    "LabelInsertResult",
     "LanguageProgress",
     "PairInsert",
     "ProgressCounts",

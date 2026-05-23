@@ -13,7 +13,7 @@ from uvicorn import run as uvicorn_run
 from pd_groundtruth.review.app import create_app
 
 
-def serve(db_path: Path, host: str, port: int) -> None:
+def serve(db_path: Path, vault_path: Path, host: str, port: int) -> None:
     """Bind ``db_path`` into the app and serve it on ``host:port``.
 
     The server is run on the pure-stdlib asyncio event loop (``loop="asyncio"``)
@@ -35,6 +35,7 @@ def serve(db_path: Path, host: str, port: int) -> None:
 
     Args:
         db_path: Path to the SQLite ``review.db`` to label against.
+        vault_path: Path to the durable JSONL label vault to append into.
         host: Interface to bind (default a loopback address for local use).
         port: TCP port to listen on.
 
@@ -43,7 +44,7 @@ def serve(db_path: Path, host: str, port: int) -> None:
     """
     if not db_path.exists():
         raise FileNotFoundError(f"review database not found: {db_path}")
-    application = create_app(db_path)
+    application = create_app(db_path, vault_path)
     try:
         uvicorn_run(application, host=host, port=port, loop="asyncio", lifespan="off")
     except KeyboardInterrupt:
