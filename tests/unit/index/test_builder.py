@@ -159,3 +159,45 @@ def test_build_index_skips_registrations_without_regnum(tmp_path: Path) -> None:
         record = decode_reg(blob)
         assert record.regnum is None
         assert record.was_renewed is False
+
+
+def test_build_index_projects_renewal_fields_onto_matched_registration(tmp_path: Path) -> None:
+    """When a registration's renewal joins, the indexed record carries the renewal projection."""
+    reg_dir, ren_dir = _seed_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        blob = store.reg_by_id.get(b"UUID-0001")
+        assert blob is not None
+        record = decode_reg(blob)
+
+    assert record.was_renewed is True
+    assert record.renewal_id == "R200001"
+    assert record.renewal_oreg == "A111111"
+    assert record.renewal_rdat == date(1968, 5, 15)
+    assert record.renewal_author == "Smith, John"
+    assert record.renewal_title == "A study of widgets"
+    assert record.renewal_claimants == "Acme Press|PWH"
+    assert record.renewal_new_matter is None
+
+
+def test_build_index_renewal_fields_none_for_unrenewed_registration(tmp_path: Path) -> None:
+    """Registrations without a renewal join carry ``None`` across the renewal projection."""
+    reg_dir, ren_dir = _seed_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        blob = store.reg_by_id.get(b"UUID-0003")
+        assert blob is not None
+        record = decode_reg(blob)
+
+    assert record.was_renewed is False
+    assert record.renewal_id is None
+    assert record.renewal_oreg is None
+    assert record.renewal_rdat is None
+    assert record.renewal_author is None
+    assert record.renewal_title is None
+    assert record.renewal_claimants is None
+    assert record.renewal_new_matter is None

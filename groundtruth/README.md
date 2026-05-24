@@ -196,12 +196,19 @@ database, so you can stop and resume any time.
 **Each card** shows the MARC record (left) against the proposed CCE candidate
 (right), the per-field evidence bars, the overall score and confidence band, and
 the **renewal flag** — the public-domain tell (a registration that was *not*
-renewed is the signal we care about). The CCE panel shows author place,
-claimant flag, edition, publication places, physical description,
-new-matter-claimed, copies, notes, copyright date, affidavit date, notice
-date, the LCCN (linked to lccn.loc.gov for cross-referencing), and any
-previous registration numbers — every field the parser was able to extract
-from the CCE source.
+renewed is the signal we care about). Next to the renewal flag the card shows
+the **matcher's predicted Cornell status** (the Phase 5 rule engine's verdict
+for the pair) as a colored chip: green for any `PD_*` status, red for any
+`IN_COPYRIGHT_*` status, grey for unknown / unresolved. When a registration
+was renewed, a **renewal-details** sub-block also appears with the renewal
+date, the claimants as transcribed on the renewal (with a warning marker
+when they differ from the registration's claimants), any new-matter the
+renewal claimed, and the renewal's id / oreg as compact metadata. The CCE
+panel shows author place, claimant flag, edition, publication places,
+physical description, new-matter-claimed, copies, notes, copyright date,
+affidavit date, notice date, the LCCN (linked to lccn.loc.gov for
+cross-referencing), and any previous registration numbers — every field
+the parser was able to extract from the CCE source.
 
 **Label with the keyboard.** The UI auto-advances to the next unlabeled pair, and
 every keypress writes to `review.db`:
@@ -323,6 +330,10 @@ review_pair (id PK, language, decade, score, band, source,
              cce_author_is_claimant, cce_copies, cce_aff_date, cce_desc,
              cce_notes, cce_new_matter_claimed, cce_copy_date,
              cce_notice_date, cce_lccn, cce_prev_regnums,
+             cce_predicted_status,
+             cce_renewal_id, cce_renewal_oreg, cce_renewal_rdat,
+             cce_renewal_author, cce_renewal_title,
+             cce_renewal_claimants, cce_renewal_new_matter,
              evidence_json, created_at)
 label       (id PK, pair_id FK→review_pair, verdict, reason, note,
              labeled_at)

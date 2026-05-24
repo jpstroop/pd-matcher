@@ -99,7 +99,10 @@ class IndexedNyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     The matcher always cares whether a registration was renewed, so the join
     against ``ren_by_oreg`` is performed once during index build and baked
     into this struct rather than re-evaluated per candidate at match time.
-    All other fields mirror :class:`NyplRegRecord` exactly.
+    When the join lands a matching :class:`NyplRenRecord`, a projection of
+    that renewal (date, claimants, new matter, etc.) is also copied across
+    so downstream consumers can show renewal details without a second LMDB
+    lookup. All non-renewal fields mirror :class:`NyplRegRecord` exactly.
     """
 
     uuid: str
@@ -130,19 +133,45 @@ class IndexedNyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     """Mirrors :attr:`NyplRegRecord.lccn`."""
     prev_regnums: tuple[str, ...] = ()
     """Mirrors :attr:`NyplRegRecord.prev_regnums`."""
+    renewal_id: str | None = None
+    """Mirrors :attr:`NyplRenRecord.id` when a renewal joined this
+    registration; otherwise ``None``."""
+    renewal_oreg: str | None = None
+    """Mirrors :attr:`NyplRenRecord.oreg` (the original registration number
+    the renewal points back at)."""
+    renewal_rdat: date | None = None
+    """Mirrors :attr:`NyplRenRecord.rdat` (renewal-recording date)."""
+    renewal_author: str | None = None
+    """Mirrors :attr:`NyplRenRecord.author` as transcribed on the renewal."""
+    renewal_title: str | None = None
+    """Mirrors :attr:`NyplRenRecord.title` as transcribed on the renewal."""
+    renewal_claimants: str | None = None
+    """Mirrors :attr:`NyplRenRecord.claimants` as transcribed on the renewal."""
+    renewal_new_matter: str | None = None
+    """Mirrors :attr:`NyplRenRecord.new_matter` as transcribed on the renewal."""
 
 
-def index_reg(record: NyplRegRecord, *, was_renewed: bool) -> IndexedNyplRegRecord:
+def index_reg(
+    record: NyplRegRecord,
+    *,
+    was_renewed: bool,
+    renewal: NyplRenRecord | None = None,
+) -> IndexedNyplRegRecord:
     """Copy a parsed :class:`NyplRegRecord` into an :class:`IndexedNyplRegRecord`.
 
     Args:
         record: The parser output to wrap.
         was_renewed: Pre-resolved renewal status; ``True`` when a matching
             renewal entry exists in ``ren_by_oreg``.
+        renewal: The matching :class:`NyplRenRecord` whose fields should be
+            projected onto the indexed record. May be ``None`` even when
+            ``was_renewed`` is ``True`` (e.g. legacy indices that did not
+            carry the projection); in that case the ``renewal_*`` fields
+            default to ``None``.
 
     Returns:
         A new :class:`IndexedNyplRegRecord` with the same field values plus
-        the supplied ``was_renewed`` flag.
+        the supplied ``was_renewed`` flag and the renewal projection.
     """
     return IndexedNyplRegRecord(
         uuid=record.uuid,
@@ -167,6 +196,13 @@ def index_reg(record: NyplRegRecord, *, was_renewed: bool) -> IndexedNyplRegReco
         notice_date=record.notice_date,
         lccn=record.lccn,
         prev_regnums=record.prev_regnums,
+        renewal_id=renewal.id if renewal is not None else None,
+        renewal_oreg=renewal.oreg if renewal is not None else None,
+        renewal_rdat=renewal.rdat if renewal is not None else None,
+        renewal_author=renewal.author if renewal is not None else None,
+        renewal_title=renewal.title if renewal is not None else None,
+        renewal_claimants=renewal.claimants if renewal is not None else None,
+        renewal_new_matter=renewal.new_matter if renewal is not None else None,
     )
 
 

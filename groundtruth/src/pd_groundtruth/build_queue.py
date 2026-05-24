@@ -138,6 +138,7 @@ def _build_pair_insert(
     score: float,
     band: str,
     source: str,
+    predicted_status: str | None,
 ) -> PairInsert:
     """Assemble a :class:`PairInsert` snapshot from one matched record."""
     return PairInsert(
@@ -174,6 +175,14 @@ def _build_pair_insert(
         cce_notice_date=_iso_or_none(matched_nypl.notice_date),
         cce_lccn=matched_nypl.lccn,
         cce_prev_regnums=_join_prev_regnums(matched_nypl.prev_regnums),
+        cce_predicted_status=predicted_status,
+        cce_renewal_id=matched_nypl.renewal_id,
+        cce_renewal_oreg=matched_nypl.renewal_oreg,
+        cce_renewal_rdat=_iso_or_none(matched_nypl.renewal_rdat),
+        cce_renewal_author=matched_nypl.renewal_author,
+        cce_renewal_title=matched_nypl.renewal_title,
+        cce_renewal_claimants=matched_nypl.renewal_claimants,
+        cce_renewal_new_matter=matched_nypl.renewal_new_matter,
     )
 
 
@@ -277,6 +286,7 @@ class StratifyingResultWriter:
         language = _language_of(marc)
         score = match.best.combined.calibrated
         band = band_of(score)
+        predicted_status = assessment.status.name
         if band == BAND_BELOW:
             pair = _build_pair_insert(
                 marc,
@@ -286,6 +296,7 @@ class StratifyingResultWriter:
                 score=score,
                 band=BAND_BELOW,
                 source=SOURCE_BELOW_SAMPLE,
+                predicted_status=predicted_status,
             )
             self._below_buffer.setdefault(language, []).append(
                 _BufferedCandidate(language=language, score=score, pair=pair)
@@ -302,6 +313,7 @@ class StratifyingResultWriter:
             score=score,
             band=band,
             source=SOURCE_BANDED,
+            predicted_status=predicted_status,
         )
         self._insert_with_vault(db, pair)
         self._kept[key] = self._kept.get(key, 0) + 1
@@ -546,6 +558,8 @@ def build_queue(
         index_path=index_path,
         matching_config=matching_config,
         pairing_config=pairing_config,
+        ruleset=ruleset,
+        copyright_config=copyright_config,
         idf=idf,
         calibrator=calibrator,
     )

@@ -28,6 +28,22 @@
     .renewal.Renewed { background: #fdecea; color: var(--no); }
     .renewal.Not.renewed, .renewal.notrenewed { background: #e9f6ec; color: var(--match); }
     .renewal.unknown { background: #eee; color: var(--muted); }
+    .status { display: inline-block; padding: .1rem .5rem; border-radius: 999px;
+              font-size: .72rem; font-weight: 600; letter-spacing: .02em; }
+    .status-pd { background: #e9f6ec; color: var(--match); }
+    .status-in_copyright { background: #fdecea; color: var(--no); }
+    .status-unknown { background: #eee; color: var(--muted); }
+    .renewal-details { margin: .6rem 0 .2rem; padding: .55rem .7rem;
+                        border: 1px solid var(--line); border-radius: 8px;
+                        background: #fafafb; }
+    .renewal-details-heading { font-size: .72rem; text-transform: uppercase;
+                                letter-spacing: .06em; color: var(--muted);
+                                margin-bottom: .3rem; }
+    .renewal-meta { display: flex; flex-wrap: wrap; gap: .8rem;
+                     font-size: .78rem; color: var(--muted); margin-top: .35rem; }
+    .renewal-meta code { background: #eef1ff; color: var(--accent);
+                          padding: 0 .35rem; border-radius: 4px; }
+    .claimants-diff { color: var(--unsure); font-weight: 700; cursor: help; }
     .nav-back { margin-bottom: .8rem; }
     .nav-back a { color: var(--accent); text-decoration: none; font-size: .9rem; }
     .nav-back a:hover { text-decoration: underline; }

@@ -51,6 +51,19 @@
     {% if card.cce_lccn %}<div class="field"><div class="k">lccn</div><div class="v"><a href="{{ card.cce_lccn_url }}" target="_blank" rel="noopener noreferrer">{{ card.cce_lccn }}</a></div></div>{% endif %}
     {% if card.cce_prev_regnums %}<div class="field"><div class="k">previous registrations</div><div class="v">{{ card.cce_prev_regnums | join("; ") }}</div></div>{% endif %}
     <div class="field"><div class="k">renewal</div><div class="v"><span class="renewal {{ card.cce_renewal_label | replace(' ', '') }}">{{ card.cce_renewal_label }}</span></div></div>
+    {% if card.predicted_status %}<div class="field"><div class="k">predicted status</div><div class="v"><span class="status status-{{ card.predicted_status_family }}" title="{{ card.predicted_status }}">{{ card.predicted_status }}</span></div></div>{% endif %}
+    {% if card.cce_has_renewal_details %}<div class="renewal-details">
+      <div class="renewal-details-heading">Renewal details</div>
+      {% if card.cce_renewal_rdat %}<div class="field"><div class="k">renewal date</div><div class="v">{{ card.cce_renewal_rdat.isoformat() }}</div></div>{% endif %}
+      {% if card.cce_renewal_claimants %}<div class="field"><div class="k">renewal claimants</div><div class="v">{{ card.cce_renewal_claimants }}{% if card.cce_renewal_claimants_differ %} <span class="claimants-diff" title="Differs from registration claimants">&#9888;</span>{% endif %}</div></div>{% endif %}
+      {% if card.cce_renewal_new_matter %}<div class="field"><div class="k">new matter (renewal)</div><div class="v cce-new-matter">{{ card.cce_renewal_new_matter }}</div></div>{% endif %}
+      {% if card.cce_renewal_author %}<div class="field"><div class="k">renewal author</div><div class="v">{{ card.cce_renewal_author }}</div></div>{% endif %}
+      {% if card.cce_renewal_title %}<div class="field"><div class="k">renewal title</div><div class="v">{{ card.cce_renewal_title }}</div></div>{% endif %}
+      {% if card.cce_renewal_id or card.cce_renewal_oreg %}<div class="renewal-meta">
+        {% if card.cce_renewal_id %}<span>renewal id <code>{{ card.cce_renewal_id }}</code></span>{% endif %}
+        {% if card.cce_renewal_oreg %}<span>oreg <code>{{ card.cce_renewal_oreg }}</code></span>{% endif %}
+      </div>{% endif %}
+    </div>{% endif %}
     {% if card.cce_edition %}<div class="field"><div class="k">edition</div><div class="v">{{ card.cce_edition }}</div></div>{% endif %}
     {% if card.cce_publication_places %}<div class="field"><div class="k">publication places</div><div class="v">{{ card.cce_publication_places | join("; ") }}</div></div>{% endif %}
     {% if card.cce_desc %}<div class="field"><div class="k">description</div><div class="v">{{ card.cce_desc }}</div></div>{% endif %}
