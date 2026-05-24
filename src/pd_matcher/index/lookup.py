@@ -16,7 +16,11 @@ from types import TracebackType
 from typing import Self
 
 from msgspec import Struct
+from msgspec.msgpack import Decoder
 
+from pd_matcher.copyright.coverage import LEGACY_COVERAGE
+from pd_matcher.copyright.coverage import Coverage
+from pd_matcher.copyright.coverage import coverage_from_year_counts
 from pd_matcher.index.codec import decode_reg
 from pd_matcher.index.codec import decode_ren
 from pd_matcher.index.codec import decode_uuid_list
@@ -37,6 +41,10 @@ _META_REG_COUNT_KEY = b"registrations_written"
 _META_REN_COUNT_KEY = b"renewals_written"
 _META_RENEWAL_JOINS_KEY = b"renewal_joins"
 _META_YEAR_BUCKETS_KEY = b"year_buckets"
+_META_REG_YEAR_COUNTS_KEY = b"reg_year_counts"
+_META_REN_YEAR_COUNTS_KEY = b"ren_year_counts"
+
+_YEAR_COUNTS_DECODER: Decoder[dict[int, int]] = Decoder(dict[int, int])
 
 
 class IndexStats(Struct, frozen=True, forbid_unknown_fields=True):
@@ -206,6 +214,29 @@ class NyplIndexLookup:
             if record is not None:
                 yield record
 
+    def coverage(self) -> Coverage:
+        """Return the :class:`Coverage` derived from the index's year histograms.
+
+        Reads the per-year reg/ren count blobs from the ``meta`` sub-DB
+        and dispatches to
+        :func:`~pd_matcher.copyright.coverage.coverage_from_year_counts`.
+        Falls back to
+        :data:`~pd_matcher.copyright.coverage.LEGACY_COVERAGE` when
+        either histogram is missing (legacy indices built before the
+        histograms were persisted), so callers always receive a valid
+        struct without rebuilding.
+        """
+        reg_blob = self._store.meta.get(_META_REG_YEAR_COUNTS_KEY)
+        ren_blob = self._store.meta.get(_META_REN_YEAR_COUNTS_KEY)
+        if reg_blob is None or ren_blob is None:
+            return LEGACY_COVERAGE
+        reg_counts = _YEAR_COUNTS_DECODER.decode(reg_blob)
+        ren_counts = _YEAR_COUNTS_DECODER.decode(ren_blob)
+        return coverage_from_year_counts(
+            reg_counts=reg_counts,
+            ren_counts=ren_counts,
+        )
+
     def stats(self) -> IndexStats:
         """Return the build metadata persisted alongside the index.
 
@@ -244,6 +275,7 @@ class NyplIndexLookup:
 
 
 __all__ = [
+    "Coverage",
     "IndexStats",
     "NyplIndexLookup",
 ]

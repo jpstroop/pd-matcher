@@ -4,9 +4,27 @@ from pytest import fixture
 
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.copyright import default_ruleset
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.copyright.facts import Facts
 
 AS_OF_YEAR: int = 2026
+
+WIDE_COVERAGE: Coverage = Coverage(
+    reg_min_year=1800,
+    ren_min_year=1800,
+    reg_max_year=2100,
+    ren_max_year=2100,
+)
+"""Coverage struct wide enough to neutralize coverage-guard short-circuits.
+
+Test cases that exist to exercise a specific rule (not the coverage
+mechanism) pass this so absence-of-evidence rules fire regardless of
+pub-year. Production callers should never construct a coverage this
+wide; use
+:func:`~pd_matcher.copyright.coverage.coverage_from_year_counts` instead,
+which respects the
+:data:`~pd_matcher.copyright.coverage.HARD_REG_MAX_YEAR` legal cap.
+"""
 
 
 def make_facts(
@@ -43,3 +61,9 @@ def as_of_year() -> int:
 def ruleset() -> CopyrightRuleSet:
     """The shipped Cornell ruleset."""
     return default_ruleset()
+
+
+@fixture
+def wide_coverage() -> Coverage:
+    """Return :data:`WIDE_COVERAGE` for tests that bypass the coverage guard."""
+    return WIDE_COVERAGE

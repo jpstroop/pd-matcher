@@ -30,6 +30,17 @@ _YEAR_END = 11
 _GOVERNMENT_PUBLICATION_POSITION = 28
 
 _CCE_MAX_YEAR = 1977
+"""Acquire-time upper bound on publication year.
+
+Reflects the legal regime boundary (last day of 1909-Act registrations
+per Copyright Office Circular 23) rather than corpus completeness. The
+ground-truth corpus only enrolls records that *could* be matched against
+a CCE registration, so anything published after the 1909 Act ended is
+out of scope regardless of how complete the index becomes. Runtime rule
+evaluation uses a separate
+:class:`~pd_matcher.copyright.coverage.Coverage` derived from the index
+to decide when absence-of-registration is meaningful evidence.
+"""
 _SUPPORTED_LANGUAGES = frozenset({"eng", "fre", "ger", "spa", "ita"})
 _NON_GOVERNMENT_CODES = frozenset({" ", "|"})
 

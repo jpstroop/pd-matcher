@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pytest import raises
 
+from pd_matcher.copyright.coverage import LEGACY_COVERAGE
 from pd_matcher.index.builder import build_index
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.index.store import NyplIndexStore
@@ -245,7 +246,7 @@ def test_stats_reflect_build_report(tmp_path: Path) -> None:
     out_path = _build_tiny_index(tmp_path)
     with NyplIndexLookup(out_path) as lookup:
         stats = lookup.stats()
-    assert stats.schema_version == 4
+    assert stats.schema_version == 5
     assert stats.registrations_written == 9
     assert stats.renewals_written == 4
     assert stats.renewal_joins == 2
@@ -261,3 +262,23 @@ def test_stats_raises_when_meta_is_incomplete(tmp_path: Path) -> None:
         pass
     with NyplIndexLookup(env_path) as lookup, raises(RuntimeError, match="meta sub-DB"):
         lookup.stats()
+
+
+def test_coverage_derived_from_built_index(tmp_path: Path) -> None:
+    """A built index exposes a coverage struct derived from the year histograms."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        coverage = lookup.coverage()
+    assert coverage.reg_min_year >= 1900
+    assert coverage.reg_max_year <= 1977
+    assert coverage.ren_min_year >= 1900
+    assert coverage.ren_max_year <= 2005
+
+
+def test_coverage_falls_back_to_legacy_when_meta_missing(tmp_path: Path) -> None:
+    """An env without per-year count blobs returns :data:`LEGACY_COVERAGE`."""
+    env_path = tmp_path / "idx.lmdb"
+    with NyplIndexStore(env_path):
+        pass
+    with NyplIndexLookup(env_path) as lookup:
+        assert lookup.coverage() == LEGACY_COVERAGE

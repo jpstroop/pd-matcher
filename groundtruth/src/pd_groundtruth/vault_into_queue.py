@@ -27,6 +27,8 @@ from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
+from pd_matcher.copyright.coverage import LEGACY_COVERAGE
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.copyright.facts import build_facts
 from pd_matcher.copyright.rules import assess
 from pd_matcher.index.lookup import NyplIndexLookup
@@ -75,6 +77,7 @@ class BackfillSummary(Struct, frozen=True, forbid_unknown_fields=True):
 def _make_vault_pair_builder(
     ruleset: CopyrightRuleSet,
     copyright_config: CopyrightAssessmentConfig,
+    coverage: Coverage,
 ) -> BuildPairFn:
     """Build a closure that projects scored vault pairs into ``PairInsert`` rows.
 
@@ -104,6 +107,7 @@ def _make_vault_pair_builder(
         assessment = assess(
             facts,
             ruleset,
+            coverage=coverage,
             enable_assumptions=copyright_config.enable_assumptions,
         )
         return _build_pair_insert(
@@ -128,6 +132,7 @@ def run_backfill(
     cce_lookup: CceLookupFn,
     score_pair: ScorePairFn,
     build_pair: BuildPairFn | None = None,
+    coverage: Coverage = LEGACY_COVERAGE,
 ) -> BackfillSummary:
     """Open ``db_path``, compute the missing set, and backfill it.
 
@@ -151,7 +156,11 @@ def run_backfill(
     project = (
         build_pair
         if build_pair is not None
-        else _make_vault_pair_builder(load_default_ruleset(), CopyrightAssessmentConfig())
+        else _make_vault_pair_builder(
+            load_default_ruleset(),
+            CopyrightAssessmentConfig(),
+            coverage,
+        )
     )
     with ReviewDb.connect(db_path) as db:
         existing = db.pair_keys()
@@ -262,6 +271,7 @@ def vault_into_queue(
             marc_lookup=marc_by_id.get,
             cce_lookup=lookup.get_registration,
             score_pair=score_pair,
+            coverage=lookup.coverage(),
         )
 
 

@@ -17,6 +17,7 @@ from pd_matcher.match.result import CandidateMatch
 from pd_matcher.match.result import MatchResult
 from pd_matcher.models import MarcRecord
 from tests.unit.copyright.conftest import AS_OF_YEAR
+from tests.unit.copyright.conftest import WIDE_COVERAGE
 from tests.unit.copyright.conftest import make_facts
 
 
@@ -61,9 +62,14 @@ def _marc(
 
 
 def test_assess_record_uses_shipped_ruleset_by_default() -> None:
-    """No explicit ruleset -> the shipped Cornell matrix is used."""
+    """No explicit ruleset -> the shipped Cornell matrix is used.
+
+    A wide :class:`Coverage` is passed so the 1985 no-registration rule
+    can fire under the shipped Cornell matrix without being short-
+    circuited by the coverage guard.
+    """
     marc = _marc(publication_year=1985, country_code="nyu")
-    result = assess_record(marc, None, as_of_year=AS_OF_YEAR)
+    result = assess_record(marc, None, as_of_year=AS_OF_YEAR, coverage=WIDE_COVERAGE)
     assert result.status is CopyrightStatus.PD_US_PUB_NO_REGISTRATION_1978_1989
 
 

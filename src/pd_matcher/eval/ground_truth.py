@@ -39,6 +39,7 @@ from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.copyright import default_ruleset
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.copyright.facts import build_facts
 from pd_matcher.copyright.rules import assess
 from pd_matcher.copyright.status import CopyrightStatus
@@ -94,6 +95,7 @@ class _WorkerState:
         "as_of_year",
         "combiner",
         "copyright_config",
+        "coverage",
         "idf",
         "lookup",
         "matching_config",
@@ -118,6 +120,7 @@ class _WorkerState:
         self.copyright_config = copyright_config
         self.pairings = compile_pairings(pairing_config)
         self.as_of_year = as_of_year
+        self.coverage: Coverage = self.lookup.coverage()
 
 
 _WORKER_STATE: _WorkerState | None = None
@@ -231,6 +234,7 @@ def _eval_one_row(
     assessment = assess(
         facts,
         state.ruleset,
+        coverage=state.coverage,
         enable_assumptions=state.copyright_config.enable_assumptions,
     )
     gt_id = _maybe(row.get("match_source_id", ""))

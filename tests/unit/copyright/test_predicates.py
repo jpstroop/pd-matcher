@@ -1,11 +1,14 @@
 """Tests for :mod:`pd_matcher.copyright.predicates`."""
 
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.copyright.predicates import country_delayed_uraa
 from pd_matcher.copyright.predicates import country_is_foreign
 from pd_matcher.copyright.predicates import country_is_us
 from pd_matcher.copyright.predicates import country_no_treaty
 from pd_matcher.copyright.predicates import in_pd_by_age
 from pd_matcher.copyright.predicates import match_confidence_at_least
+from pd_matcher.copyright.predicates import pub_year_in_reg_coverage
+from pd_matcher.copyright.predicates import pub_year_in_ren_coverage
 from pd_matcher.copyright.predicates import published_before
 from pd_matcher.copyright.predicates import published_between
 from pd_matcher.copyright.predicates import published_on_or_after
@@ -88,3 +91,37 @@ def test_match_confidence_at_least_threshold() -> None:
     assert match_confidence_at_least(facts, 0.95) is True
     assert match_confidence_at_least(facts, 0.90) is True
     assert match_confidence_at_least(facts, 0.96) is False
+
+
+_NARROW_COVERAGE: Coverage = Coverage(
+    reg_min_year=1931,
+    reg_max_year=1977,
+    ren_min_year=1959,
+    ren_max_year=2005,
+)
+
+
+def test_pub_year_in_reg_coverage_handles_missing_year() -> None:
+    """A missing ``pub_year`` is treated as out of coverage."""
+    assert pub_year_in_reg_coverage(make_facts(pub_year=None), _NARROW_COVERAGE) is False
+
+
+def test_pub_year_in_reg_coverage_boundaries() -> None:
+    """Boundaries are inclusive."""
+    assert pub_year_in_reg_coverage(make_facts(pub_year=1931), _NARROW_COVERAGE) is True
+    assert pub_year_in_reg_coverage(make_facts(pub_year=1977), _NARROW_COVERAGE) is True
+    assert pub_year_in_reg_coverage(make_facts(pub_year=1930), _NARROW_COVERAGE) is False
+    assert pub_year_in_reg_coverage(make_facts(pub_year=1978), _NARROW_COVERAGE) is False
+
+
+def test_pub_year_in_ren_coverage_handles_missing_year() -> None:
+    """A missing ``pub_year`` is treated as out of coverage."""
+    assert pub_year_in_ren_coverage(make_facts(pub_year=None), _NARROW_COVERAGE) is False
+
+
+def test_pub_year_in_ren_coverage_uses_28_year_window() -> None:
+    """``ren_coverage`` walks ``pub_year + 28`` against the renewal window."""
+    assert pub_year_in_ren_coverage(make_facts(pub_year=1931), _NARROW_COVERAGE) is True
+    assert pub_year_in_ren_coverage(make_facts(pub_year=1977), _NARROW_COVERAGE) is True
+    assert pub_year_in_ren_coverage(make_facts(pub_year=1930), _NARROW_COVERAGE) is False
+    assert pub_year_in_ren_coverage(make_facts(pub_year=1978), _NARROW_COVERAGE) is False

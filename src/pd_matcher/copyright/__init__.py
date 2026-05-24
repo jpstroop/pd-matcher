@@ -21,6 +21,8 @@ from importlib.resources import files
 from pd_matcher.config.loader import load_copyright_rules
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.copyright.assessment import CopyrightAssessment
+from pd_matcher.copyright.coverage import LEGACY_COVERAGE
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.copyright.facts import Facts
 from pd_matcher.copyright.facts import build_facts
 from pd_matcher.copyright.rules import RuleEvaluationError
@@ -53,6 +55,7 @@ def assess_record(
     as_of_year: int | None = None,
     matched_nypl: IndexedNyplRegRecord | None = None,
     ruleset: CopyrightRuleSet | None = None,
+    coverage: Coverage = LEGACY_COVERAGE,
     enable_assumptions: bool = True,
 ) -> CopyrightAssessment:
     """Return a :class:`CopyrightAssessment` for one MARC record.
@@ -70,6 +73,9 @@ def assess_record(
             (e.g. US-government detection) on the registration side.
         ruleset: An override ruleset; defaults to the shipped Cornell
             matrix.
+        coverage: The pub-year range over which the index's
+            registration / renewal evidence is reliable. Defaults to
+            :data:`~pd_matcher.copyright.coverage.LEGACY_COVERAGE`.
         enable_assumptions: When ``False``, predicates that surface a
             documented assumption are treated as ``False`` so they
             cannot gate a rule.
@@ -85,12 +91,19 @@ def assess_record(
         matched_nypl=matched_nypl,
     )
     active_ruleset = ruleset if ruleset is not None else _DEFAULT_RULESET
-    return assess(facts, active_ruleset, enable_assumptions=enable_assumptions)
+    return assess(
+        facts,
+        active_ruleset,
+        coverage=coverage,
+        enable_assumptions=enable_assumptions,
+    )
 
 
 __all__ = [
+    "LEGACY_COVERAGE",
     "CopyrightAssessment",
     "CopyrightStatus",
+    "Coverage",
     "Facts",
     "RuleEvaluationError",
     "assess",

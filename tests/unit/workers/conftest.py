@@ -19,6 +19,8 @@ from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
+from pd_matcher.copyright.coverage import LEGACY_COVERAGE
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.index.builder import build_index
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.idf import IdfTable
@@ -92,3 +94,9 @@ def pairing_config() -> PairingConfig:
 def compiled_pairings(pairing_config: PairingConfig) -> CompiledPairings:
     """Return the shipped default pairings compiled for the pipeline."""
     return compile_pairings(pairing_config)
+
+
+@fixture
+def coverage() -> Coverage:
+    """Return :data:`LEGACY_COVERAGE` for worker tests that don't need a tuned coverage."""
+    return LEGACY_COVERAGE

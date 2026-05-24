@@ -3,6 +3,7 @@
 from datetime import date
 
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
+from pd_matcher.copyright.coverage import LEGACY_COVERAGE
 from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.result import CandidateMatch
@@ -54,7 +55,9 @@ def _candidate(score: float) -> CandidateMatch:
 
 
 def test_make_vault_pair_builder_projects_scored_candidate_into_pair_insert() -> None:
-    builder = _make_vault_pair_builder(load_default_ruleset(), CopyrightAssessmentConfig())
+    builder = _make_vault_pair_builder(
+        load_default_ruleset(), CopyrightAssessmentConfig(), LEGACY_COVERAGE
+    )
     pair = builder(_marc(), _cce(), _candidate(0.95))
     assert pair.marc_control_id == "ctrl-1"
     assert pair.nypl_uuid == "uuid-1"
@@ -66,7 +69,9 @@ def test_make_vault_pair_builder_projects_scored_candidate_into_pair_insert() ->
 
 
 def test_make_vault_pair_builder_uses_today_when_copyright_year_unset() -> None:
-    builder = _make_vault_pair_builder(load_default_ruleset(), CopyrightAssessmentConfig())
+    builder = _make_vault_pair_builder(
+        load_default_ruleset(), CopyrightAssessmentConfig(), LEGACY_COVERAGE
+    )
     pair = builder(_marc(), _cce(), _candidate(0.42))
     assert pair.band == "below"
     assert pair.cce_predicted_status is not None
@@ -74,7 +79,9 @@ def test_make_vault_pair_builder_uses_today_when_copyright_year_unset() -> None:
 
 def test_make_vault_pair_builder_honors_explicit_as_of_year() -> None:
     builder = _make_vault_pair_builder(
-        load_default_ruleset(), CopyrightAssessmentConfig(as_of_year=date.today().year - 50)
+        load_default_ruleset(),
+        CopyrightAssessmentConfig(as_of_year=date.today().year - 50),
+        LEGACY_COVERAGE,
     )
     pair = builder(_marc(), _cce(), _candidate(0.95))
     assert pair.cce_predicted_status is not None

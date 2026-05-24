@@ -5,10 +5,12 @@ from pytest import raises
 from pd_matcher.config.schemas import CopyrightRule
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import PredicateCall
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.copyright.rules import RuleEvaluationError
 from pd_matcher.copyright.rules import assess
 from pd_matcher.copyright.rules import registered_predicate_names
 from pd_matcher.copyright.status import CopyrightStatus
+from tests.unit.copyright.conftest import WIDE_COVERAGE
 from tests.unit.copyright.conftest import make_facts
 
 
@@ -119,6 +121,19 @@ def test_float_predicate_rejects_wrong_arity() -> None:
     )
     facts = make_facts(pub_year=1985, pub_country_code="nyu")
     with raises(RuleEvaluationError, match="expects 1 arg"):
+        assess(facts, _ruleset_for(rule))
+
+
+def test_coverage_predicate_rejects_args() -> None:
+    """Coverage-aware predicates take no positional arguments."""
+    rule = CopyrightRule(
+        name="bad_arity",
+        when=[PredicateCall(predicate="pub_year_in_reg_coverage", args=(1931,))],
+        then="UNKNOWN_NO_RULE_MATCHED",
+        explanation="x",
+    )
+    facts = make_facts(pub_year=1985, pub_country_code="nyu")
+    with raises(RuleEvaluationError, match="expects no args"):
         assess(facts, _ruleset_for(rule))
 
 
@@ -264,6 +279,8 @@ def test_registered_predicate_names_includes_every_registered_predicate() -> Non
         "has_us_notice",
         "is_us_government_work",
         "foreign_in_pd_home_country_1996",
+        "pub_year_in_reg_coverage",
+        "pub_year_in_ren_coverage",
     }
     assert names == expected
 
@@ -338,7 +355,7 @@ def test_shipped_us_pub_1978_1989_no_registration(
         pub_country_code="nyu",
         was_registered=False,
     )
-    result = assess(facts, ruleset)
+    result = assess(facts, ruleset, coverage=WIDE_COVERAGE)
     assert result.status is CopyrightStatus.PD_US_PUB_NO_REGISTRATION_1978_1989
 
 
@@ -348,7 +365,7 @@ def test_shipped_us_pub_1978_1989_registered(ruleset: CopyrightRuleSet) -> None:
         pub_country_code="nyu",
         was_registered=True,
     )
-    result = assess(facts, ruleset)
+    result = assess(facts, ruleset, coverage=WIDE_COVERAGE)
     assert result.status is CopyrightStatus.IN_COPYRIGHT_1978_1989_CURED
 
 
@@ -488,7 +505,7 @@ def test_foreign_registered_1978_1989_cured_follows_category_2(
         pub_country_code="fr",
         was_registered=True,
     )
-    result = assess(facts, ruleset)
+    result = assess(facts, ruleset, coverage=WIDE_COVERAGE)
     assert result.status is CopyrightStatus.IN_COPYRIGHT_1978_1989_CURED
 
 
@@ -536,6 +553,146 @@ def test_foreign_registered_does_not_fire_post_1989(
     )
     result = assess(facts, ruleset)
     assert result.status is not CopyrightStatus.IN_COPYRIGHT_FOREIGN_POST_1989
+
+
+# -----------------------------------------------------------------------
+# Coverage-aware behavior: rules carrying an ``on_coverage_fail`` short  #
+# -circuit to ``UNKNOWN_INSUFFICIENT_COVERAGE`` when the pub-year is     #
+# outside the index's reliable window.                                    #
+# -----------------------------------------------------------------------
+
+
+_NARROW_REG_COVERAGE: Coverage = Coverage(
+    reg_min_year=1931,
+    reg_max_year=1950,
+    ren_min_year=1909,
+    ren_max_year=2005,
+)
+
+
+_NARROW_REN_COVERAGE: Coverage = Coverage(
+    reg_min_year=1931,
+    reg_max_year=1977,
+    ren_min_year=1909,
+    ren_max_year=1959,
+)
+
+
+def test_us_pub_1931_1977_not_registered_fires_inside_reg_coverage(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """A 1940 unregistered US work inside the reg window fires the PD rule."""
+    facts = make_facts(pub_year=1940, pub_country_code="nyu", was_registered=False)
+    result = assess(facts, ruleset, coverage=_NARROW_REG_COVERAGE)
+    assert result.status is CopyrightStatus.PD_US_PUB_NO_NOTICE_1931_1977
+
+
+def test_us_pub_1931_1977_not_registered_insufficient_coverage_outside_window(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """A 1960 unregistered US work outside the reg window surfaces INSUFFICIENT_COVERAGE."""
+    facts = make_facts(pub_year=1960, pub_country_code="nyu", was_registered=False)
+    result = assess(facts, ruleset, coverage=_NARROW_REG_COVERAGE)
+    assert result.status is CopyrightStatus.UNKNOWN_INSUFFICIENT_COVERAGE
+    assert result.matched_rule_name == "us_pub_1931_1977_not_registered_no_notice"
+
+
+def test_registered_1931_1963_not_renewed_fires_inside_ren_coverage(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """A 1931 registered-not-renewed work whose renewal year (1959) is in window fires."""
+    facts = make_facts(
+        pub_year=1931,
+        pub_country_code="nyu",
+        was_registered=True,
+        was_renewed=False,
+    )
+    result = assess(facts, ruleset, coverage=_NARROW_REN_COVERAGE)
+    assert result.status is CopyrightStatus.PD_REGISTERED_NOT_RENEWED
+
+
+def test_registered_1931_1963_not_renewed_insufficient_coverage_outside_window(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """A 1940 registered-not-renewed work whose renewal year (1968) is out of window."""
+    facts = make_facts(
+        pub_year=1940,
+        pub_country_code="nyu",
+        was_registered=True,
+        was_renewed=False,
+    )
+    result = assess(facts, ruleset, coverage=_NARROW_REN_COVERAGE)
+    assert result.status is CopyrightStatus.UNKNOWN_INSUFFICIENT_COVERAGE
+    assert result.matched_rule_name == "registered_1931_1963_not_renewed"
+
+
+def test_us_pub_1978_1989_no_registration_insufficient_coverage_under_legacy(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """Under :data:`LEGACY_COVERAGE` the post-1977 no-reg rule is always insufficient."""
+    facts = make_facts(pub_year=1985, pub_country_code="nyu", was_registered=False)
+    result = assess(facts, ruleset)
+    assert result.status is CopyrightStatus.UNKNOWN_INSUFFICIENT_COVERAGE
+    assert result.matched_rule_name == "us_pub_1978_1989_no_registration"
+
+
+def test_us_pub_1978_1989_registered_cured_insufficient_coverage_under_legacy(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """Under :data:`LEGACY_COVERAGE` the post-1977 cured rule is always insufficient."""
+    facts = make_facts(pub_year=1985, pub_country_code="nyu", was_registered=True)
+    result = assess(facts, ruleset)
+    assert result.status is CopyrightStatus.UNKNOWN_INSUFFICIENT_COVERAGE
+    assert result.matched_rule_name == "registered_1978_1989_cured"
+
+
+def test_foreign_uraa_restored_insufficient_coverage_outside_window(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """A foreign 1960 unregistered work whose reg-year is out of window is insufficient."""
+    facts = make_facts(pub_year=1960, pub_country_code="fr", was_registered=False)
+    result = assess(facts, ruleset, coverage=_NARROW_REG_COVERAGE)
+    assert result.status is CopyrightStatus.UNKNOWN_INSUFFICIENT_COVERAGE
+    assert result.matched_rule_name == "foreign_1931_1977_uraa_restored"
+
+
+def test_coverage_guard_after_other_predicates_does_not_short_circuit(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """A rule whose non-coverage predicates fail moves on to the next rule.
+
+    A 1985 foreign-published unregistered work doesn't satisfy the
+    1931-1977 URAA rule's window, so the coverage guard is irrelevant
+    and the engine continues to ``foreign_1978_2002_pre_1978_creation_floor``
+    instead of short-circuiting to ``UNKNOWN_INSUFFICIENT_COVERAGE``.
+    """
+    facts = make_facts(pub_year=1985, pub_country_code="fr", was_registered=False)
+    result = assess(facts, ruleset)
+    assert result.status is CopyrightStatus.IN_COPYRIGHT_PRE_1978_PUBLISHED_1978_2002_FLOOR
+
+
+def test_negated_coverage_predicate_does_not_trigger_short_circuit(
+    ruleset: CopyrightRuleSet,
+) -> None:
+    """A negated coverage predicate returning False does not surface coverage failure.
+
+    Negation flips the value, so when ``not pub_year_in_reg_coverage`` is
+    True, the predicate is treated as a normal success. The engine does
+    not interpret the False inner result as a coverage failure for a
+    negated predicate.
+    """
+    rule = CopyrightRule(
+        name="negated_coverage_demo",
+        when=[
+            PredicateCall(predicate="pub_year_in_reg_coverage", negate=True),
+        ],
+        then="UNKNOWN_INSUFFICIENT_DATA",
+        on_coverage_fail="UNKNOWN_INSUFFICIENT_COVERAGE",
+        explanation="demo",
+    )
+    facts = make_facts(pub_year=1985, pub_country_code="nyu")
+    result = assess(facts, _ruleset_for(rule))
+    assert result.status is CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA
 
 
 def test_foreign_registered_pre_1923_does_not_fire_pd_home_country(
