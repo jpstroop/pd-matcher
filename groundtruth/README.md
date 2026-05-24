@@ -49,9 +49,13 @@ Who reads the labels:
   1909 Copyright Act** — the legal-regime boundary our `_CCE_MAX_YEAR = 1977`
   reflects. Records from January 1, 1978 onward are under the 1976 Act and
   live only in the online catalog at copyright.gov.
-- **Internet Archive — copyright records mirror**:
-  <https://archive.org/details/copyrightrecords>. Candidate corpus extension
-  for post-1977 data (tracked as a future scope item).
+- **Internet Archive — copyright records collection**:
+  <https://archive.org/details/copyrightrecords>. OCR / scans of the same
+  CCE volumes NYPL transcribed. Same source data, less structured form;
+  doesn't extend our coverage. Useful as a human-readable cross-reference
+  when investigating a specific record. Post-1977 records (under the 1976
+  Act) live only at <https://www.copyright.gov/>, in a different format
+  entirely.
 
 ## Glossary
 
