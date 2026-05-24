@@ -37,6 +37,22 @@ Who reads the labels:
   (`verdict == "match"`), aimed at libraries, archives, and digitization
   programs that need to know which titles in their collections are PD.
 
+## References
+
+- **Cornell University Library — "Copyright Term and the Public Domain in the
+  United States"**: <https://guides.library.cornell.edu/copyright/publicdomain>.
+  The reference matrix the matcher's rule engine encodes.
+- **U.S. Copyright Office — Circular 23, "Copyright Office Records"**:
+  <https://www.copyright.gov/circs/circ23.pdf>. Authoritative breakdown of
+  which copyright records exist for which years and how to access them.
+  Confirms that **December 31, 1977 is the last day of registrations under the
+  1909 Copyright Act** — the legal-regime boundary our `_CCE_MAX_YEAR = 1977`
+  reflects. Records from January 1, 1978 onward are under the 1976 Act and
+  live only in the online catalog at copyright.gov.
+- **Internet Archive — copyright records mirror**:
+  <https://archive.org/details/copyrightrecords>. Candidate corpus extension
+  for post-1977 data (tracked as a future scope item).
+
 ## Glossary
 
 | term | meaning |
