@@ -497,6 +497,31 @@ def test_previous_labeled_respects_language_filter(tmp_path: Path) -> None:
         assert back.id == eng
 
 
+def test_previous_labeled_respects_band_filter(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        below = db.insert_pair(_pair(band="below", control_id="a", nypl_uuid="u-a"))
+        ge90 = db.insert_pair(_pair(band="ge90", control_id="b", nypl_uuid="u-b"))
+        db.add_label(below, VERDICT_MATCH)
+        db.add_label(ge90, VERDICT_MATCH)
+        back = db.previous_labeled(band="below")
+        assert back is not None
+        assert back.id == below
+
+
+def _raise_after_insert(db_path: Path) -> None:
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        raise RuntimeError("boom")
+
+
+def test_connect_context_manager_swallows_commit_when_exception_raised(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    with raises(RuntimeError, match="boom"):
+        _raise_after_insert(db_path)
+    with ReviewDb.connect(db_path) as db:
+        assert db.stratum_counts() == {}
+
+
 def test_add_label_stores_single_reason_and_note(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         pair = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))

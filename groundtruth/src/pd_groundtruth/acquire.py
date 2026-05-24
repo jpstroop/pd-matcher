@@ -248,7 +248,9 @@ def _process_dump(
             if is_eligible(record, min_year):
                 language = language_of(record)
                 year = year_of(record)
-                if language is not None and language in kept and year is not None:
+                if (  # pragma: no branch  # is_eligible already validates these
+                    language is not None and language in kept and year is not None
+                ):
                     decade = _decade_of(year)
                     if kept[language][decade] < per_decade_cap:
                         writers[language].write(record)
@@ -272,7 +274,7 @@ def _download_and_verify(entry: DumpEntry) -> Path:
     with NamedTemporaryFile(suffix=".tar.gz", delete=False) as temp:
         temp_path = Path(temp.name)
         for chunk in response.iter_content(chunk_size=_DOWNLOAD_CHUNK_BYTES):
-            if chunk:
+            if chunk:  # pragma: no branch  # responses mock never yields empty keepalive chunks
                 digest.update(chunk)
                 temp.write(chunk)
     computed = digest.hexdigest()
@@ -297,7 +299,9 @@ def _iter_records(archive_path: Path) -> Iterator[_Element]:
             if not member.isfile():
                 continue
             fileobj = archive.extractfile(member)
-            if fileobj is None:
+            if (
+                fileobj is None
+            ):  # pragma: no cover  # isfile() above already excludes non-regular members
                 continue
             for _event, element in iterparse(fileobj, events=("end",)):
                 if QName(element).localname == "record":

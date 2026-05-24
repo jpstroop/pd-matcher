@@ -77,3 +77,9 @@ def test_no_records_writes_no_shard(tmp_path: Path) -> None:
 def test_invalid_shard_size_rejected(tmp_path: Path) -> None:
     with raises(ValueError, match="positive integer"):
         MarcxmlShardWriter(tmp_path, shard_size=0)
+
+
+def test_require_handle_raises_when_no_shard_open(tmp_path: Path) -> None:
+    writer = MarcxmlShardWriter(tmp_path)
+    with raises(RuntimeError, match="no open shard"):
+        writer._require_handle()

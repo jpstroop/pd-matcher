@@ -423,6 +423,68 @@ def test_writer_skips_when_match_or_nypl_is_none(tmp_path: Path) -> None:
         assert db.stratum_counts() == {}
 
 
+def test_writer_logs_fill_at_interval_for_banded_inserts(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bq, "_FILL_LOG_INTERVAL", 3)
+    db_path = tmp_path / "review.db"
+    budget = BudgetModel(caps={("eng", "ge90"): 5})
+    with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
+        for index in range(3):
+            writer.write(_marc(control_id=f"c{index}"), _match(0.95), _ASSESSMENT, _cce())
+    with ReviewDb.connect(db_path) as db:
+        assert db.stratum_counts() == {("eng", "ge90"): 3}
+
+
+def test_writer_exit_with_exception_does_not_commit_or_inject_vault(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    budget = BudgetModel(caps={("eng", "ge90"): 5})
+    resolved = (
+        ResolvedVaultPair(
+            entry=VaultEntry(
+                schema=SCHEMA_VERSION,
+                marc_control_id="ctrl-a",
+                nypl_uuid="uuid-a",
+                verdict="match",
+                reasons=(),
+                note=None,
+                labeled_at="2026-05-22T10:00:00+00:00",
+                labeler="jpstroop",
+                marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+            ),
+            pair=PairInsert(
+                language="eng",
+                decade=1950,
+                score=0.95,
+                band="ge90",
+                source="banded",
+                marc_control_id="ctrl-a",
+                marc_json="{}",
+                marc_title="t",
+                marc_author=None,
+                marc_publisher=None,
+                marc_year=1953,
+                nypl_uuid="uuid-a",
+                cce_title="t",
+                cce_author=None,
+                cce_publishers=None,
+                cce_claimants=None,
+                cce_reg_year=1953,
+                cce_was_renewed=True,
+                cce_regnum="R1",
+                evidence_json="{}",
+            ),
+        ),
+    )
+    with (
+        raises(RuntimeError, match="boom"),
+        StratifyingResultWriter(db_path=db_path, budget=budget, seed=1, vault_pairs=resolved),
+    ):
+        raise RuntimeError("boom")
+    with ReviewDb.connect(db_path) as db:
+        assert db.stratum_counts() == {}
+
+
 def test_writer_requires_context_manager(tmp_path: Path) -> None:
     writer = StratifyingResultWriter(
         db_path=tmp_path / "review.db",
@@ -934,6 +996,26 @@ def test_build_queue_reports_vault_entry_missing_from_index(
     assert summary.vault_missing_in_index == 1
     with ReviewDb.connect(tmp_path / "review.db") as db:
         assert db.stratum_counts() == {}
+
+
+def test_load_calibrator_returns_none_when_file_absent(tmp_path: Path) -> None:
+    from pd_groundtruth.build_queue import _load_calibrator
+
+    assert _load_calibrator(tmp_path) is None
+
+
+def test_load_calibrator_reads_file_when_present(tmp_path: Path) -> None:
+    from pd_matcher.match.combiners.calibrator import PlattCalibrator
+    from pd_matcher.match.combiners.calibrator import save_calibrator
+
+    from pd_groundtruth.build_queue import _load_calibrator
+
+    saved = PlattCalibrator(
+        a=-0.5, b=0.25, trained_at="2026-05-22T00:00:00+00:00", n_positive=10, n_negative=20
+    )
+    save_calibrator(saved, tmp_path / "calibrator.msgpack")
+    loaded = _load_calibrator(tmp_path)
+    assert loaded == saved
 
 
 def test_build_queue_cleans_up_prepared_dir(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

@@ -358,6 +358,60 @@ def test_build_queue_rejects_rebuild_and_append_together(tmp_path: Path) -> None
     assert out.exists()
 
 
+def test_build_queue_treats_non_empty_db_without_review_pair_table_as_empty(
+    tmp_path: Path,
+) -> None:
+    from sqlite3 import connect as sqlite_connect
+
+    out = tmp_path / "review.db"
+    connection = sqlite_connect(out)
+    try:
+        connection.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+        connection.execute("INSERT INTO unrelated DEFAULT VALUES")
+        connection.commit()
+    finally:
+        connection.close()
+    assert out.stat().st_size > 0
+    with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+                "--out",
+                str(out),
+            ],
+        )
+    assert result.exit_code == 0
+    mock_build.assert_called_once()
+
+
+def test_review_command_invokes_serve_with_cli_args(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    vault_path = tmp_path / "vault.jsonl"
+    with patch("pd_groundtruth.cli.serve") as mock_serve:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "review",
+                "--db",
+                str(db_path),
+                "--vault",
+                str(vault_path),
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "9000",
+            ],
+        )
+    assert result.exit_code == 0
+    mock_serve.assert_called_once_with(db_path, vault_path, host="0.0.0.0", port=9000)
+    assert "serving review UI" in result.stdout
+
+
 def test_build_queue_command_scales_budget(tmp_path: Path) -> None:
     with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
         result = _RUNNER.invoke(
