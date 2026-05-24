@@ -340,6 +340,59 @@ def test_writer_persists_snapshot_fields(tmp_path: Path) -> None:
     assert row.cce_notice_date == "1953-04-02"
     assert row.cce_lccn == "28000854"
     assert row.cce_prev_regnums == "A100000; A200000"
+    assert row.cce_predicted_status == "PD_REGISTERED_NOT_RENEWED"
+
+
+def test_writer_persists_renewal_projection_when_matched_nypl_carries_it(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review.db"
+    budget = BudgetModel(caps={("eng", "ge90"): 1})
+    cce_with_renewal = IndexedNyplRegRecord(
+        uuid="uuid-r",
+        title="CCE Title",
+        was_renewed=True,
+        regnum="R123",
+        reg_year=1953,
+        renewal_id="R200001",
+        renewal_oreg="R123",
+        renewal_rdat=date(1981, 6, 1),
+        renewal_author="Author A",
+        renewal_title="Title A",
+        renewal_claimants="Acme Press|PWH",
+        renewal_new_matter="added ch. 7",
+    )
+    with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
+        writer.write(
+            _marc(control_id="cr"), _match(0.95, uuid="uuid-r"), _ASSESSMENT, cce_with_renewal
+        )
+    with ReviewDb.connect(db_path) as db:
+        row = db.next_unlabeled()
+    assert row is not None
+    assert row.cce_renewal_id == "R200001"
+    assert row.cce_renewal_oreg == "R123"
+    assert row.cce_renewal_rdat == "1981-06-01"
+    assert row.cce_renewal_author == "Author A"
+    assert row.cce_renewal_title == "Title A"
+    assert row.cce_renewal_claimants == "Acme Press|PWH"
+    assert row.cce_renewal_new_matter == "added ch. 7"
+
+
+def test_writer_persists_predicted_status_from_assessment(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    budget = BudgetModel(caps={("eng", "ge90"): 1})
+    in_copyright_assessment = CopyrightAssessment(
+        status=CopyrightStatus.IN_COPYRIGHT_REGISTERED_AND_RENEWED,
+        matched_rule_name=None,
+        explanation="",
+        assumptions=(),
+    )
+    with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
+        writer.write(_marc(control_id="cs"), _match(0.95), in_copyright_assessment, _cce())
+    with ReviewDb.connect(db_path) as db:
+        row = db.next_unlabeled()
+    assert row is not None
+    assert row.cce_predicted_status == "IN_COPYRIGHT_REGISTERED_AND_RENEWED"
 
 
 def test_writer_below_sample_reservoir_caps_on_close(tmp_path: Path) -> None:

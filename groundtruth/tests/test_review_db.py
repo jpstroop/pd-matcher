@@ -773,3 +773,129 @@ def test_iter_labeled_pairs_aggregates_multiple_reason_codes(tmp_path: Path) -> 
         db.add_label(pair_id, VERDICT_NO_MATCH, reasons=("garbled", "diff_work"))
         rows = db.iter_labeled_pairs()
     assert rows[0].reason_codes == ("diff_work", "garbled")
+
+
+def test_round_trip_preserves_predicted_status_and_renewal_details(tmp_path: Path) -> None:
+    extended = PairInsert(
+        language="eng",
+        decade=1950,
+        score=0.91,
+        band="ge90",
+        source="banded",
+        marc_control_id="ctrl-x",
+        marc_json="{}",
+        marc_title="t",
+        marc_author="a",
+        marc_publisher="p",
+        marc_year=1953,
+        nypl_uuid="uuid-x",
+        cce_title="CCE Title",
+        cce_author="CCE Author",
+        cce_publishers="Pub A | Pub B",
+        cce_claimants="Claimant A",
+        cce_reg_year=1953,
+        cce_was_renewed=True,
+        cce_regnum="R12345",
+        evidence_json="{}",
+        cce_predicted_status="PD_REGISTERED_NOT_RENEWED",
+        cce_renewal_id="R200001",
+        cce_renewal_oreg="A111111",
+        cce_renewal_rdat="1968-05-15",
+        cce_renewal_author="Smith, John",
+        cce_renewal_title="A study of widgets",
+        cce_renewal_claimants="Acme Press|PWH",
+        cce_renewal_new_matter="added ch. 7",
+    )
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        db.insert_pair(extended)
+        row = db.next_unlabeled()
+    assert row is not None
+    assert row.cce_predicted_status == "PD_REGISTERED_NOT_RENEWED"
+    assert row.cce_renewal_id == "R200001"
+    assert row.cce_renewal_oreg == "A111111"
+    assert row.cce_renewal_rdat == "1968-05-15"
+    assert row.cce_renewal_author == "Smith, John"
+    assert row.cce_renewal_title == "A study of widgets"
+    assert row.cce_renewal_claimants == "Acme Press|PWH"
+    assert row.cce_renewal_new_matter == "added ch. 7"
+
+
+def test_predicted_status_and_renewal_details_default_to_null(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        db.insert_pair(_pair())
+        row = db.next_unlabeled()
+    assert row is not None
+    assert row.cce_predicted_status is None
+    assert row.cce_renewal_id is None
+    assert row.cce_renewal_oreg is None
+    assert row.cce_renewal_rdat is None
+    assert row.cce_renewal_author is None
+    assert row.cce_renewal_title is None
+    assert row.cce_renewal_claimants is None
+    assert row.cce_renewal_new_matter is None
+
+
+def test_init_schema_adds_predicted_status_and_renewal_columns_to_legacy_pair_table(
+    tmp_path: Path,
+) -> None:
+    from sqlite3 import connect as sqlite_connect
+
+    db_path = tmp_path / "legacy_pair.db"
+    legacy = sqlite_connect(db_path)
+    legacy.executescript(
+        """
+        CREATE TABLE review_pair (
+            id INTEGER PRIMARY KEY,
+            language TEXT NOT NULL,
+            decade INTEGER,
+            score REAL NOT NULL,
+            band TEXT NOT NULL,
+            source TEXT NOT NULL,
+            marc_control_id TEXT NOT NULL,
+            marc_json TEXT NOT NULL,
+            marc_title TEXT,
+            marc_author TEXT,
+            marc_publisher TEXT,
+            marc_year INTEGER,
+            nypl_uuid TEXT NOT NULL,
+            cce_title TEXT,
+            cce_author TEXT,
+            cce_publishers TEXT,
+            cce_claimants TEXT,
+            cce_reg_year INTEGER,
+            cce_was_renewed INTEGER,
+            cce_regnum TEXT,
+            evidence_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO review_pair (
+            language, decade, score, band, source, marc_control_id, marc_json,
+            marc_title, marc_author, marc_publisher, marc_year, nypl_uuid,
+            cce_title, cce_author, cce_publishers, cce_claimants, cce_reg_year,
+            cce_was_renewed, cce_regnum, evidence_json, created_at
+        ) VALUES (
+            'eng', 1950, 0.9, 'ge90', 'banded', 'ctrl-legacy', '{}',
+            't', 'a', 'p', 1953, 'uuid-legacy',
+            'CCE', 'CCE Author', 'Pub', 'Claim', 1953,
+            1, 'R1', '{}', '2026-01-01T00:00:00+00:00'
+        );
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    with ReviewDb.connect(db_path) as db:
+        columns = {row[1] for row in db._conn.execute("PRAGMA table_info(review_pair)")}
+        assert "cce_predicted_status" in columns
+        assert "cce_renewal_id" in columns
+        assert "cce_renewal_oreg" in columns
+        assert "cce_renewal_rdat" in columns
+        assert "cce_renewal_author" in columns
+        assert "cce_renewal_title" in columns
+        assert "cce_renewal_claimants" in columns
+        assert "cce_renewal_new_matter" in columns
+        row = db.get_pair(1)
+    assert row is not None
+    assert row.cce_predicted_status is None
+    assert row.cce_renewal_id is None
+    assert row.cce_renewal_new_matter is None

@@ -9,6 +9,9 @@ from msgspec.json import encode as json_encode
 from pd_matcher.models import MarcRecord
 
 from pd_groundtruth.review.view import CLAIMANT_LABEL
+from pd_groundtruth.review.view import PREDICTED_STATUS_FAMILY_IN_COPYRIGHT
+from pd_groundtruth.review.view import PREDICTED_STATUS_FAMILY_PD
+from pd_groundtruth.review.view import PREDICTED_STATUS_FAMILY_UNKNOWN
 from pd_groundtruth.review.view import RENEWAL_NOT_RENEWED
 from pd_groundtruth.review.view import RENEWAL_RENEWED
 from pd_groundtruth.review.view import RENEWAL_UNKNOWN
@@ -17,6 +20,7 @@ from pd_groundtruth.review.view import author_is_claimant_label
 from pd_groundtruth.review.view import build_card
 from pd_groundtruth.review.view import build_labeled_row
 from pd_groundtruth.review.view import parse_evidence
+from pd_groundtruth.review.view import predicted_status_family
 from pd_groundtruth.review.view import render_renewal_label
 from pd_groundtruth.review_db import LabeledPairRow
 from pd_groundtruth.review_db import ReviewPairRow
@@ -77,6 +81,15 @@ def _row(
     cce_notice_date: str | None = None,
     cce_lccn: str | None = None,
     cce_prev_regnums: str | None = None,
+    cce_predicted_status: str | None = None,
+    cce_renewal_id: str | None = None,
+    cce_renewal_oreg: str | None = None,
+    cce_renewal_rdat: str | None = None,
+    cce_renewal_author: str | None = None,
+    cce_renewal_title: str | None = None,
+    cce_renewal_claimants: str | None = None,
+    cce_renewal_new_matter: str | None = None,
+    cce_claimants: str | None = "Jane Doe",
 ) -> ReviewPairRow:
     return ReviewPairRow(
         id=7,
@@ -95,7 +108,7 @@ def _row(
         cce_title="The Full Title",
         cce_author="Jane Doe",
         cce_publishers="Acme Press | Beta Co",
-        cce_claimants="Jane Doe",
+        cce_claimants=cce_claimants,
         cce_reg_year=1953,
         cce_was_renewed=was_renewed,
         cce_regnum="R99",
@@ -114,6 +127,14 @@ def _row(
         cce_notice_date=cce_notice_date,
         cce_lccn=cce_lccn,
         cce_prev_regnums=cce_prev_regnums,
+        cce_predicted_status=cce_predicted_status,
+        cce_renewal_id=cce_renewal_id,
+        cce_renewal_oreg=cce_renewal_oreg,
+        cce_renewal_rdat=cce_renewal_rdat,
+        cce_renewal_author=cce_renewal_author,
+        cce_renewal_title=cce_renewal_title,
+        cce_renewal_claimants=cce_renewal_claimants,
+        cce_renewal_new_matter=cce_renewal_new_matter,
     )
 
 
@@ -488,3 +509,108 @@ def test_build_labeled_row_renders_relative_time() -> None:
     row = build_labeled_row(_labeled_row(labeled_at=past), now)
     assert row.labeled_relative == "3h ago"
     assert row.labeled_at == past
+
+
+def test_predicted_status_family_classifies_pd_statuses() -> None:
+    assert predicted_status_family("PD_REGISTERED_NOT_RENEWED") == PREDICTED_STATUS_FAMILY_PD
+    assert predicted_status_family("PD_BY_AGE_PRE_95_YEARS") == PREDICTED_STATUS_FAMILY_PD
+    assert predicted_status_family("PD_US_GOVERNMENT_WORK") == PREDICTED_STATUS_FAMILY_PD
+
+
+def test_predicted_status_family_classifies_in_copyright_statuses() -> None:
+    assert (
+        predicted_status_family("IN_COPYRIGHT_REGISTERED_AND_RENEWED")
+        == PREDICTED_STATUS_FAMILY_IN_COPYRIGHT
+    )
+    assert (
+        predicted_status_family("IN_COPYRIGHT_FOREIGN_URAA_RESTORED")
+        == PREDICTED_STATUS_FAMILY_IN_COPYRIGHT
+    )
+
+
+def test_predicted_status_family_falls_back_to_unknown_for_unknown_or_none() -> None:
+    assert predicted_status_family(None) == PREDICTED_STATUS_FAMILY_UNKNOWN
+    assert predicted_status_family("UNKNOWN_NO_RULE_MATCHED") == PREDICTED_STATUS_FAMILY_UNKNOWN
+    assert predicted_status_family("UNKNOWN_INSUFFICIENT_DATA") == PREDICTED_STATUS_FAMILY_UNKNOWN
+    assert predicted_status_family("SOMETHING_ELSE") == PREDICTED_STATUS_FAMILY_UNKNOWN
+
+
+def test_build_card_projects_predicted_status_and_family() -> None:
+    card = build_card(
+        _row(_marc(), evidence_json="{}", cce_predicted_status="PD_REGISTERED_NOT_RENEWED")
+    )
+    assert card.predicted_status == "PD_REGISTERED_NOT_RENEWED"
+    assert card.predicted_status_family == PREDICTED_STATUS_FAMILY_PD
+
+
+def test_build_card_predicted_status_none_falls_back_to_unknown_family() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.predicted_status is None
+    assert card.predicted_status_family == PREDICTED_STATUS_FAMILY_UNKNOWN
+
+
+def test_build_card_projects_renewal_details_when_populated() -> None:
+    card = build_card(
+        _row(
+            _marc(),
+            evidence_json="{}",
+            cce_renewal_id="R200001",
+            cce_renewal_oreg="A111111",
+            cce_renewal_rdat="1968-05-15",
+            cce_renewal_author="Smith, John",
+            cce_renewal_title="A study of widgets",
+            cce_renewal_claimants="Acme Press|PWH",
+            cce_renewal_new_matter="added ch. 7",
+        )
+    )
+    assert card.cce_renewal_id == "R200001"
+    assert card.cce_renewal_oreg == "A111111"
+    assert card.cce_renewal_rdat == date(1968, 5, 15)
+    assert card.cce_renewal_author == "Smith, John"
+    assert card.cce_renewal_title == "A study of widgets"
+    assert card.cce_renewal_claimants == "Acme Press|PWH"
+    assert card.cce_renewal_new_matter == "added ch. 7"
+    assert card.cce_has_renewal_details is True
+
+
+def test_build_card_renewal_details_absent_for_legacy_row() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.cce_renewal_id is None
+    assert card.cce_renewal_rdat is None
+    assert card.cce_has_renewal_details is False
+
+
+def test_build_card_renewal_claimants_differ_when_registration_disagrees() -> None:
+    card = build_card(
+        _row(
+            _marc(),
+            evidence_json="{}",
+            cce_claimants="Jane Doe",
+            cce_renewal_claimants="Estate of Jane Doe",
+        )
+    )
+    assert card.cce_renewal_claimants_differ is True
+
+
+def test_build_card_renewal_claimants_match_collapses_whitespace_and_case() -> None:
+    card = build_card(
+        _row(
+            _marc(),
+            evidence_json="{}",
+            cce_claimants="Jane Doe",
+            cce_renewal_claimants="jane doe",
+        )
+    )
+    assert card.cce_renewal_claimants_differ is False
+
+
+def test_build_card_renewal_claimants_no_diff_signal_when_either_side_blank() -> None:
+    card = build_card(
+        _row(
+            _marc(),
+            evidence_json="{}",
+            cce_claimants=None,
+            cce_renewal_claimants="Estate of Jane Doe",
+        )
+    )
+    assert card.cce_renewal_claimants_differ is False

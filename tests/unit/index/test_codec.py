@@ -77,6 +77,31 @@ def test_decode_reg_accepts_legacy_record_missing_new_cce_fields() -> None:
     assert decoded.notice_date is None
     assert decoded.lccn is None
     assert decoded.prev_regnums == ()
+    assert decoded.renewal_id is None
+    assert decoded.renewal_oreg is None
+    assert decoded.renewal_rdat is None
+    assert decoded.renewal_author is None
+    assert decoded.renewal_title is None
+    assert decoded.renewal_claimants is None
+    assert decoded.renewal_new_matter is None
+
+
+def test_encode_reg_round_trips_renewal_projection() -> None:
+    record = IndexedNyplRegRecord(
+        uuid="UUID-1",
+        title="A Study of Widgets",
+        was_renewed=True,
+        regnum="A111111",
+        reg_date=date(1940, 5, 10),
+        renewal_id="R200001",
+        renewal_oreg="A111111",
+        renewal_rdat=date(1968, 5, 15),
+        renewal_author="Smith, John",
+        renewal_title="A study of widgets",
+        renewal_claimants="Acme Press|PWH",
+        renewal_new_matter="added ch. 7",
+    )
+    assert decode_reg(encode_reg(record)) == record
 
 
 def test_encode_ren_round_trips_full_record() -> None:

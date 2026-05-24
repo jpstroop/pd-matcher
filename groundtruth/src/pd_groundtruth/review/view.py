@@ -32,6 +32,10 @@ RENEWAL_UNKNOWN: str = "unknown"
 
 CLAIMANT_LABEL: str = "Author is claimant"
 
+PREDICTED_STATUS_FAMILY_PD: str = "pd"
+PREDICTED_STATUS_FAMILY_IN_COPYRIGHT: str = "in_copyright"
+PREDICTED_STATUS_FAMILY_UNKNOWN: str = "unknown"
+
 _ONLINE_RESOURCE_MARKER: str = "online resource"
 
 _LCCN_BASE_URL: str = "https://lccn.loc.gov/"
@@ -102,7 +106,44 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     cce_lccn_url: str | None
     cce_prev_regnums: tuple[str, ...]
 
+    predicted_status: str | None
+    predicted_status_family: str
+
+    cce_renewal_id: str | None
+    cce_renewal_oreg: str | None
+    cce_renewal_rdat: date | None
+    cce_renewal_author: str | None
+    cce_renewal_title: str | None
+    cce_renewal_claimants: str | None
+    cce_renewal_new_matter: str | None
+    cce_renewal_claimants_differ: bool
+    cce_has_renewal_details: bool
+
     evidence: tuple[EvidenceBar, ...]
+
+
+def predicted_status_family(status: str | None) -> str:
+    """Classify a stored Cornell status into a coarse rendering family.
+
+    Returns one of :data:`PREDICTED_STATUS_FAMILY_PD`,
+    :data:`PREDICTED_STATUS_FAMILY_IN_COPYRIGHT`, or
+    :data:`PREDICTED_STATUS_FAMILY_UNKNOWN`. The classifier inspects the
+    serialized name (``status.name``) so it stays decoupled from the
+    ``pd_matcher.copyright.status.CopyrightStatus`` import surface on the
+    review side.
+
+    Args:
+        status: The stored ``CopyrightStatus`` name (e.g.
+            ``"PD_REGISTERED_NOT_RENEWED"``), or ``None`` when the queue
+            row predates predicted-status capture.
+    """
+    if status is None:
+        return PREDICTED_STATUS_FAMILY_UNKNOWN
+    if status.startswith("PD_"):
+        return PREDICTED_STATUS_FAMILY_PD
+    if status.startswith("IN_COPYRIGHT"):
+        return PREDICTED_STATUS_FAMILY_IN_COPYRIGHT
+    return PREDICTED_STATUS_FAMILY_UNKNOWN
 
 
 def render_renewal_label(was_renewed: int | None) -> str:
@@ -230,6 +271,43 @@ def _is_online_resource(extent: str | None) -> bool:
     return _ONLINE_RESOURCE_MARKER in extent.lower()
 
 
+def _renewal_claimants_differ(registration: str | None, renewal: str | None) -> bool:
+    """Return ``True`` when the registration's claimants disagree with the renewal's.
+
+    The registration's claimants are stored as a ``" | "``-joined string
+    (built by :func:`pd_groundtruth.build_queue._join`); the renewal's
+    ``claimants`` come straight from the NYPL transcription. The comparison
+    is whitespace-collapsed and lower-cased so a trivial formatting drift
+    does not count as a difference. When either side is absent or empty the
+    function returns ``False`` (no diff signal to surface).
+    """
+    if not registration or not renewal:
+        return False
+    return registration.strip().lower() != renewal.strip().lower()
+
+
+def _has_renewal_details(row: ReviewPairRow) -> bool:
+    """Return ``True`` when any persisted ``cce_renewal_*`` field is populated.
+
+    Used by the template to decide whether to render the renewal-details
+    sub-block. Older rows (pre-#42) carry ``None`` across all renewal fields
+    and so collapse to ``False``, leaving the legacy "Renewed" badge as the
+    sole renewal signal.
+    """
+    return any(
+        value is not None
+        for value in (
+            row.cce_renewal_id,
+            row.cce_renewal_oreg,
+            row.cce_renewal_rdat,
+            row.cce_renewal_author,
+            row.cce_renewal_title,
+            row.cce_renewal_claimants,
+            row.cce_renewal_new_matter,
+        )
+    )
+
+
 def build_card(row: ReviewPairRow) -> ReviewCard:
     """Project a persisted :class:`ReviewPairRow` into a :class:`ReviewCard`.
 
@@ -289,6 +367,19 @@ def build_card(row: ReviewPairRow) -> ReviewCard:
         cce_lccn=row.cce_lccn,
         cce_lccn_url=_lccn_url(row.cce_lccn),
         cce_prev_regnums=_split_prev_regnums(row.cce_prev_regnums),
+        predicted_status=row.cce_predicted_status,
+        predicted_status_family=predicted_status_family(row.cce_predicted_status),
+        cce_renewal_id=row.cce_renewal_id,
+        cce_renewal_oreg=row.cce_renewal_oreg,
+        cce_renewal_rdat=_parse_iso_date(row.cce_renewal_rdat),
+        cce_renewal_author=row.cce_renewal_author,
+        cce_renewal_title=row.cce_renewal_title,
+        cce_renewal_claimants=row.cce_renewal_claimants,
+        cce_renewal_new_matter=row.cce_renewal_new_matter,
+        cce_renewal_claimants_differ=_renewal_claimants_differ(
+            row.cce_claimants, row.cce_renewal_claimants
+        ),
+        cce_has_renewal_details=_has_renewal_details(row),
         evidence=parse_evidence(row.evidence_json),
     )
 
@@ -357,6 +448,9 @@ def build_labeled_row(row: LabeledPairRow, now: datetime) -> LabeledRow:
 
 __all__ = [
     "CLAIMANT_LABEL",
+    "PREDICTED_STATUS_FAMILY_IN_COPYRIGHT",
+    "PREDICTED_STATUS_FAMILY_PD",
+    "PREDICTED_STATUS_FAMILY_UNKNOWN",
     "RENEWAL_NOT_RENEWED",
     "RENEWAL_RENEWED",
     "RENEWAL_UNKNOWN",
@@ -367,5 +461,6 @@ __all__ = [
     "build_card",
     "build_labeled_row",
     "parse_evidence",
+    "predicted_status_family",
     "render_renewal_label",
 ]

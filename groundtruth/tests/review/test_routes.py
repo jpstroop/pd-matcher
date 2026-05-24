@@ -30,6 +30,14 @@ def _pair(
     control_id: str,
     nypl_uuid: str,
     extent: str | None = None,
+    predicted_status: str | None = "PD_REGISTERED_NOT_RENEWED",
+    renewal_id: str | None = "R200001",
+    renewal_oreg: str | None = "A111111",
+    renewal_rdat: str | None = "1968-05-15",
+    renewal_author: str | None = "Smith, John",
+    renewal_title: str | None = "A study of widgets",
+    renewal_claimants: str | None = "Estate of Jane Doe|PWH",
+    renewal_new_matter: str | None = "added chapter 7",
 ) -> PairInsert:
     marc = MarcRecord(
         control_id=control_id,
@@ -84,6 +92,14 @@ def _pair(
         cce_notice_date="1953-04-02",
         cce_lccn="28000854",
         cce_prev_regnums="A100000; A200000",
+        cce_predicted_status=predicted_status,
+        cce_renewal_id=renewal_id,
+        cce_renewal_oreg=renewal_oreg,
+        cce_renewal_rdat=renewal_rdat,
+        cce_renewal_author=renewal_author,
+        cce_renewal_title=renewal_title,
+        cce_renewal_claimants=renewal_claimants,
+        cce_renewal_new_matter=renewal_new_matter,
     )
 
 
@@ -125,6 +141,47 @@ def ebook_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
                 control_id="eng-ebook-1",
                 nypl_uuid="u-eng-ebook-1",
                 extent="1 online resource (xxi, 406 p.)",
+            )
+        )
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
+def in_copyright_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="ic-1",
+                nypl_uuid="u-ic-1",
+                predicted_status="IN_COPYRIGHT_REGISTERED_AND_RENEWED",
+            )
+        )
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
+def no_predicted_status_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="np-1",
+                nypl_uuid="u-np-1",
+                predicted_status=None,
+                renewal_id=None,
+                renewal_oreg=None,
+                renewal_rdat=None,
+                renewal_author=None,
+                renewal_title=None,
+                renewal_claimants=None,
+                renewal_new_matter=None,
             )
         )
     app = create_app(db_path, vault_path)
@@ -617,3 +674,56 @@ def test_card_omits_extended_marc_rows_when_absent(empty_client: TestClient) -> 
     assert ">isbns<" not in response.text
     assert ">oclc<" not in response.text
     assert "worldcat.org" not in response.text
+
+
+def test_card_renders_predicted_status_pd_chip(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'class="status status-pd"' in response.text
+    assert "PD_REGISTERED_NOT_RENEWED" in response.text
+
+
+def test_card_renders_predicted_status_in_copyright_chip(
+    in_copyright_client: TestClient,
+) -> None:
+    response = in_copyright_client.get("/")
+    assert response.status_code == 200
+    assert 'class="status status-in_copyright"' in response.text
+    assert "IN_COPYRIGHT_REGISTERED_AND_RENEWED" in response.text
+
+
+def test_card_omits_predicted_status_chip_when_absent(
+    no_predicted_status_client: TestClient,
+) -> None:
+    response = no_predicted_status_client.get("/")
+    assert response.status_code == 200
+    assert 'class="status status-' not in response.text
+    assert "predicted status" not in response.text
+
+
+def test_card_renders_renewal_details_block_when_populated(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Renewal details" in response.text
+    assert "1968-05-15" in response.text
+    assert "Estate of Jane Doe|PWH" in response.text
+    assert "added chapter 7" in response.text
+    assert "R200001" in response.text
+    assert "A111111" in response.text
+
+
+def test_card_renders_renewal_claimants_diff_marker_when_registration_disagrees(
+    client: TestClient,
+) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "claimants-diff" in response.text
+
+
+def test_card_omits_renewal_details_block_when_no_renewal_fields(
+    no_predicted_status_client: TestClient,
+) -> None:
+    response = no_predicted_status_client.get("/")
+    assert response.status_code == 200
+    assert "Renewal details" not in response.text
+    assert "renewal date" not in response.text

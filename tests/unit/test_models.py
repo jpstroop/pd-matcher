@@ -154,6 +154,43 @@ def test_index_reg_preserves_defaults_for_new_cce_fields() -> None:
     assert indexed.prev_regnums == ()
 
 
+def test_index_reg_projects_renewal_fields_when_renewal_supplied() -> None:
+    parsed = NyplRegRecord(uuid="UUID-1", title="t", regnum="A111111", reg_date=date(1940, 5, 10))
+    renewal = NyplRenRecord(
+        id="R200001",
+        entry_id="entry-001",
+        oreg="A111111",
+        odat=date(1940, 5, 10),
+        rdat=date(1968, 5, 15),
+        author="Smith, John",
+        title="A study of widgets",
+        claimants="Acme Press|PWH",
+        new_matter="updated chapter 7",
+    )
+    indexed = index_reg(parsed, was_renewed=True, renewal=renewal)
+    assert indexed.was_renewed is True
+    assert indexed.renewal_id == "R200001"
+    assert indexed.renewal_oreg == "A111111"
+    assert indexed.renewal_rdat == date(1968, 5, 15)
+    assert indexed.renewal_author == "Smith, John"
+    assert indexed.renewal_title == "A study of widgets"
+    assert indexed.renewal_claimants == "Acme Press|PWH"
+    assert indexed.renewal_new_matter == "updated chapter 7"
+
+
+def test_index_reg_renewal_fields_default_to_none_when_renewal_absent() -> None:
+    parsed = NyplRegRecord(uuid="UUID-1", title="t")
+    indexed = index_reg(parsed, was_renewed=True)
+    assert indexed.was_renewed is True
+    assert indexed.renewal_id is None
+    assert indexed.renewal_oreg is None
+    assert indexed.renewal_rdat is None
+    assert indexed.renewal_author is None
+    assert indexed.renewal_title is None
+    assert indexed.renewal_claimants is None
+    assert indexed.renewal_new_matter is None
+
+
 def test_indexed_nypl_reg_record_is_frozen() -> None:
     rec = IndexedNyplRegRecord(uuid="UUID-1", title="t", was_renewed=False)
     with raises(AttributeError):

@@ -28,6 +28,7 @@ from structlog import get_logger
 from structlog.contextvars import bind_contextvars
 from structlog.contextvars import unbind_contextvars
 
+from pd_matcher.index.codec import decode_ren
 from pd_matcher.index.codec import encode_reg
 from pd_matcher.index.codec import encode_ren
 from pd_matcher.index.codec import encode_uuid_list
@@ -186,12 +187,18 @@ def _ingest_registrations(
         with store.write_transaction():
             for record in iter_nypl_reg_directory(reg_dir):
                 was_renewed = False
+                renewal = None
                 if record.regnum is not None:
                     join_key = make_renewal_key(record.regnum, record.reg_date)
-                    was_renewed = store.ren_by_oreg.get(join_key) is not None
+                    entry_id_blob = store.ren_by_oreg.get(join_key)
+                    if entry_id_blob is not None:
+                        was_renewed = True
+                        ren_blob = store.ren_by_id.get(entry_id_blob)
+                        if ren_blob is not None:  # pragma: no branch
+                            renewal = decode_ren(ren_blob)
                 if was_renewed:
                     joins += 1
-                indexed = index_reg(record, was_renewed=was_renewed)
+                indexed = index_reg(record, was_renewed=was_renewed, renewal=renewal)
                 store.reg_by_id.put(record.uuid.encode("utf-8"), encode_reg(indexed))
                 if record.reg_year is not None:
                     year_buckets.setdefault(record.reg_year, []).append(record.uuid)
@@ -309,7 +316,7 @@ def build_index(
     reg_dir: Path,
     ren_dir: Path,
     out_path: Path,
-    schema_version: int = 3,
+    schema_version: int = 4,
     force: bool = False,
 ) -> BuildReport:
     """Materialise the LMDB index from the two CCE source directories.
