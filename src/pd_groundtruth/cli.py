@@ -45,6 +45,9 @@ _DEFAULT_WORKERS = 8
 _DEFAULT_SAMPLE_PER_LANG = 1500
 _DEFAULT_REVIEW_HOST = "127.0.0.1"
 _DEFAULT_REVIEW_PORT = 8000
+_DEFAULT_POOL_PATH = Path("data/candidates")
+_DEFAULT_INDEX_PATH = Path("caches/nypl.lmdb")
+_DEFAULT_REVIEW_DB_PATH = Path("data/review.db")
 _DEFAULT_VAULT_PATH = Path("data/label_vault.jsonl")
 _LABELER = "jpstroop"
 _LOG_DIR_NAME = "logs"
@@ -169,11 +172,13 @@ def build_queue_command(
     pool: Annotated[
         Path,
         Option("--pool", help="Root dir whose <lang>/*.xml shards form the candidate pool."),
-    ],
+    ] = _DEFAULT_POOL_PATH,
     index: Annotated[
         Path, Option("--index", help="LMDB env produced by `pd-matcher index build`.")
-    ],
-    out: Annotated[Path, Option("--out", help="Destination SQLite review database.")],
+    ] = _DEFAULT_INDEX_PATH,
+    out: Annotated[
+        Path, Option("--out", help="Destination SQLite review database.")
+    ] = _DEFAULT_REVIEW_DB_PATH,
     vault: Annotated[
         Path,
         Option(
@@ -267,7 +272,9 @@ def build_queue_command(
 
 @app.command(name="review")
 def review_command(
-    db: Annotated[Path, Option("--db", help="SQLite review database produced by `build-queue`.")],
+    db: Annotated[
+        Path, Option("--db", help="SQLite review database produced by `build-queue`.")
+    ] = _DEFAULT_REVIEW_DB_PATH,
     vault: Annotated[
         Path,
         Option(
@@ -297,7 +304,7 @@ def seed_vault_command(
     db: Annotated[
         Path,
         Option("--db", help="SQLite review database whose current labels to dump."),
-    ],
+    ] = _DEFAULT_REVIEW_DB_PATH,
     vault: Annotated[
         Path,
         Option("--vault", help="JSONL label vault to append into (created if absent)."),
@@ -344,24 +351,26 @@ def seed_vault_command(
 
 @app.command(name="vault-into-queue")
 def vault_into_queue_command(
-    db: Annotated[Path, Option("--db", help="Existing SQLite review database to backfill.")],
+    db: Annotated[
+        Path, Option("--db", help="Existing SQLite review database to backfill.")
+    ] = _DEFAULT_REVIEW_DB_PATH,
     vault: Annotated[
         Path,
         Option(
             "--vault",
             help="JSONL label vault whose entries are checked against the queue.",
         ),
-    ],
+    ] = _DEFAULT_VAULT_PATH,
     pool: Annotated[
         Path,
         Option(
             "--pool",
             help="Root dir whose <lang>/*.xml shards form the candidate pool.",
         ),
-    ],
+    ] = _DEFAULT_POOL_PATH,
     index: Annotated[
         Path, Option("--index", help="LMDB env produced by `pd-matcher index build`.")
-    ],
+    ] = _DEFAULT_INDEX_PATH,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
