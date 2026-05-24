@@ -7,6 +7,7 @@ exercised directly with fabricated :class:`MarcRecord`,
 temporary SQLite review database.
 """
 
+from datetime import date
 from pathlib import Path
 from pickle import loads as pickle_loads
 
@@ -35,8 +36,11 @@ from pd_groundtruth.build_queue import StratifyingResultWriter
 from pd_groundtruth.build_queue import StratifyingWriterFactory
 from pd_groundtruth.build_queue import _decade_of
 from pd_groundtruth.build_queue import _evidence_payload
+from pd_groundtruth.build_queue import _iso_or_none
 from pd_groundtruth.build_queue import _iter_language_dirs
 from pd_groundtruth.build_queue import _join
+from pd_groundtruth.build_queue import _join_notes
+from pd_groundtruth.build_queue import _join_places
 from pd_groundtruth.build_queue import _sample_language
 from pd_groundtruth.build_queue import _write_sample_chunks
 from pd_groundtruth.build_queue import build_queue
@@ -113,8 +117,19 @@ def _cce(uuid: str = "uuid-1") -> IndexedNyplRegRecord:
         regnum="R123",
         reg_year=1953,
         author_name="CCE Author",
+        author_place="Cambridge, Mass.",
+        author_is_claimant=True,
+        edition="2nd ed.",
         publisher_names=("Pub A", "Pub B"),
+        publication_places=("New York", "London"),
         claimants=("Claimant A",),
+        copies="2c.",
+        aff_date=date(1953, 6, 1),
+        desc="vi, 200 p.",
+        notes=("note one", "note two"),
+        new_matter_claimed="added ch. 5",
+        copy_date=date(1953, 4, 1),
+        notice_date=date(1953, 4, 2),
     )
 
 
@@ -142,6 +157,23 @@ def test_join_collapses_empty_to_none() -> None:
     assert _join(()) is None
     assert _join(("a",)) == "a"
     assert _join(("a", "b")) == "a | b"
+
+
+def test_join_places_uses_semicolon_separator() -> None:
+    assert _join_places(()) is None
+    assert _join_places(("NY",)) == "NY"
+    assert _join_places(("NY", "London")) == "NY; London"
+
+
+def test_join_notes_uses_newline_separator() -> None:
+    assert _join_notes(()) is None
+    assert _join_notes(("one",)) == "one"
+    assert _join_notes(("one", "two")) == "one\ntwo"
+
+
+def test_iso_or_none_formats_date_or_returns_none() -> None:
+    assert _iso_or_none(None) is None
+    assert _iso_or_none(date(1953, 6, 1)) == "1953-06-01"
 
 
 def test_evidence_payload_drops_skipped() -> None:
@@ -286,6 +318,17 @@ def test_writer_persists_snapshot_fields(tmp_path: Path) -> None:
     assert row.source == "banded"
     assert row.band == "ge90"
     assert row.decade == 1950
+    assert row.cce_edition == "2nd ed."
+    assert row.cce_publication_places == "New York; London"
+    assert row.cce_author_place == "Cambridge, Mass."
+    assert row.cce_author_is_claimant == 1
+    assert row.cce_copies == "2c."
+    assert row.cce_aff_date == "1953-06-01"
+    assert row.cce_desc == "vi, 200 p."
+    assert row.cce_notes == "note one\nnote two"
+    assert row.cce_new_matter_claimed == "added ch. 5"
+    assert row.cce_copy_date == "1953-04-01"
+    assert row.cce_notice_date == "1953-04-02"
 
 
 def test_writer_below_sample_reservoir_caps_on_close(tmp_path: Path) -> None:

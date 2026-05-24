@@ -23,6 +23,7 @@ picklable values (paths, the budget, the seed) across the process boundary.
 
 from collections.abc import Iterator
 from datetime import UTC
+from datetime import date
 from datetime import datetime
 from logging import getLogger
 from pathlib import Path
@@ -90,6 +91,21 @@ def _join(values: tuple[str, ...]) -> str | None:
     return " | ".join(values) if values else None
 
 
+def _join_places(values: tuple[str, ...]) -> str | None:
+    """Join a tuple of publication-place strings with ``"; "`` or return ``None``."""
+    return "; ".join(values) if values else None
+
+
+def _join_notes(values: tuple[str, ...]) -> str | None:
+    """Join a tuple of CCE notes with newlines or return ``None`` when empty."""
+    return "\n".join(values) if values else None
+
+
+def _iso_or_none(value: date | None) -> str | None:
+    """Return ``value.isoformat()`` or ``None`` when the date is absent."""
+    return value.isoformat() if value is not None else None
+
+
 def _evidence_payload(evidence: tuple[Evidence, ...]) -> dict[str, float]:
     """Return a ``scorer -> normalized score`` mapping for the 2b card."""
     return {ev.scorer: ev.normalized for ev in evidence if not ev.skipped}
@@ -140,6 +156,17 @@ def _build_pair_insert(
         cce_was_renewed=matched_nypl.was_renewed,
         cce_regnum=matched_nypl.regnum,
         evidence_json=json_encode(_evidence_payload(evidence)).decode("utf-8"),
+        cce_edition=matched_nypl.edition,
+        cce_publication_places=_join_places(matched_nypl.publication_places),
+        cce_author_place=matched_nypl.author_place,
+        cce_author_is_claimant=matched_nypl.author_is_claimant,
+        cce_copies=matched_nypl.copies,
+        cce_aff_date=_iso_or_none(matched_nypl.aff_date),
+        cce_desc=matched_nypl.desc,
+        cce_notes=_join_notes(matched_nypl.notes),
+        cce_new_matter_claimed=matched_nypl.new_matter_claimed,
+        cce_copy_date=_iso_or_none(matched_nypl.copy_date),
+        cce_notice_date=_iso_or_none(matched_nypl.notice_date),
     )
 
 

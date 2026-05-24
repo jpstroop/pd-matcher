@@ -51,6 +51,17 @@ CREATE TABLE IF NOT EXISTS review_pair (
     cce_reg_year INTEGER,
     cce_was_renewed INTEGER,
     cce_regnum TEXT,
+    cce_edition TEXT,
+    cce_publication_places TEXT,
+    cce_author_place TEXT,
+    cce_author_is_claimant INTEGER,
+    cce_copies TEXT,
+    cce_aff_date TEXT,
+    cce_desc TEXT,
+    cce_notes TEXT,
+    cce_new_matter_claimed TEXT,
+    cce_copy_date TEXT,
+    cce_notice_date TEXT,
     evidence_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -156,6 +167,17 @@ class PairInsert(Struct, frozen=True, forbid_unknown_fields=True):
     cce_was_renewed: bool | None
     cce_regnum: str | None
     evidence_json: str
+    cce_edition: str | None = None
+    cce_publication_places: str | None = None
+    cce_author_place: str | None = None
+    cce_author_is_claimant: bool | None = None
+    cce_copies: str | None = None
+    cce_aff_date: str | None = None
+    cce_desc: str | None = None
+    cce_notes: str | None = None
+    cce_new_matter_claimed: str | None = None
+    cce_copy_date: str | None = None
+    cce_notice_date: str | None = None
 
 
 class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
@@ -183,6 +205,17 @@ class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
     cce_regnum: str | None
     evidence_json: str
     created_at: str
+    cce_edition: str | None = None
+    cce_publication_places: str | None = None
+    cce_author_place: str | None = None
+    cce_author_is_claimant: int | None = None
+    cce_copies: str | None = None
+    cce_aff_date: str | None = None
+    cce_desc: str | None = None
+    cce_notes: str | None = None
+    cce_new_matter_claimed: str | None = None
+    cce_copy_date: str | None = None
+    cce_notice_date: str | None = None
 
 
 class LanguageProgress(Struct, frozen=True, forbid_unknown_fields=True):
@@ -227,6 +260,21 @@ def _split_reason_codes(raw: str | None) -> tuple[str, ...]:
     return tuple(code for code in raw.split(",") if code)
 
 
+_ADDITIVE_CCE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("cce_edition", "TEXT"),
+    ("cce_publication_places", "TEXT"),
+    ("cce_author_place", "TEXT"),
+    ("cce_author_is_claimant", "INTEGER"),
+    ("cce_copies", "TEXT"),
+    ("cce_aff_date", "TEXT"),
+    ("cce_desc", "TEXT"),
+    ("cce_notes", "TEXT"),
+    ("cce_new_matter_claimed", "TEXT"),
+    ("cce_copy_date", "TEXT"),
+    ("cce_notice_date", "TEXT"),
+)
+
+
 def _row_to_pair(row: Row) -> ReviewPairRow:
     """Map a ``review_pair`` :class:`sqlite3.Row` to a typed struct."""
     return ReviewPairRow(
@@ -252,6 +300,17 @@ def _row_to_pair(row: Row) -> ReviewPairRow:
         cce_regnum=row["cce_regnum"],
         evidence_json=row["evidence_json"],
         created_at=row["created_at"],
+        cce_edition=row["cce_edition"],
+        cce_publication_places=row["cce_publication_places"],
+        cce_author_place=row["cce_author_place"],
+        cce_author_is_claimant=row["cce_author_is_claimant"],
+        cce_copies=row["cce_copies"],
+        cce_aff_date=row["cce_aff_date"],
+        cce_desc=row["cce_desc"],
+        cce_notes=row["cce_notes"],
+        cce_new_matter_claimed=row["cce_new_matter_claimed"],
+        cce_copy_date=row["cce_copy_date"],
+        cce_notice_date=row["cce_notice_date"],
     )
 
 
@@ -293,7 +352,7 @@ class ReviewDb:
     def init_schema(self) -> None:
         """Create tables and indices if they do not already exist.
 
-        Runs two idempotent migrations so a partially-labeled ``review.db``
+        Runs three idempotent migrations so a partially-labeled ``review.db``
         upgrades in place without losing any verdicts:
 
         1. Add the scalar ``label.reason`` column to databases created before
@@ -302,8 +361,18 @@ class ReviewDb:
         2. Backfill the normalized ``label_reason`` table from any pre-existing
            scalar ``label.reason`` values, so single-reason labels recorded
            under the old schema still feed :meth:`reason_counts`.
+        3. Add the extended ``cce_*`` columns to ``review_pair`` for databases
+           created before the full CCE surface was carried into the queue.
+           Existing rows get ``NULL`` for the new columns; the card view
+           guards every new field with an "if set" check.
         """
         self._conn.executescript(_SCHEMA)
+        pair_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(review_pair)")}
+        for column_name, column_type in _ADDITIVE_CCE_COLUMNS:
+            if column_name not in pair_columns:
+                self._conn.execute(
+                    f"ALTER TABLE review_pair ADD COLUMN {column_name} {column_type}"
+                )
         columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(label)")}
         if "reason" not in columns:
             self._conn.execute("ALTER TABLE label ADD COLUMN reason TEXT")
@@ -345,8 +414,16 @@ class ReviewDb:
                 language, decade, score, band, source, marc_control_id,
                 marc_json, marc_title, marc_author, marc_publisher, marc_year,
                 nypl_uuid, cce_title, cce_author, cce_publishers, cce_claimants,
-                cce_reg_year, cce_was_renewed, cce_regnum, evidence_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                cce_reg_year, cce_was_renewed, cce_regnum, evidence_json,
+                cce_edition, cce_publication_places, cce_author_place,
+                cce_author_is_claimant, cce_copies, cce_aff_date, cce_desc,
+                cce_notes, cce_new_matter_claimed, cce_copy_date, cce_notice_date,
+                created_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?
+            )
             """,
             (
                 pair.language,
@@ -369,6 +446,17 @@ class ReviewDb:
                 None if pair.cce_was_renewed is None else int(pair.cce_was_renewed),
                 pair.cce_regnum,
                 pair.evidence_json,
+                pair.cce_edition,
+                pair.cce_publication_places,
+                pair.cce_author_place,
+                None if pair.cce_author_is_claimant is None else int(pair.cce_author_is_claimant),
+                pair.cce_copies,
+                pair.cce_aff_date,
+                pair.cce_desc,
+                pair.cce_notes,
+                pair.cce_new_matter_claimed,
+                pair.cce_copy_date,
+                pair.cce_notice_date,
                 _now(),
             ),
         )

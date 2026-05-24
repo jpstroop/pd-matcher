@@ -196,7 +196,10 @@ database, so you can stop and resume any time.
 **Each card** shows the MARC record (left) against the proposed CCE candidate
 (right), the per-field evidence bars, the overall score and confidence band, and
 the **renewal flag** — the public-domain tell (a registration that was *not*
-renewed is the signal we care about).
+renewed is the signal we care about). The CCE panel shows author place,
+claimant flag, edition, publication places, physical description,
+new-matter-claimed, copies, notes, copyright date, affidavit date, and notice
+date — every field the parser was able to extract from the CCE source.
 
 **Label with the keyboard.** The UI auto-advances to the next unlabeled pair, and
 every keypress writes to `review.db`:
@@ -314,6 +317,10 @@ review_pair (id PK, language, decade, score, band, source,
              marc_publisher, marc_year,
              nypl_uuid, cce_title, cce_author, cce_publishers,
              cce_claimants, cce_reg_year, cce_was_renewed, cce_regnum,
+             cce_edition, cce_publication_places, cce_author_place,
+             cce_author_is_claimant, cce_copies, cce_aff_date, cce_desc,
+             cce_notes, cce_new_matter_claimed, cce_copy_date,
+             cce_notice_date,
              evidence_json, created_at)
 label       (id PK, pair_id FK→review_pair, verdict, reason, note,
              labeled_at)

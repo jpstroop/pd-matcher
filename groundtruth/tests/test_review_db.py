@@ -256,6 +256,185 @@ def test_round_trip_preserves_all_columns(tmp_path: Path) -> None:
     assert row.created_at != ""
 
 
+def test_round_trip_preserves_extended_cce_columns(tmp_path: Path) -> None:
+    extended = PairInsert(
+        language="eng",
+        decade=1950,
+        score=0.91,
+        band="ge90",
+        source="banded",
+        marc_control_id="ctrl-x",
+        marc_json="{}",
+        marc_title="t",
+        marc_author="a",
+        marc_publisher="p",
+        marc_year=1953,
+        nypl_uuid="uuid-x",
+        cce_title="CCE Title",
+        cce_author="CCE Author",
+        cce_publishers="Pub A | Pub B",
+        cce_claimants="Claimant A",
+        cce_reg_year=1953,
+        cce_was_renewed=True,
+        cce_regnum="R12345",
+        evidence_json="{}",
+        cce_edition="2nd ed.",
+        cce_publication_places="New York; London",
+        cce_author_place="Cambridge, Mass.",
+        cce_author_is_claimant=True,
+        cce_copies="2c.",
+        cce_aff_date="1953-06-01",
+        cce_desc="vi, 200 p.",
+        cce_notes="note one\nnote two",
+        cce_new_matter_claimed="added ch. 5",
+        cce_copy_date="1953-04-01",
+        cce_notice_date="1953-04-02",
+    )
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        db.insert_pair(extended)
+        row = db.next_unlabeled()
+    assert row is not None
+    assert row.cce_edition == "2nd ed."
+    assert row.cce_publication_places == "New York; London"
+    assert row.cce_author_place == "Cambridge, Mass."
+    assert row.cce_author_is_claimant == 1
+    assert row.cce_copies == "2c."
+    assert row.cce_aff_date == "1953-06-01"
+    assert row.cce_desc == "vi, 200 p."
+    assert row.cce_notes == "note one\nnote two"
+    assert row.cce_new_matter_claimed == "added ch. 5"
+    assert row.cce_copy_date == "1953-04-01"
+    assert row.cce_notice_date == "1953-04-02"
+
+
+def test_extended_cce_columns_default_to_null(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        db.insert_pair(_pair())
+        row = db.next_unlabeled()
+    assert row is not None
+    assert row.cce_edition is None
+    assert row.cce_publication_places is None
+    assert row.cce_author_place is None
+    assert row.cce_author_is_claimant is None
+    assert row.cce_copies is None
+    assert row.cce_aff_date is None
+    assert row.cce_desc is None
+    assert row.cce_notes is None
+    assert row.cce_new_matter_claimed is None
+    assert row.cce_copy_date is None
+    assert row.cce_notice_date is None
+
+
+def test_cce_author_is_claimant_stored_as_integer_flag(tmp_path: Path) -> None:
+    def _build(value: bool | None, control_id: str, uuid: str) -> PairInsert:
+        base = _pair(control_id=control_id, nypl_uuid=uuid)
+        return PairInsert(
+            language=base.language,
+            decade=base.decade,
+            score=base.score,
+            band=base.band,
+            source=base.source,
+            marc_control_id=base.marc_control_id,
+            marc_json=base.marc_json,
+            marc_title=base.marc_title,
+            marc_author=base.marc_author,
+            marc_publisher=base.marc_publisher,
+            marc_year=base.marc_year,
+            nypl_uuid=base.nypl_uuid,
+            cce_title=base.cce_title,
+            cce_author=base.cce_author,
+            cce_publishers=base.cce_publishers,
+            cce_claimants=base.cce_claimants,
+            cce_reg_year=base.cce_reg_year,
+            cce_was_renewed=base.cce_was_renewed,
+            cce_regnum=base.cce_regnum,
+            evidence_json=base.evidence_json,
+            cce_author_is_claimant=value,
+        )
+
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        db.insert_pair(_build(True, "t", "u-t"))
+        db.insert_pair(_build(False, "f", "u-f"))
+        db.insert_pair(_build(None, "n", "u-n"))
+        truthy = db.next_unlabeled()
+        assert truthy is not None
+        assert truthy.cce_author_is_claimant == 1
+        db.add_label(truthy.id, VERDICT_MATCH)
+        falsy = db.next_unlabeled()
+        assert falsy is not None
+        assert falsy.cce_author_is_claimant == 0
+        db.add_label(falsy.id, VERDICT_MATCH)
+        none_row = db.next_unlabeled()
+        assert none_row is not None
+        assert none_row.cce_author_is_claimant is None
+
+
+def test_init_schema_adds_extended_cce_columns_to_legacy_pair_table(tmp_path: Path) -> None:
+    from sqlite3 import connect as sqlite_connect
+
+    db_path = tmp_path / "legacy_pair.db"
+    legacy = sqlite_connect(db_path)
+    legacy.executescript(
+        """
+        CREATE TABLE review_pair (
+            id INTEGER PRIMARY KEY,
+            language TEXT NOT NULL,
+            decade INTEGER,
+            score REAL NOT NULL,
+            band TEXT NOT NULL,
+            source TEXT NOT NULL,
+            marc_control_id TEXT NOT NULL,
+            marc_json TEXT NOT NULL,
+            marc_title TEXT,
+            marc_author TEXT,
+            marc_publisher TEXT,
+            marc_year INTEGER,
+            nypl_uuid TEXT NOT NULL,
+            cce_title TEXT,
+            cce_author TEXT,
+            cce_publishers TEXT,
+            cce_claimants TEXT,
+            cce_reg_year INTEGER,
+            cce_was_renewed INTEGER,
+            cce_regnum TEXT,
+            evidence_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO review_pair (
+            language, decade, score, band, source, marc_control_id, marc_json,
+            marc_title, marc_author, marc_publisher, marc_year, nypl_uuid,
+            cce_title, cce_author, cce_publishers, cce_claimants, cce_reg_year,
+            cce_was_renewed, cce_regnum, evidence_json, created_at
+        ) VALUES (
+            'eng', 1950, 0.9, 'ge90', 'banded', 'ctrl-legacy', '{}',
+            't', 'a', 'p', 1953, 'uuid-legacy',
+            'CCE', 'CCE Author', 'Pub', 'Claim', 1953,
+            1, 'R1', '{}', '2026-01-01T00:00:00+00:00'
+        );
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    with ReviewDb.connect(db_path) as db:
+        columns = {row[1] for row in db._conn.execute("PRAGMA table_info(review_pair)")}
+        assert "cce_edition" in columns
+        assert "cce_publication_places" in columns
+        assert "cce_author_place" in columns
+        assert "cce_author_is_claimant" in columns
+        assert "cce_copies" in columns
+        assert "cce_aff_date" in columns
+        assert "cce_desc" in columns
+        assert "cce_notes" in columns
+        assert "cce_new_matter_claimed" in columns
+        assert "cce_copy_date" in columns
+        assert "cce_notice_date" in columns
+        row = db.get_pair(1)
+    assert row is not None
+    assert row.cce_edition is None
+    assert row.cce_author_is_claimant is None
+
+
 def test_previous_labeled_none_when_nothing_labeled(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))

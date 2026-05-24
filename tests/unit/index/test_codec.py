@@ -24,10 +24,19 @@ def test_encode_reg_round_trips_full_record() -> None:
         reg_date=date(1940, 5, 10),
         reg_year=1940,
         author_name="Smith, John",
+        author_place="Cambridge, Mass.",
+        author_is_claimant=True,
         edition="1st ed.",
         publisher_names=("Acme Press",),
         publication_places=("New York",),
         claimants=("Acme Press",),
+        copies="2c.",
+        aff_date=date(1940, 6, 1),
+        desc="vi, 200 p.",
+        notes=("note one", "note two"),
+        new_matter_claimed="ch. 5 added",
+        copy_date=date(1940, 4, 1),
+        notice_date=date(1940, 4, 2),
     )
     assert decode_reg(encode_reg(record)) == record
 
@@ -35,6 +44,35 @@ def test_encode_reg_round_trips_full_record() -> None:
 def test_encode_reg_round_trips_minimal_record() -> None:
     record = IndexedNyplRegRecord(uuid="UUID-1", title="t", was_renewed=False)
     assert decode_reg(encode_reg(record)) == record
+
+
+def test_decode_reg_accepts_legacy_record_missing_new_cce_fields() -> None:
+    from msgspec.msgpack import encode as msgpack_encode
+
+    legacy_payload: dict[str, object] = {
+        "uuid": "UUID-LEGACY",
+        "title": "Pre-fields record",
+        "was_renewed": True,
+        "regnum": "A111111",
+        "reg_date": "1940-05-10",
+        "reg_year": 1940,
+        "author_name": "Smith, John",
+        "edition": "1st ed.",
+        "publisher_names": ["Acme Press"],
+        "publication_places": ["New York"],
+        "claimants": ["Acme Press"],
+    }
+    decoded = decode_reg(msgpack_encode(legacy_payload))
+    assert decoded.uuid == "UUID-LEGACY"
+    assert decoded.author_place is None
+    assert decoded.author_is_claimant is False
+    assert decoded.copies is None
+    assert decoded.aff_date is None
+    assert decoded.desc is None
+    assert decoded.notes == ()
+    assert decoded.new_matter_claimed is None
+    assert decoded.copy_date is None
+    assert decoded.notice_date is None
 
 
 def test_encode_ren_round_trips_full_record() -> None:
