@@ -1,15 +1,18 @@
 """Unit tests for the pure review view model."""
 
 from datetime import UTC
+from datetime import date
 from datetime import datetime
 from datetime import timedelta
 
 from msgspec.json import encode as json_encode
 from pd_matcher.models import MarcRecord
 
+from pd_groundtruth.review.view import CLAIMANT_LABEL
 from pd_groundtruth.review.view import RENEWAL_NOT_RENEWED
 from pd_groundtruth.review.view import RENEWAL_RENEWED
 from pd_groundtruth.review.view import RENEWAL_UNKNOWN
+from pd_groundtruth.review.view import author_is_claimant_label
 from pd_groundtruth.review.view import build_card
 from pd_groundtruth.review.view import build_labeled_row
 from pd_groundtruth.review.view import parse_evidence
@@ -42,7 +45,23 @@ def _marc(
     )
 
 
-def _row(marc: MarcRecord, *, evidence_json: str, was_renewed: int | None = 1) -> ReviewPairRow:
+def _row(
+    marc: MarcRecord,
+    *,
+    evidence_json: str,
+    was_renewed: int | None = 1,
+    cce_edition: str | None = None,
+    cce_publication_places: str | None = None,
+    cce_author_place: str | None = None,
+    cce_author_is_claimant: int | None = None,
+    cce_copies: str | None = None,
+    cce_aff_date: str | None = None,
+    cce_desc: str | None = None,
+    cce_notes: str | None = None,
+    cce_new_matter_claimed: str | None = None,
+    cce_copy_date: str | None = None,
+    cce_notice_date: str | None = None,
+) -> ReviewPairRow:
     return ReviewPairRow(
         id=7,
         language="eng",
@@ -66,6 +85,17 @@ def _row(marc: MarcRecord, *, evidence_json: str, was_renewed: int | None = 1) -
         cce_regnum="R99",
         evidence_json=evidence_json,
         created_at="2026-05-22T00:00:00+00:00",
+        cce_edition=cce_edition,
+        cce_publication_places=cce_publication_places,
+        cce_author_place=cce_author_place,
+        cce_author_is_claimant=cce_author_is_claimant,
+        cce_copies=cce_copies,
+        cce_aff_date=cce_aff_date,
+        cce_desc=cce_desc,
+        cce_notes=cce_notes,
+        cce_new_matter_claimed=cce_new_matter_claimed,
+        cce_copy_date=cce_copy_date,
+        cce_notice_date=cce_notice_date,
     )
 
 
@@ -149,6 +179,78 @@ def test_build_card_online_resource_match_is_case_insensitive() -> None:
         marc = _marc(extent=extent)
         card = build_card(_row(marc, evidence_json="{}"))
         assert card.marc_is_online_resource is True, extent
+
+
+def test_author_is_claimant_label_maps_truthy_only() -> None:
+    assert author_is_claimant_label(1) == CLAIMANT_LABEL
+    assert author_is_claimant_label(0) is None
+    assert author_is_claimant_label(None) is None
+
+
+def test_build_card_projects_all_new_cce_fields() -> None:
+    card = build_card(
+        _row(
+            _marc(),
+            evidence_json="{}",
+            cce_edition="2nd ed.",
+            cce_publication_places="New York; London",
+            cce_author_place="Cambridge, Mass.",
+            cce_author_is_claimant=1,
+            cce_copies="2c.",
+            cce_aff_date="1953-06-01",
+            cce_desc="vi, 200 p.",
+            cce_notes="note one\nnote two",
+            cce_new_matter_claimed="added ch. 5",
+            cce_copy_date="1953-04-01",
+            cce_notice_date="1953-04-02",
+        )
+    )
+    assert card.cce_edition == "2nd ed."
+    assert card.cce_publication_places == ("New York", "London")
+    assert card.cce_author_place == "Cambridge, Mass."
+    assert card.cce_author_is_claimant is True
+    assert card.author_is_claimant_label == CLAIMANT_LABEL
+    assert card.cce_copies == "2c."
+    assert card.cce_aff_date == date(1953, 6, 1)
+    assert card.cce_desc == "vi, 200 p."
+    assert card.cce_notes == ("note one", "note two")
+    assert card.cce_new_matter_claimed == "added ch. 5"
+    assert card.cce_copy_date == date(1953, 4, 1)
+    assert card.cce_notice_date == date(1953, 4, 2)
+
+
+def test_build_card_defaults_new_cce_fields_for_legacy_row() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.cce_edition is None
+    assert card.cce_publication_places == ()
+    assert card.cce_author_place is None
+    assert card.cce_author_is_claimant is False
+    assert card.author_is_claimant_label is None
+    assert card.cce_copies is None
+    assert card.cce_aff_date is None
+    assert card.cce_desc is None
+    assert card.cce_notes == ()
+    assert card.cce_new_matter_claimed is None
+    assert card.cce_copy_date is None
+    assert card.cce_notice_date is None
+
+
+def test_build_card_claimant_label_none_when_flag_false() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}", cce_author_is_claimant=0))
+    assert card.cce_author_is_claimant is False
+    assert card.author_is_claimant_label is None
+
+
+def test_build_card_drops_blank_chunks_in_publication_places() -> None:
+    card = build_card(
+        _row(_marc(), evidence_json="{}", cce_publication_places="New York;  ; London")
+    )
+    assert card.cce_publication_places == ("New York", "London")
+
+
+def test_build_card_single_note_round_trips() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}", cce_notes="just one"))
+    assert card.cce_notes == ("just one",)
 
 
 def _labeled_row(

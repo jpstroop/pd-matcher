@@ -96,10 +96,19 @@ def test_index_reg_copies_all_fields_and_adds_renewal_flag() -> None:
         reg_date=date(1940, 5, 10),
         reg_year=1940,
         author_name="Smith",
+        author_place="Cambridge, Mass.",
+        author_is_claimant=True,
         edition="1st",
         publisher_names=("Acme",),
         publication_places=("NY",),
         claimants=("Acme",),
+        copies="2c.",
+        aff_date=date(1940, 6, 1),
+        desc="vi, 200 p.",
+        notes=("note one", "note two"),
+        new_matter_claimed="ch. 5 added",
+        copy_date=date(1940, 4, 1),
+        notice_date=date(1940, 4, 2),
     )
     indexed = index_reg(parsed, was_renewed=True)
     assert isinstance(indexed, IndexedNyplRegRecord)
@@ -110,10 +119,33 @@ def test_index_reg_copies_all_fields_and_adds_renewal_flag() -> None:
     assert indexed.reg_date == parsed.reg_date
     assert indexed.reg_year == parsed.reg_year
     assert indexed.author_name == parsed.author_name
+    assert indexed.author_place == parsed.author_place
+    assert indexed.author_is_claimant == parsed.author_is_claimant
     assert indexed.edition == parsed.edition
     assert indexed.publisher_names == parsed.publisher_names
     assert indexed.publication_places == parsed.publication_places
     assert indexed.claimants == parsed.claimants
+    assert indexed.copies == parsed.copies
+    assert indexed.aff_date == parsed.aff_date
+    assert indexed.desc == parsed.desc
+    assert indexed.notes == parsed.notes
+    assert indexed.new_matter_claimed == parsed.new_matter_claimed
+    assert indexed.copy_date == parsed.copy_date
+    assert indexed.notice_date == parsed.notice_date
+
+
+def test_index_reg_preserves_defaults_for_new_cce_fields() -> None:
+    parsed = NyplRegRecord(uuid="UUID-1", title="t")
+    indexed = index_reg(parsed, was_renewed=False)
+    assert indexed.author_place is None
+    assert indexed.author_is_claimant is False
+    assert indexed.copies is None
+    assert indexed.aff_date is None
+    assert indexed.desc is None
+    assert indexed.notes == ()
+    assert indexed.new_matter_claimed is None
+    assert indexed.copy_date is None
+    assert indexed.notice_date is None
 
 
 def test_indexed_nypl_reg_record_is_frozen() -> None:

@@ -54,10 +54,19 @@ class NyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     ``None`` when no ``<regDate>`` exists; ``reg_year`` may still be set
     from the fallback chain so the record lands in a year bucket."""
     author_name: str | None = None
+    author_place: str | None = None
+    author_is_claimant: bool = False
     edition: str | None = None
     publisher_names: tuple[str, ...] = ()
     publication_places: tuple[str, ...] = ()
     claimants: tuple[str, ...] = ()
+    copies: str | None = None
+    aff_date: date | None = None
+    desc: str | None = None
+    notes: tuple[str, ...] = ()
+    new_matter_claimed: str | None = None
+    copy_date: date | None = None
+    notice_date: date | None = None
 
 
 class NyplRenRecord(Struct, frozen=True, forbid_unknown_fields=True):
@@ -95,10 +104,19 @@ class IndexedNyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     present. Mirrors :attr:`NyplRegRecord.reg_year`; ``reg_date`` remains
     strictly the registration date."""
     author_name: str | None = None
+    author_place: str | None = None
+    author_is_claimant: bool = False
     edition: str | None = None
     publisher_names: tuple[str, ...] = ()
     publication_places: tuple[str, ...] = ()
     claimants: tuple[str, ...] = ()
+    copies: str | None = None
+    aff_date: date | None = None
+    desc: str | None = None
+    notes: tuple[str, ...] = ()
+    new_matter_claimed: str | None = None
+    copy_date: date | None = None
+    notice_date: date | None = None
 
 
 def index_reg(record: NyplRegRecord, *, was_renewed: bool) -> IndexedNyplRegRecord:
@@ -121,10 +139,19 @@ def index_reg(record: NyplRegRecord, *, was_renewed: bool) -> IndexedNyplRegReco
         reg_date=record.reg_date,
         reg_year=record.reg_year,
         author_name=record.author_name,
+        author_place=record.author_place,
+        author_is_claimant=record.author_is_claimant,
         edition=record.edition,
         publisher_names=record.publisher_names,
         publication_places=record.publication_places,
         claimants=record.claimants,
+        copies=record.copies,
+        aff_date=record.aff_date,
+        desc=record.desc,
+        notes=record.notes,
+        new_matter_claimed=record.new_matter_claimed,
+        copy_date=record.copy_date,
+        notice_date=record.notice_date,
     )
 
 

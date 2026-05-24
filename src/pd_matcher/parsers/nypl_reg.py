@@ -214,6 +214,24 @@ def _collect_explicit_claimants(entry: _Element, stats: NyplRegParseStats) -> li
     return out
 
 
+def _extract_date_attr(entry: _Element, tag: str) -> date | None:
+    """Return the ``date`` attribute of ``entry``'s first ``<tag>`` child as a date."""
+    elem = entry.find(tag)
+    if elem is None:
+        return None
+    return _parse_date(elem.get("date"))
+
+
+def _collect_notes(entry: _Element, stats: NyplRegParseStats) -> tuple[str, ...]:
+    """Return the text of every ``<note>`` child of ``entry`` in document order."""
+    out: list[str] = []
+    for note in entry.iterfind("note"):
+        value = _text(note, stats)
+        if value is not None:
+            out.append(value)
+    return tuple(out)
+
+
 def _build_record(entry: _Element, stats: NyplRegParseStats) -> NyplRegRecord | None:
     """Translate one ``<copyrightEntry>`` into a :class:`NyplRegRecord`.
 
@@ -233,12 +251,27 @@ def _build_record(entry: _Element, stats: NyplRegParseStats) -> NyplRegRecord | 
     reg_date = _extract_reg_date(entry)
     reg_year = _derive_reg_year(entry, stats)
 
-    author_name = _text(entry.find("author/authorName"), stats)
+    first_author = entry.find("author")
+    author_name = (
+        _text(first_author.find("authorName"), stats) if first_author is not None else None
+    )
+    author_place = (
+        _text(first_author.find("authorPlace"), stats) if first_author is not None else None
+    )
+    author_is_claimant = first_author is not None and first_author.get("claimant") == "yes"
     edition = _text(entry.find("edition"), stats)
     publisher_names, claimants_from_pub = _collect_publisher_names(entry, stats)
     publication_places = _collect_publication_places(entry, stats)
     explicit_claimants = _collect_explicit_claimants(entry, stats)
     combined_claimants = (*claimants_from_pub, *explicit_claimants)
+
+    copies = _text(entry.find("copies"), stats)
+    aff_date = _extract_date_attr(entry, "affDate")
+    desc = _text(entry.find("desc"), stats)
+    notes = _collect_notes(entry, stats)
+    new_matter_claimed = _text(entry.find("newMatterClaimed"), stats)
+    copy_date = _extract_date_attr(entry, "copyDate")
+    notice_date = _extract_date_attr(entry, "noticeDate")
 
     stats.emitted += 1
     return NyplRegRecord(
@@ -248,10 +281,19 @@ def _build_record(entry: _Element, stats: NyplRegParseStats) -> NyplRegRecord | 
         reg_date=reg_date,
         reg_year=reg_year,
         author_name=author_name,
+        author_place=author_place,
+        author_is_claimant=author_is_claimant,
         edition=edition,
         publisher_names=tuple(publisher_names),
         publication_places=tuple(publication_places),
         claimants=combined_claimants,
+        copies=copies,
+        aff_date=aff_date,
+        desc=desc,
+        notes=notes,
+        new_matter_claimed=new_matter_claimed,
+        copy_date=copy_date,
+        notice_date=notice_date,
     )
 
 

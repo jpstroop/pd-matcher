@@ -36,11 +36,24 @@
     <h2>CCE (Copyright Office)</h2>
     {% if card.cce_title %}<div class="field"><div class="k">title</div><div class="v title">{{ card.cce_title }}</div></div>{% endif %}
     {% if card.cce_author %}<div class="field"><div class="k">author</div><div class="v">{{ card.cce_author }}</div></div>{% endif %}
+    {% if card.cce_author_place %}<div class="field"><div class="k">author place</div><div class="v">{{ card.cce_author_place }}</div></div>{% endif %}
+    {% if card.author_is_claimant_label %}<div class="field"><span class="badge-claimant">{{ card.author_is_claimant_label }}</span></div>{% endif %}
     {% if card.cce_publishers %}<div class="field"><div class="k">publishers</div><div class="v">{{ card.cce_publishers }}</div></div>{% endif %}
     {% if card.cce_claimants %}<div class="field"><div class="k">claimants</div><div class="v">{{ card.cce_claimants }}</div></div>{% endif %}
     {% if card.cce_reg_year is not none %}<div class="field"><div class="k">reg year</div><div class="v">{{ card.cce_reg_year }}</div></div>{% endif %}
     {% if card.cce_regnum %}<div class="field"><div class="k">reg number</div><div class="v">{{ card.cce_regnum }}</div></div>{% endif %}
     <div class="field"><div class="k">renewal</div><div class="v"><span class="renewal {{ card.cce_renewal_label | replace(' ', '') }}">{{ card.cce_renewal_label }}</span></div></div>
+    {% if card.cce_edition %}<div class="field"><div class="k">edition</div><div class="v">{{ card.cce_edition }}</div></div>{% endif %}
+    {% if card.cce_publication_places %}<div class="field"><div class="k">publication places</div><div class="v">{{ card.cce_publication_places | join("; ") }}</div></div>{% endif %}
+    {% if card.cce_desc %}<div class="field"><div class="k">description</div><div class="v">{{ card.cce_desc }}</div></div>{% endif %}
+    {% if card.cce_new_matter_claimed %}<div class="field"><div class="k">new matter claimed</div><div class="v cce-new-matter">{{ card.cce_new_matter_claimed }}</div></div>{% endif %}
+    {% if card.cce_copies %}<div class="field"><div class="k">copies</div><div class="v">{{ card.cce_copies }}</div></div>{% endif %}
+    {% if card.cce_notes %}<div class="field"><div class="k">notes</div><div class="v">
+      {% if card.cce_notes | length > 1 %}<ul class="cce-notes">{% for note in card.cce_notes %}<li>{{ note }}</li>{% endfor %}</ul>{% else %}{{ card.cce_notes[0] }}{% endif %}
+    </div></div>{% endif %}
+    {% if card.cce_copy_date %}<div class="field"><div class="k">copyright date</div><div class="v">{{ card.cce_copy_date.isoformat() }}</div></div>{% endif %}
+    {% if card.cce_aff_date %}<div class="field"><div class="k">affidavit date</div><div class="v">{{ card.cce_aff_date.isoformat() }}</div></div>{% endif %}
+    {% if card.cce_notice_date %}<div class="field"><div class="k">notice date</div><div class="v">{{ card.cce_notice_date.isoformat() }}</div></div>{% endif %}
   </section>
 </div>
 

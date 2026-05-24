@@ -66,6 +66,17 @@ def _pair(
         cce_was_renewed=True,
         cce_regnum="R12345",
         evidence_json='{"title.token_set": 1.0, "name.author": 0.8}',
+        cce_edition="2nd ed.",
+        cce_publication_places="New York; London",
+        cce_author_place="Cambridge, Mass.",
+        cce_author_is_claimant=True,
+        cce_copies="2c.",
+        cce_aff_date="1953-06-01",
+        cce_desc="vi, 200 p.",
+        cce_notes="first note\nsecond note",
+        cce_new_matter_claimed="added chapter 5",
+        cce_copy_date="1953-04-01",
+        cce_notice_date="1953-04-02",
     )
 
 
@@ -529,3 +540,29 @@ def test_labels_route_nav_link_present_on_other_pages(client: TestClient) -> Non
     response = client.get("/")
     assert response.status_code == 200
     assert 'href="/labels"' in response.text
+
+
+def test_card_renders_extended_cce_fields(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Cambridge, Mass." in response.text
+    assert "Author is claimant" in response.text
+    assert "2nd ed." in response.text
+    assert "New York; London" in response.text
+    assert "vi, 200 p." in response.text
+    assert "added chapter 5" in response.text
+    assert "2c." in response.text
+    assert "first note" in response.text
+    assert "second note" in response.text
+    assert "1953-04-01" in response.text
+    assert "1953-06-01" in response.text
+    assert "1953-04-02" in response.text
+
+
+def test_card_omits_extended_cce_rows_when_absent(empty_client: TestClient) -> None:
+    response = empty_client.get("/")
+    assert response.status_code == 200
+    assert "author place" not in response.text
+    assert "Author is claimant" not in response.text
+    assert "new matter claimed" not in response.text
+    assert "affidavit date" not in response.text

@@ -211,3 +211,212 @@ def test_reg_year_none_when_no_usable_date_anywhere(tmp_path: Path) -> None:
     )
     assert record.reg_date is None
     assert record.reg_year is None
+
+
+def test_author_place_extracted_when_present(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="AP1"><title>With author place.</title>'
+        "<author><authorName>Smith, J.</authorName>"
+        "<authorPlace>Cambridge, Mass.</authorPlace></author></copyrightEntry>",
+    )
+    assert record.author_place == "Cambridge, Mass."
+
+
+def test_author_place_absent_defaults_to_none(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="AP2"><title>No author place.</title>'
+        "<author><authorName>Smith, J.</authorName></author></copyrightEntry>",
+    )
+    assert record.author_place is None
+
+
+def test_author_is_claimant_true_when_attr_yes(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="AC1"><title>Author is claimant.</title>'
+        '<author claimant="yes"><authorName>Smith, J.</authorName></author></copyrightEntry>',
+    )
+    assert record.author_is_claimant is True
+
+
+def test_author_is_claimant_false_when_attr_absent(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="AC2"><title>No claimant attr.</title>'
+        "<author><authorName>Smith, J.</authorName></author></copyrightEntry>",
+    )
+    assert record.author_is_claimant is False
+
+
+def test_author_is_claimant_false_when_no_author(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="AC3"><title>No author at all.</title></copyrightEntry>',
+    )
+    assert record.author_is_claimant is False
+    assert record.author_name is None
+    assert record.author_place is None
+
+
+def test_copies_extracted_raw_text(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="CP1"><title>With copies.</title><copies>2c.</copies></copyrightEntry>',
+    )
+    assert record.copies == "2c."
+
+
+def test_copies_absent_defaults_to_none(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="CP2"><title>No copies.</title></copyrightEntry>',
+    )
+    assert record.copies is None
+
+
+def test_aff_date_parsed_from_attribute(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="AF1"><title>Has affDate.</title>'
+        '<regDate date="1940-05-10">May 10, 1940</regDate>'
+        '<affDate date="1940-06-01">Jun. 1, 1940</affDate></copyrightEntry>',
+    )
+    assert record.aff_date == date(1940, 6, 1)
+
+
+def test_aff_date_absent_defaults_to_none(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="AF2"><title>No affDate.</title></copyrightEntry>',
+    )
+    assert record.aff_date is None
+
+
+def test_desc_extracted_when_present(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="D1"><title>With desc.</title>'
+        "<desc>vi, 200 p. illus.</desc></copyrightEntry>",
+    )
+    assert record.desc == "vi, 200 p. illus."
+
+
+def test_desc_absent_defaults_to_none(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="D2"><title>No desc.</title></copyrightEntry>',
+    )
+    assert record.desc is None
+
+
+def test_notes_collected_in_order_when_multiple(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="N1"><title>With notes.</title>'
+        "<note>First note.</note><note>Second note.</note></copyrightEntry>",
+    )
+    assert record.notes == ("First note.", "Second note.")
+
+
+def test_notes_empty_tuple_when_absent(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="N2"><title>No notes.</title></copyrightEntry>',
+    )
+    assert record.notes == ()
+
+
+def test_notes_skip_empty_note_elements(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="N3"><title>Mixed notes.</title>'
+        "<note/><note>real one</note><note>   </note></copyrightEntry>",
+    )
+    assert record.notes == ("real one",)
+
+
+def test_new_matter_claimed_extracted_when_present(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="NM1"><title>Derivative work.</title>'
+        "<newMatterClaimed>ch. 5 added</newMatterClaimed></copyrightEntry>",
+    )
+    assert record.new_matter_claimed == "ch. 5 added"
+
+
+def test_new_matter_claimed_absent_defaults_to_none(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="NM2"><title>No new matter.</title></copyrightEntry>',
+    )
+    assert record.new_matter_claimed is None
+
+
+def test_copy_date_parsed_from_attribute(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="CD1"><title>Has copyDate.</title>'
+        '<copyDate date="1940-04-01">Apr. 1, 1940</copyDate></copyrightEntry>',
+    )
+    assert record.copy_date == date(1940, 4, 1)
+
+
+def test_copy_date_absent_defaults_to_none(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="CD2"><title>No copyDate.</title></copyrightEntry>',
+    )
+    assert record.copy_date is None
+
+
+def test_notice_date_parsed_from_attribute(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="ND1"><title>Has noticeDate.</title>'
+        '<noticeDate date="1940-04-02">Apr. 2, 1940</noticeDate></copyrightEntry>',
+    )
+    assert record.notice_date == date(1940, 4, 2)
+
+
+def test_notice_date_absent_defaults_to_none(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="ND2"><title>No noticeDate.</title></copyrightEntry>',
+    )
+    assert record.notice_date is None
+
+
+def test_full_cce_entry_extracts_every_new_field(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry regnum="A123" id="FULL1">'
+        "<title>A complete record.</title>"
+        '<author claimant="yes"><authorName>Doe, Jane</authorName>'
+        "<authorPlace>Cambridge, Mass.</authorPlace></author>"
+        "<edition>2nd ed.</edition>"
+        '<regDate date="1940-05-10">May 10, 1940</regDate>'
+        '<affDate date="1940-06-01">Jun. 1, 1940</affDate>'
+        '<copyDate date="1940-04-01">Apr. 1, 1940</copyDate>'
+        '<noticeDate date="1940-04-02">Apr. 2, 1940</noticeDate>'
+        "<copies>2c.</copies>"
+        "<desc>vi, 200 p.</desc>"
+        "<newMatterClaimed>added ch. 5</newMatterClaimed>"
+        "<note>handwritten correction</note>"
+        "<note>seen in second printing</note>"
+        "<publisher><pubName>Acme Press</pubName>"
+        "<pubPlace>New York</pubPlace></publisher></copyrightEntry>",
+    )
+    assert record.author_name == "Doe, Jane"
+    assert record.author_place == "Cambridge, Mass."
+    assert record.author_is_claimant is True
+    assert record.copies == "2c."
+    assert record.aff_date == date(1940, 6, 1)
+    assert record.copy_date == date(1940, 4, 1)
+    assert record.notice_date == date(1940, 4, 2)
+    assert record.desc == "vi, 200 p."
+    assert record.new_matter_claimed == "added ch. 5"
+    assert record.notes == ("handwritten correction", "seen in second printing")
+    assert record.edition == "2nd ed."
+    assert record.publication_places == ("New York",)
