@@ -96,3 +96,40 @@ rebuild safe — every adjudicated verdict is persisted to
   set, the other a single volume.
 - **Looks like one issue of a periodical** — the CCE entry appears to be a
   single issue of a serial rather than a monograph.
+
+## Field annotations
+
+Below the reason chips, the card surfaces a small annotation grid: five
+fields (`title`, `author`, `publisher`, `year`, `edition`) crossed with four
+judgments. Use it to flag *which fields the scorer got wrong*, so the future
+learned scorer has structured per-field signal to train on. Annotations are
+**optional** — annotate only what you actively noticed; leave the rest blank.
+
+Click a cell to flag a field; click again to clear. Only one judgment per
+field (it's a row-radio, not a chip).
+
+The four judgments:
+
+- **correct** — the scorer's per-field reading agrees with reality. Use this
+  sparingly to highlight fields where the scorer did well *despite* a tricky
+  surface form (e.g. it correctly matched "Doe, J." to "Jane Doe").
+- **overscored** — the scorer said the field matches, but on inspection it
+  doesn't. This is a per-field false positive: the scorer overweighted a
+  surface similarity that turned out to be coincidental. Common example:
+  publisher "Macmillan" appears on both sides but they're different
+  Macmillan imprints in different countries.
+- **underscored** — the scorer said the field doesn't match, but actually it
+  does once you account for transcription differences, abbreviations, or
+  formatting. This is a per-field false negative: the scorer was too strict.
+  Common example: author "Doe, John" vs. "John Doe" — same person, the
+  scorer didn't know that.
+- **n/a** — the field is missing on one or both sides, or otherwise not
+  assessable. Use this when there's no signal to evaluate (e.g. the CCE side
+  has no edition statement at all, so neither "correct" nor "overscored"
+  makes sense for `edition`).
+
+You don't have to annotate every field on every label. The intent is to
+capture the *occasional* per-field surprises — the cases where you can see
+the scorer making a systematic mistake. The aggregate of these annotations
+on `…/stats` becomes the diagnostic for which per-field scorers need
+re-tuning.

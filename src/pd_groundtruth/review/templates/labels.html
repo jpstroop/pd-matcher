@@ -63,6 +63,7 @@
         <th>reasons</th>
         <th>lang</th>
         <th>labeled</th>
+        <th>annotations</th>
       </tr>
     </thead>
     <tbody>
@@ -79,6 +80,11 @@
         </td>
         <td>{{ row.language }}</td>
         <td title="{{ row.labeled_at }}">{{ row.labeled_relative }}</td>
+        <td class="annotations-cell">
+          {% for tag in row.annotation_tags %}
+          <span class="annotation-tag">{{ tag }}</span>
+          {% endfor %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

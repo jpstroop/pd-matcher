@@ -27,9 +27,10 @@ from msgspec import Struct
 from msgspec.json import decode as json_decode
 from msgspec.json import encode as json_encode
 
+from pd_groundtruth.review.field_annotations import FieldAnnotation
 from pd_matcher.models import MarcRecord
 
-SCHEMA_VERSION: int = 1
+SCHEMA_VERSION: int = 2
 
 
 class MarcIdentifiers(Struct, frozen=True, forbid_unknown_fields=True):
@@ -46,6 +47,9 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     A ``(marc_control_id, nypl_uuid)`` pair may appear in the vault multiple
     times; the latest entry by file order wins. ``reasons`` is empty for
     ``match`` verdicts and zero-or-more controlled codes otherwise.
+
+    ``field_annotations`` carries the per-field scorer judgments (schema 2+)
+    and defaults to the empty tuple so schema-1 lines decode unchanged.
     """
 
     schema: int
@@ -57,6 +61,7 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     labeled_at: str
     labeler: str
     marc_identifiers: MarcIdentifiers
+    field_annotations: tuple[FieldAnnotation, ...] = ()
 
 
 def append_entry(path: Path, entry: VaultEntry) -> None:

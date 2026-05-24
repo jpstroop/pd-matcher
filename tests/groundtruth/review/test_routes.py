@@ -413,7 +413,7 @@ def test_label_appends_to_vault(client: TestClient, vault_path: Path) -> None:
     assert entry.verdict == "match"
     assert entry.reasons == ()
     assert entry.labeler == "jpstroop"
-    assert entry.schema == 1
+    assert entry.schema == 2
     assert entry.marc_identifiers.lccn == "40012345"
     assert entry.marc_identifiers.oclc == "0001"
     assert entry.marc_identifiers.isbns == ("9780000000000",)
@@ -755,3 +755,103 @@ def test_card_omits_renewal_details_block_when_no_renewal_fields(
     assert response.status_code == 200
     assert "Renewal details" not in response.text
     assert "renewal date" not in response.text
+
+
+def test_card_renders_field_annotation_grid(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "field annotations" in response.text
+    for field in ("title", "author", "publisher", "year", "edition"):
+        assert f'data-field="{field}"' in response.text
+    for judgment in ("correct", "overscored", "underscored", "n_a"):
+        assert f'data-judgment="{judgment}"' in response.text
+
+
+def test_label_records_field_annotations(client: TestClient, vault_path: Path) -> None:
+    response = client.post(
+        "/label",
+        data={
+            "pair_id": "1",
+            "verdict": "match",
+            "annotation_title": "correct",
+            "annotation_author": "overscored",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    [entry] = list(iter_entries(vault_path))
+    fields = {(ann.field, ann.judgment) for ann in entry.field_annotations}
+    assert fields == {("title", "correct"), ("author", "overscored")}
+
+
+def test_label_drops_blank_annotation_fields(client: TestClient, vault_path: Path) -> None:
+    client.post(
+        "/label",
+        data={
+            "pair_id": "1",
+            "verdict": "match",
+            "annotation_title": "correct",
+            "annotation_author": "",
+            "annotation_publisher": "",
+        },
+        follow_redirects=False,
+    )
+    [entry] = list(iter_entries(vault_path))
+    assert entry.field_annotations == tuple(
+        ann for ann in entry.field_annotations if ann.field == "title"
+    )
+    assert len(entry.field_annotations) == 1
+
+
+def test_stats_renders_per_field_annotation_table(client: TestClient, vault_path: Path) -> None:
+    client.post(
+        "/label",
+        data={
+            "pair_id": "1",
+            "verdict": "match",
+            "annotation_title": "correct",
+            "annotation_publisher": "overscored",
+        },
+        follow_redirects=False,
+    )
+    stats = client.get("/stats")
+    assert stats.status_code == 200
+    assert "Field annotations" in stats.text
+    assert ">title<" in stats.text
+    assert ">publisher<" in stats.text
+
+
+def test_stats_omits_annotation_table_when_no_annotations(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match"},
+        follow_redirects=False,
+    )
+    stats = client.get("/stats")
+    assert stats.status_code == 200
+    assert "Field annotations" not in stats.text
+
+
+def test_labels_table_shows_annotation_tags(labels_client: TestClient) -> None:
+    labels_client.post(
+        "/label",
+        data={
+            "pair_id": "1",
+            "verdict": "match",
+            "annotation_title": "correct",
+            "annotation_year": "n_a",
+        },
+        follow_redirects=False,
+    )
+    response = labels_client.get("/labels")
+    assert response.status_code == 200
+    assert "annotations" in response.text
+    assert "title:OK" in response.text
+    assert "year:n/a" in response.text
+
+
+def test_card_includes_hidden_inputs_for_each_annotation_field(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    for field in ("title", "author", "publisher", "year", "edition"):
+        assert f'name="annotation_{field}"' in response.text

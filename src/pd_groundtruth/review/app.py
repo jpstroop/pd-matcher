@@ -36,6 +36,12 @@ from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import append_entry
 from pd_groundtruth.label_vault import extract_marc_identifiers
+from pd_groundtruth.review.field_annotations import ALL_JUDGMENTS
+from pd_groundtruth.review.field_annotations import ANNOTATABLE_FIELDS
+from pd_groundtruth.review.field_annotations import FieldAnnotation
+from pd_groundtruth.review.field_annotations import judgment_label
+from pd_groundtruth.review.field_annotations import normalize_annotations
+from pd_groundtruth.review.field_annotations import summarize_field_annotations
 from pd_groundtruth.review.filters import ReviewFilters
 from pd_groundtruth.review.filters import label_filters_active
 from pd_groundtruth.review.filters import label_filters_query_string
@@ -62,6 +68,10 @@ _SKIP_QUERY: list[int] = Query([])
 _REASON_CONTEXT: dict[str, tuple[ReasonCode, ...]] = {
     "no_match_reasons": NO_MATCH_REASONS,
     "unsure_reasons": UNSURE_REASONS,
+}
+_FIELD_ANNOTATION_CONTEXT: dict[str, tuple[str, ...]] = {
+    "annotatable_fields": ANNOTATABLE_FIELDS,
+    "field_judgments": ALL_JUDGMENTS,
 }
 _LANGUAGE_CHOICES: tuple[str, ...] = ("eng", "fre", "ger", "spa", "ita")
 _VERDICT_CHOICES: tuple[str, ...] = ("match", "no_match", "unsure")
@@ -136,6 +146,7 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 "counts": counts,
                 "back_id": back_id,
                 **_REASON_CONTEXT,
+                **_FIELD_ANNOTATION_CONTEXT,
             },
         )
 
@@ -165,6 +176,7 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 "counts": counts,
                 "back_id": back_id,
                 **_REASON_CONTEXT,
+                **_FIELD_ANNOTATION_CONTEXT,
             },
         )
 
@@ -177,13 +189,33 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
         note: str | None = Form(None),
         language: str | None = Form(None),
         band: str | None = Form(None),
+        annotation_title: str | None = Form(None),
+        annotation_author: str | None = Form(None),
+        annotation_publisher: str | None = Form(None),
+        annotation_year: str | None = Form(None),
+        annotation_edition: str | None = Form(None),
     ) -> RedirectResponse:
         filters = parse_filters(language, band)
         clean_note = note.strip() if note is not None and note.strip() else None
         clean_reasons = normalize_reasons(verdict, reason)
+        clean_annotations = normalize_annotations(
+            {
+                "title": annotation_title or "",
+                "author": annotation_author or "",
+                "publisher": annotation_publisher or "",
+                "year": annotation_year or "",
+                "edition": annotation_edition or "",
+            }
+        )
         with ReviewDb.connect(_db_path(request)) as db:
             pair = db.get_pair(pair_id)
-            result = db.add_label(pair_id, verdict, note=clean_note, reasons=clean_reasons)
+            result = db.add_label(
+                pair_id,
+                verdict,
+                note=clean_note,
+                reasons=clean_reasons,
+                annotations=clean_annotations,
+            )
         if pair is not None:
             _append_vault_entry(
                 vault_path=_vault_path(request),
@@ -193,6 +225,7 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 reasons=clean_reasons,
                 note=clean_note,
                 labeled_at=result.labeled_at,
+                field_annotations=clean_annotations,
             )
         return _redirect_to_next(filters)
 
@@ -204,10 +237,18 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
         with ReviewDb.connect(_db_path(request)) as db:
             counts = db.progress()
             reason_summary = summarize_reasons(db.reason_counts())
+            annotation_summary = summarize_field_annotations(db.field_annotation_counts())
         return templates.TemplateResponse(
             request,
             "stats.html",
-            {"counts": counts, "filters": filters, "reason_summary": reason_summary},
+            {
+                "counts": counts,
+                "filters": filters,
+                "reason_summary": reason_summary,
+                "annotation_summary": annotation_summary,
+                "field_judgments": ALL_JUDGMENTS,
+                "judgment_label": judgment_label,
+            },
         )
 
     @app.get("/labels", response_class=HTMLResponse)
@@ -277,6 +318,7 @@ def _append_vault_entry(
     reasons: tuple[str, ...],
     note: str | None,
     labeled_at: str,
+    field_annotations: tuple[FieldAnnotation, ...] = (),
 ) -> None:
     """Append one verdict to the vault, swallowing and logging any I/O failure.
 
@@ -297,6 +339,7 @@ def _append_vault_entry(
             labeled_at=labeled_at,
             labeler=_LABELER,
             marc_identifiers=extract_marc_identifiers(marc),
+            field_annotations=field_annotations,
         )
         append_entry(vault_path, entry)
     except Exception:
