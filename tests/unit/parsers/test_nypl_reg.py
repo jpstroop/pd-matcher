@@ -520,3 +520,61 @@ def test_prev_regnums_skips_empty_elements(tmp_path: Path) -> None:
         "<prev-regNum>   </prev-regNum></copyrightEntry>",
     )
     assert record.prev_regnums == ("A200000",)
+
+
+def test_year_rejected_when_below_plausible_floor(tmp_path: Path) -> None:
+    """A regDate with year ``0159`` is rejected and the year falls back."""
+    stats = NyplRegParseStats()
+    records = list(
+        iter_nypl_reg_records(
+            _write_entry(
+                tmp_path,
+                '<copyrightEntry id="LOW"><title>Year too low.</title>'
+                '<regDate date="0159-01-01">Jan 1, 0159</regDate>'
+                '<copyDate date="1955-02-03">Feb 3, 1955</copyDate>'
+                "</copyrightEntry>",
+            ),
+            stats=stats,
+        )
+    )
+    assert len(records) == 1
+    assert records[0].reg_year == 1955
+    assert stats.years_rejected_out_of_range == 1
+
+
+def test_year_rejected_when_above_plausible_ceiling(tmp_path: Path) -> None:
+    """A pubDate with year ``5764`` is rejected and the chain returns ``None``."""
+    stats = NyplRegParseStats()
+    records = list(
+        iter_nypl_reg_records(
+            _write_entry(
+                tmp_path,
+                '<copyrightEntry id="HI"><title>Year too high.</title>'
+                "<publisher><pubName>Press</pubName>"
+                '<pubDate date="5764-01-01">5764</pubDate></publisher>'
+                "</copyrightEntry>",
+            ),
+            stats=stats,
+        )
+    )
+    assert len(records) == 1
+    assert records[0].reg_year is None
+    assert stats.years_rejected_out_of_range == 1
+
+
+def test_year_accepted_when_inside_plausible_range(tmp_path: Path) -> None:
+    """An in-range year does not increment the rejection counter."""
+    stats = NyplRegParseStats()
+    records = list(
+        iter_nypl_reg_records(
+            _write_entry(
+                tmp_path,
+                '<copyrightEntry id="OK"><title>In range.</title>'
+                '<regDate date="1955-06-12">Jun 12, 1955</regDate>'
+                "</copyrightEntry>",
+            ),
+            stats=stats,
+        )
+    )
+    assert records[0].reg_year == 1955
+    assert stats.years_rejected_out_of_range == 0

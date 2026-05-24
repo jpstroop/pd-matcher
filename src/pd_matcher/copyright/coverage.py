@@ -15,7 +15,7 @@ in the 1976-Act-regime catalog at copyright.gov rather than in the CCE.
 """
 
 from collections.abc import Iterable
-from itertools import pairwise
+from statistics import median
 
 from msgspec import Struct
 
@@ -36,14 +36,28 @@ registration. A 1977 registration could be renewed as late as 2005 (1977
 + 28). Anything beyond this is outside the 1909-Act renewal window.
 """
 
-_COVERAGE_PARTIALNESS_THRESHOLD: float = 0.50
-"""Bucket-size ratio below which a year is treated as partial-data.
+_COVERAGE_RELIABILITY_RATIO: float = 0.10
+"""Bucket-size ratio below which a year is treated as data-boundary noise.
 
-The "last reliable year" is the highest year ``y`` such that
-``bucket(y) >= _COVERAGE_PARTIALNESS_THRESHOLD * bucket(y-1)``. A bucket
-that drops below half the prior year's size is treated as evidence that
-the corpus is truncated at that boundary rather than that the year was
-genuinely quieter.
+A year is "reliable" when its bucket size is at least this fraction of
+the median bucket size over the most recent
+:data:`_COVERAGE_RELIABILITY_WINDOW` reliable years. The walk anchors at
+the histogram peak (where the corpus is densest) and steps outward; the
+first year whose bucket falls below ``ratio * median(recent reliable)``
+ends the walk. ``0.10`` was chosen against the production CCE histograms:
+the real renewal cliff is 1991 (23,254) → 1992 (21), a 99.9% drop that
+clears any threshold up to ~99%, while the genuine within-corpus
+year-to-year noise stays inside an order of magnitude.
+"""
+
+_COVERAGE_RELIABILITY_WINDOW: int = 5
+"""Number of trailing reliable years used to compute the comparison median.
+
+A trailing median (rather than the previous single year) absorbs
+year-to-year jitter in the histogram so a single low year does not freeze
+the walk inside the bulk of the data. Five years is small enough to track
+real corpus trends (e.g. the steady ramp in 1949-1955 registrations) but
+large enough to dampen single-year dips.
 """
 
 
@@ -86,45 +100,68 @@ instead of using this default.
 """
 
 
-def _last_reliable_year(
+def _walk_from_anchor(
     counts: dict[int, int],
     *,
-    threshold: float = _COVERAGE_PARTIALNESS_THRESHOLD,
-) -> int | None:
-    """Return the highest year whose bucket is not partial-truncation evidence.
+    anchor: int,
+    step: int,
+    window: int,
+    ratio: float,
+) -> int:
+    """Walk outward from ``anchor`` while bucket sizes stay reliable.
 
-    Walks years in ascending order; the result is the last year ``y`` such
-    that ``counts[y] >= threshold * counts[y-1]``. A bucket that falls
-    below the threshold is treated as data-boundary truncation, so the
-    result is the year *before* that drop.
+    The walk advances by ``step`` (``+1`` forward, ``-1`` backward).
+    At each step the next year's count is compared against
+    ``ratio * median(recent_reliable[-window:])``; the first year that
+    fails ends the walk. Returns the last year that passed (the anchor
+    itself when no neighbours qualify).
 
     Args:
-        counts: Per-year bucket sizes.
-        threshold: The partial-data ratio. Years whose bucket size is
-            below this fraction of the previous year's bucket are treated
-            as truncated.
+        counts: Per-year bucket sizes (already cleaned of out-of-range
+            garbage years).
+        anchor: The year the walk starts from; always counted as reliable.
+        step: ``+1`` to walk forward, ``-1`` to walk backward.
+        window: Number of trailing reliable buckets included in the
+            comparison median.
+        ratio: A year is reliable when ``counts[year] >= ratio * median``.
 
     Returns:
-        The highest reliable year, or ``None`` when ``counts`` is empty.
+        The outermost year that satisfied the reliability check.
     """
-    if not counts:
-        return None
-    years = sorted(counts)
-    last_good = years[0]
-    for prev, curr in pairwise(years):
-        prev_count = counts[prev]
-        curr_count = counts[curr]
-        if prev_count > 0 and curr_count < threshold * prev_count:
+    reliable: list[int] = [counts[anchor]]
+    last_good = anchor
+    year = anchor + step
+    while year in counts:
+        reference = median(reliable[-window:])
+        if counts[year] < ratio * reference:
             break
-        last_good = curr
+        reliable.append(counts[year])
+        last_good = year
+        year += step
     return last_good
 
 
-def _first_year(counts: dict[int, int]) -> int | None:
-    """Return the lowest year in ``counts`` (``None`` when empty)."""
+def _bounds_from_counts(
+    counts: dict[int, int],
+    *,
+    window: int = _COVERAGE_RELIABILITY_WINDOW,
+    ratio: float = _COVERAGE_RELIABILITY_RATIO,
+) -> tuple[int, int] | None:
+    """Return ``(min_year, max_year)`` derived from a histogram via the anchored walk.
+
+    The peak bucket is taken as the anchor (the densest, most reliable
+    year by construction); the walk then expands outward in both
+    directions, stopping at the first year whose count falls below
+    ``ratio`` times the median of the recent reliable buckets. Returns
+    ``None`` for an empty histogram so the caller can fall back to a
+    legacy default.
+    """
     if not counts:
         return None
-    return min(counts)
+    anchor = max(counts, key=lambda year: counts[year])
+    min_year = _walk_from_anchor(counts, anchor=anchor, step=-1, window=window, ratio=ratio)
+    max_year = _walk_from_anchor(counts, anchor=anchor, step=1, window=window, ratio=ratio)
+    return min_year, max_year
 
 
 def coverage_from_year_counts(
@@ -136,11 +173,22 @@ def coverage_from_year_counts(
 ) -> Coverage:
     """Derive a :class:`Coverage` from per-year bucket histograms.
 
-    The "last reliable year" per source is the highest year whose bucket
-    size is at least :data:`_COVERAGE_PARTIALNESS_THRESHOLD` of the
-    previous year's bucket size, capped at the legal-regime maximum.
-    Falls back to :data:`LEGACY_COVERAGE` defaults when a histogram is
-    empty so callers always receive a valid struct.
+    Each bound is found by anchoring at the peak (largest-count) year and
+    walking outward (forward for ``max``, backward for ``min``). A step
+    succeeds while the next year's count is at least
+    :data:`_COVERAGE_RELIABILITY_RATIO` times the median of the trailing
+    :data:`_COVERAGE_RELIABILITY_WINDOW` reliable buckets; the walk stops
+    at the first year that falls below that threshold. ``max`` is then
+    capped at the legal-regime maximum. Falls back to
+    :data:`LEGACY_COVERAGE` defaults when a histogram is empty so callers
+    always receive a valid struct.
+
+    Anchoring at the peak (rather than the first observed year) protects
+    the bounds against the long tail of garbage / partial-data years a
+    forward-only walk would freeze on. Single-year out-of-range entries
+    in the histogram cannot become the anchor (their count is one) and
+    cannot keep the backward walk from terminating (the trailing-median
+    comparison rejects them as soon as the bulk is exhausted).
 
     Args:
         reg_counts: ``{year: count}`` for registrations.
@@ -155,12 +203,18 @@ def coverage_from_year_counts(
         ``hard_reg_max_year`` and ``ren_max_year`` at
         ``hard_ren_max_year``.
     """
-    reg_min = _first_year(reg_counts) or LEGACY_COVERAGE.reg_min_year
-    ren_min = _first_year(ren_counts) or LEGACY_COVERAGE.ren_min_year
-    reg_last = _last_reliable_year(reg_counts)
-    ren_last = _last_reliable_year(ren_counts)
-    reg_uncapped = reg_last if reg_last is not None else LEGACY_COVERAGE.reg_max_year
-    ren_uncapped = ren_last if ren_last is not None else LEGACY_COVERAGE.ren_max_year
+    reg_bounds = _bounds_from_counts(reg_counts)
+    ren_bounds = _bounds_from_counts(ren_counts)
+    reg_min, reg_uncapped = (
+        reg_bounds
+        if reg_bounds is not None
+        else (LEGACY_COVERAGE.reg_min_year, LEGACY_COVERAGE.reg_max_year)
+    )
+    ren_min, ren_uncapped = (
+        ren_bounds
+        if ren_bounds is not None
+        else (LEGACY_COVERAGE.ren_min_year, LEGACY_COVERAGE.ren_max_year)
+    )
     reg_max = min(reg_uncapped, hard_reg_max_year)
     ren_max = min(ren_uncapped, hard_ren_max_year)
     return Coverage(

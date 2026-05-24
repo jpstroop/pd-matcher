@@ -119,9 +119,29 @@ def test_pub_year_in_ren_coverage_handles_missing_year() -> None:
     assert pub_year_in_ren_coverage(make_facts(pub_year=None), _NARROW_COVERAGE) is False
 
 
-def test_pub_year_in_ren_coverage_uses_28_year_window() -> None:
-    """``ren_coverage`` walks ``pub_year + 28`` against the renewal window."""
-    assert pub_year_in_ren_coverage(make_facts(pub_year=1931), _NARROW_COVERAGE) is True
+def test_pub_year_in_ren_coverage_requires_both_27_and_28() -> None:
+    """``ren_coverage`` requires both ``pub_year + 27`` and ``+ 28`` in range.
+
+    The 1909 Act §24 renewal window straddled the 28th calendar year
+    after registration: a registration in early year ``y`` renews in
+    ``y + 27``; a late-year registration renews in ``y + 28``. Both
+    candidate years must be inside coverage for the cohort to be fully
+    observable.
+    """
+    assert pub_year_in_ren_coverage(make_facts(pub_year=1932), _NARROW_COVERAGE) is True
     assert pub_year_in_ren_coverage(make_facts(pub_year=1977), _NARROW_COVERAGE) is True
-    assert pub_year_in_ren_coverage(make_facts(pub_year=1930), _NARROW_COVERAGE) is False
+    assert pub_year_in_ren_coverage(make_facts(pub_year=1931), _NARROW_COVERAGE) is False
     assert pub_year_in_ren_coverage(make_facts(pub_year=1978), _NARROW_COVERAGE) is False
+
+
+def test_pub_year_in_ren_coverage_requires_both_at_upper_boundary() -> None:
+    """``pub_year + 28`` must fit, not just ``pub_year + 27``."""
+    boundary = Coverage(reg_min_year=1923, reg_max_year=1977, ren_min_year=1950, ren_max_year=1990)
+    assert pub_year_in_ren_coverage(make_facts(pub_year=1963), boundary) is False
+    assert pub_year_in_ren_coverage(make_facts(pub_year=1962), boundary) is True
+
+
+def test_pub_year_in_ren_coverage_accepts_when_both_in_range() -> None:
+    """A widened upper bound lets ``pub_year + 28`` slip inside, satisfying both."""
+    widened = Coverage(reg_min_year=1923, reg_max_year=1977, ren_min_year=1950, ren_max_year=1991)
+    assert pub_year_in_ren_coverage(make_facts(pub_year=1963), widened) is True

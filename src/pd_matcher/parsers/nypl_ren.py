@@ -85,6 +85,22 @@ _HEADER_FROM_DB: tuple[str, ...] = (
 
 _KNOWN_HEADERS: tuple[tuple[str, ...], ...] = (_HEADER_PRE_1978, _HEADER_FROM_DB)
 
+_MIN_PLAUSIBLE_YEAR = 1700
+"""Floor used to reject impossible year values from CCE date columns.
+
+The CCE renewal corpus runs 1909-1991 in practice (with a 2005 hard
+cap); 1700 is well outside any plausible entry and only screens out
+parser garbage that would otherwise pollute the year histogram used by
+:func:`pd_matcher.copyright.coverage.coverage_from_year_counts`.
+"""
+
+_MAX_PLAUSIBLE_YEAR = 2100
+"""Ceiling matching :data:`_MIN_PLAUSIBLE_YEAR`.
+
+Catches malformed five-digit years (e.g. ``5764-01-01``) without
+rejecting any real entry.
+"""
+
 
 class NyplRenHeaderError(ValueError):
     """Raised when a renewal TSV's header row does not match either contract."""
@@ -138,6 +154,7 @@ class NyplRenParseStats:
         "mojibake_fixed_count",
         "subfields_decoded_as_cp1255",
         "subfields_decoded_with_replacement",
+        "years_rejected_out_of_range",
     )
 
     def __init__(self) -> None:
@@ -145,6 +162,7 @@ class NyplRenParseStats:
         self.mojibake_fixed_count = 0
         self.subfields_decoded_as_cp1255 = 0
         self.subfields_decoded_with_replacement = 0
+        self.years_rejected_out_of_range = 0
 
 
 def _file_is_utf8(path: Path) -> bool:
@@ -167,15 +185,26 @@ def _clean_cell(value: str, stats: NyplRenParseStats) -> str | None:
     return cleaned.text or None
 
 
-def _parse_iso_date(value: str) -> date | None:
-    """Parse ``value`` as ISO date or return ``None`` on blank/invalid input."""
+def _parse_iso_date(value: str, stats: NyplRenParseStats) -> date | None:
+    """Parse ``value`` as ISO date or return ``None`` on blank/invalid input.
+
+    Dates whose year falls outside
+    ``[_MIN_PLAUSIBLE_YEAR, _MAX_PLAUSIBLE_YEAR]`` are rejected as parser
+    garbage; the rejection increments
+    :attr:`NyplRenParseStats.years_rejected_out_of_range` and the
+    function returns ``None`` so the cell becomes a missing date.
+    """
     cleaned = value.strip()
     if not cleaned:
         return None
     try:
-        return date.fromisoformat(cleaned)
+        parsed = date.fromisoformat(cleaned)
     except ValueError:
         return None
+    if not _MIN_PLAUSIBLE_YEAR <= parsed.year <= _MAX_PLAUSIBLE_YEAR:
+        stats.years_rejected_out_of_range += 1
+        return None
+    return parsed
 
 
 def _row_to_record(
@@ -198,8 +227,8 @@ def _row_to_record(
         id=renewal_id,
         entry_id=entry_id,
         oreg=_clean_cell(row[columns.oreg], stats),
-        odat=_parse_iso_date(row[columns.odat]),
-        rdat=_parse_iso_date(row[columns.rdat]),
+        odat=_parse_iso_date(row[columns.odat], stats),
+        rdat=_parse_iso_date(row[columns.rdat], stats),
         author=_clean_cell(row[columns.author], stats),
         title=_clean_cell(row[columns.title], stats),
         claimants=_clean_cell(row[columns.claimants], stats),

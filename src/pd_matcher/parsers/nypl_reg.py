@@ -43,15 +43,31 @@ from pd_matcher.normalize.encoding import clean_text
 _ENTRY_TAG = "copyrightEntry"
 _YEAR_RE = re_compile(r"(\d{4})")
 
+_MIN_PLAUSIBLE_YEAR = 1700
+"""Floor used to reject impossible year derivations from CCE date elements.
+
+The CCE registration corpus runs 1891-1977 (1909 Act regime); 1700 is
+well outside the corpus boundary and only screens out parser garbage
+(e.g. ``date="0159-01-01"``) without rejecting any plausible entry.
+"""
+
+_MAX_PLAUSIBLE_YEAR = 2100
+"""Ceiling matching :data:`_MIN_PLAUSIBLE_YEAR`.
+
+Catches malformed five-digit years (e.g. ``date="5764-01-01"`` observed
+in the live corpus) without rejecting any real entry.
+"""
+
 
 class NyplRegParseStats:
     """Mutable counters surfaced to callers after a parse run."""
 
-    __slots__ = ("emitted", "mojibake_fixed_count")
+    __slots__ = ("emitted", "mojibake_fixed_count", "years_rejected_out_of_range")
 
     def __init__(self) -> None:
         self.emitted = 0
         self.mojibake_fixed_count = 0
+        self.years_rejected_out_of_range = 0
 
 
 def _text(element: _Element | None, stats: NyplRegParseStats) -> str | None:
@@ -115,13 +131,23 @@ def _year_from_date_element(elem: _Element | None, stats: NyplRegParseStats) -> 
     we read the leading 4-digit run from the attribute first. When the
     attribute is missing or malformed we fall back to the same 4-digit
     scan over the element's display text.
+
+    Years outside ``[_MIN_PLAUSIBLE_YEAR, _MAX_PLAUSIBLE_YEAR]`` are
+    rejected as parser garbage and increment
+    :attr:`NyplRegParseStats.years_rejected_out_of_range`; callers see
+    ``None`` and can move to the next fallback in the chain.
     """
     if elem is None:
         return None
-    from_attr = _year_from_text(elem.get("date"))
-    if from_attr is not None:
-        return from_attr
-    return _year_from_text(_text(elem, stats))
+    candidate = _year_from_text(elem.get("date"))
+    if candidate is None:
+        candidate = _year_from_text(_text(elem, stats))
+    if candidate is None:
+        return None
+    if not _MIN_PLAUSIBLE_YEAR <= candidate <= _MAX_PLAUSIBLE_YEAR:
+        stats.years_rejected_out_of_range += 1
+        return None
+    return candidate
 
 
 def _derive_reg_year(entry: _Element, stats: NyplRegParseStats) -> int | None:
