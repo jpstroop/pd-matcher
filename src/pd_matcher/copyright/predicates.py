@@ -17,6 +17,7 @@ from the MARC Code List for Countries (Library of Congress) so the
 predicate distinguishes US-published from foreign-published records.
 """
 
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.copyright.facts import Facts
 
 _US_COUNTRY_CODES: frozenset[str] = frozenset(
@@ -180,6 +181,34 @@ def match_confidence_at_least(facts: Facts, threshold: float) -> bool:
     return facts.match_confidence >= threshold
 
 
+def pub_year_in_reg_coverage(facts: Facts, coverage: Coverage) -> bool:
+    """Return ``True`` when ``pub_year`` falls within the registration coverage window.
+
+    An absence-of-registration assertion is only meaningful when the
+    pub-year is inside ``[coverage.reg_min_year, coverage.reg_max_year]``.
+    A missing ``pub_year`` is treated as out of coverage so the
+    corresponding rule short-circuits to ``UNKNOWN_INSUFFICIENT_COVERAGE``.
+    """
+    if facts.pub_year is None:
+        return False
+    return coverage.reg_min_year <= facts.pub_year <= coverage.reg_max_year
+
+
+def pub_year_in_ren_coverage(facts: Facts, coverage: Coverage) -> bool:
+    """Return ``True`` when the renewal window for ``pub_year`` is in coverage.
+
+    Renewals under the 1909 Act were filed in the 28th year after
+    registration. For a registration in year ``y``, the renewal would
+    have landed in year ``y + 28``. We treat the pub-year cohort as in
+    coverage when ``y + 28`` falls inside
+    ``[coverage.ren_min_year, coverage.ren_max_year]``.
+    """
+    if facts.pub_year is None:
+        return False
+    renewal_year = facts.pub_year + 28
+    return coverage.ren_min_year <= renewal_year <= coverage.ren_max_year
+
+
 __all__ = [
     "country_delayed_uraa",
     "country_is_foreign",
@@ -187,6 +216,8 @@ __all__ = [
     "country_no_treaty",
     "in_pd_by_age",
     "match_confidence_at_least",
+    "pub_year_in_reg_coverage",
+    "pub_year_in_ren_coverage",
     "published_before",
     "published_between",
     "published_on_or_after",

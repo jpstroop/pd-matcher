@@ -18,6 +18,8 @@ from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.copyright.assessment import CopyrightAssessment
+from pd_matcher.copyright.coverage import LEGACY_COVERAGE
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.evidence import Evidence
@@ -887,6 +889,9 @@ class _NullCceLookup:
 
     def get_registration(self, _uuid: str) -> object:
         return None
+
+    def coverage(self) -> Coverage:
+        return LEGACY_COVERAGE
 
 
 def test_build_queue_reports_vault_entries_missing_from_pool(

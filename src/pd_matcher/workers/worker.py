@@ -26,6 +26,7 @@ from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.copyright.facts import build_facts
 from pd_matcher.copyright.rules import assess
 from pd_matcher.index.lookup import NyplIndexLookup
@@ -66,6 +67,7 @@ def _process_record(
     pairings: CompiledPairings,
     ruleset: CopyrightRuleSet,
     assessment_config: CopyrightAssessmentConfig,
+    coverage: Coverage,
 ) -> WorkerOutput:
     """Run match + copyright rules over one record and return the wire payload."""
     match = match_record(
@@ -89,6 +91,7 @@ def _process_record(
     assessment = assess(
         facts,
         ruleset,
+        coverage=coverage,
         enable_assumptions=assessment_config.enable_assumptions,
     )
     return WorkerOutput(
@@ -137,6 +140,7 @@ def run_worker_loop(
     pairings: CompiledPairings,
     ruleset: CopyrightRuleSet,
     assessment_config: CopyrightAssessmentConfig,
+    coverage: Coverage,
     input_get: Callable[[], bytes | None],
     output_put: Callable[[bytes], None],
     stats_put: Callable[[bytes], None],
@@ -209,6 +213,7 @@ def run_worker_loop(
                     pairings=pairings,
                     ruleset=ruleset,
                     assessment_config=assessment_config,
+                    coverage=coverage,
                 )
                 output_put(encode_worker_output(output))
                 stats_put(_stats_event_for(output))
@@ -259,6 +264,7 @@ def worker_main(
     """
     pairings = compile_pairings(pairing_config)
     with NyplIndexLookup(index_path) as lookup:
+        coverage = lookup.coverage()
         return run_worker_loop(
             lookup=lookup,
             config=matching_config,
@@ -267,6 +273,7 @@ def worker_main(
             pairings=pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
+            coverage=coverage,
             input_get=input_get,
             output_put=output_put,
             stats_put=stats_put,

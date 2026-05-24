@@ -91,6 +91,14 @@ class CopyrightStatus(StrEnum):
     """The facts available do not let the engine reach a determination
     (e.g. delayed-URAA country, missing publication year)."""
 
+    UNKNOWN_INSUFFICIENT_COVERAGE = "UNKNOWN_INSUFFICIENT_COVERAGE"
+    """The rule that would apply to this publication year depends on
+    absence-of-evidence in our corpus (e.g., 'no registration'), but the
+    relevant year falls outside the index's reliable coverage window - so
+    the absence isn't meaningful. To get a definitive answer, consult the
+    US Copyright Office directly (https://www.copyright.gov/) or extend
+    the corpus."""
+
     UNKNOWN_NO_RULE_MATCHED = "UNKNOWN_NO_RULE_MATCHED"
     """No rule in the active ruleset matched the observed facts."""
 

@@ -11,6 +11,7 @@ from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.logging_config import configure_logging
 from pd_matcher.match.idf import IdfTable
@@ -70,6 +71,7 @@ def test_worker_loop_processes_one_batch_and_stops_on_poison_pill(
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
+    coverage: Coverage,
 ) -> None:
     outputs: list[bytes] = []
     stats: list[bytes] = []
@@ -86,6 +88,7 @@ def test_worker_loop_processes_one_batch_and_stops_on_poison_pill(
             pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
+            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=outputs.append,
             stats_put=stats.append,
@@ -111,6 +114,7 @@ def test_worker_loop_stops_when_shutdown_before_processing(
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
+    coverage: Coverage,
 ) -> None:
     outputs: list[bytes] = []
     stats: list[bytes] = []
@@ -123,6 +127,7 @@ def test_worker_loop_stops_when_shutdown_before_processing(
             pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
+            coverage=coverage,
             input_get=_build_input_get([encode_batch((_make_marc(),))]),
             output_put=outputs.append,
             stats_put=stats.append,
@@ -139,6 +144,7 @@ def test_worker_loop_stops_between_records_when_shutdown_fires(
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
+    coverage: Coverage,
 ) -> None:
     """A multi-record batch is aborted mid-batch when ``is_shutdown`` flips True."""
     outputs: list[bytes] = []
@@ -160,6 +166,7 @@ def test_worker_loop_stops_between_records_when_shutdown_fires(
             pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
+            coverage=coverage,
             input_get=_build_input_get([batch, None]),
             output_put=outputs.append,
             stats_put=stats.append,
@@ -246,6 +253,7 @@ def test_worker_loop_silent_at_verbosity_zero(
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
+    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
     """Default verbosity emits no per-worker lines."""
@@ -260,6 +268,7 @@ def test_worker_loop_silent_at_verbosity_zero(
             pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
+            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=_sink(),
             stats_put=_sink(),
@@ -279,6 +288,7 @@ def test_worker_loop_logs_start_and_finish_with_id_and_rate_at_v(
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
+    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
     """``-v`` logs worker id + rate on start and finish; no per-record hits."""
@@ -294,6 +304,7 @@ def test_worker_loop_logs_start_and_finish_with_id_and_rate_at_v(
             pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
+            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=_sink(),
             stats_put=_sink(),
@@ -317,6 +328,7 @@ def test_worker_loop_logs_per_record_hits_at_vv(
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
+    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
     """``-vv`` logs one hit line per record, carrying marc id and status."""
@@ -331,6 +343,7 @@ def test_worker_loop_logs_per_record_hits_at_vv(
             pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
+            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=_sink(),
             stats_put=_sink(),
@@ -351,6 +364,7 @@ def test_worker_loop_logs_progress_every_n_records(
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
+    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
     """A worker crossing the every-N threshold emits an interim progress line."""
@@ -366,6 +380,7 @@ def test_worker_loop_logs_progress_every_n_records(
             pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
+            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=_sink(),
             stats_put=_sink(),
@@ -384,6 +399,7 @@ def test_worker_loop_finish_logged_when_shutdown_mid_batch_at_v(
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
+    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
     """The mid-batch shutdown exit still logs a finish line under ``-v``."""
@@ -399,6 +415,7 @@ def test_worker_loop_finish_logged_when_shutdown_mid_batch_at_v(
             pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
+            coverage=coverage,
             input_get=_build_input_get([batch, None]),
             output_put=_sink(),
             stats_put=_sink(),
@@ -418,6 +435,7 @@ def test_worker_loop_hit_line_marks_no_match_at_vv(
     copyright_config: CopyrightAssessmentConfig,
     ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
+    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
     """An unmatchable record logs ``reg=none`` and ``score=0.0`` under ``-vv``."""
@@ -435,6 +453,7 @@ def test_worker_loop_hit_line_marks_no_match_at_vv(
             pairings=compiled_pairings,
             ruleset=ruleset,
             assessment_config=copyright_config,
+            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=_sink(),
             stats_put=_sink(),

@@ -17,6 +17,7 @@ from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
+from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.copyright.facts import build_facts
 from pd_matcher.copyright.rules import assess
 from pd_matcher.index.lookup import NyplIndexLookup
@@ -44,12 +45,13 @@ _LOGGER = getLogger(__name__)
 def _make_vault_pair_builder(
     ruleset: CopyrightRuleSet,
     copyright_config: CopyrightAssessmentConfig,
+    coverage: Coverage,
 ) -> Callable[[MarcRecord, IndexedNyplRegRecord, CandidateMatch], PairInsert]:
     """Build a closure that projects scored vault pairs into ``PairInsert`` rows.
 
-    Closes over the active ruleset + assessment config so each pair's
-    Cornell predicted status (Phase 5 rule engine) is materialized at vault
-    resolution time. Returning a closure keeps
+    Closes over the active ruleset + assessment config + index coverage
+    so each pair's Cornell predicted status (Phase 5 rule engine) is
+    materialized at vault resolution time. Returning a closure keeps
     :func:`pd_groundtruth.vault_pair_resolver.resolve_vault_pairs` signature
     unchanged.
     """
@@ -78,6 +80,7 @@ def _make_vault_pair_builder(
         assessment = assess(
             facts,
             ruleset,
+            coverage=coverage,
             enable_assumptions=copyright_config.enable_assumptions,
         )
         return _build_pair_insert(
@@ -133,8 +136,8 @@ def resolve_vault_for_build(
         idf=idf,
         calibrator=calibrator,
     )
-    build_pair = _make_vault_pair_builder(ruleset, copyright_config)
     with NyplIndexLookup(index_path) as lookup:
+        build_pair = _make_vault_pair_builder(ruleset, copyright_config, lookup.coverage())
         resolved, summary = resolve_vault_pairs(
             vault=vault,
             marc_lookup=marc_by_id.get,

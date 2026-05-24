@@ -93,6 +93,13 @@ class CopyrightRule(Struct, frozen=True, forbid_unknown_fields=True):
     member by name and is resolved at evaluation time. ``assumptions``
     holds static assumption strings that always apply when the rule
     fires; inference predicates may add further dynamic assumptions.
+
+    ``on_coverage_fail`` names the :class:`CopyrightStatus` the engine
+    short-circuits to when a coverage-aware predicate inside ``when``
+    returns ``False``. Coverage-aware predicates are those that consult
+    a :class:`~pd_matcher.copyright.coverage.Coverage` value (currently
+    ``pub_year_in_reg_coverage`` and ``pub_year_in_ren_coverage``).
+    Rules that don't depend on absence-of-evidence leave this ``None``.
     """
 
     name: Annotated[str, Meta(min_length=1)]
@@ -100,6 +107,7 @@ class CopyrightRule(Struct, frozen=True, forbid_unknown_fields=True):
     explanation: Annotated[str, Meta(min_length=1)]
     when: list[PredicateCall] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
+    on_coverage_fail: str | None = None
 
 
 class CopyrightRuleSet(Struct, frozen=True, forbid_unknown_fields=True):

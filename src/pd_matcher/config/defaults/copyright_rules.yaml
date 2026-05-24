@@ -67,7 +67,9 @@ rules:
         args: [1931, 1977]
       - predicate: was_registered
         negate: true
+      - predicate: pub_year_in_reg_coverage
     then: PD_US_PUB_NO_NOTICE_1931_1977
+    on_coverage_fail: UNKNOWN_INSUFFICIENT_COVERAGE
     explanation: >-
       US-published 1931-1977 with no surviving CCE registration; under
       the pre-1989 formality regime publication without notice and
@@ -91,7 +93,9 @@ rules:
       - predicate: was_registered
       - predicate: was_renewed
         negate: true
+      - predicate: pub_year_in_ren_coverage
     then: PD_REGISTERED_NOT_RENEWED
+    on_coverage_fail: UNKNOWN_INSUFFICIENT_COVERAGE
     explanation: >-
       Registered work, regardless of country of first publication, that
       was not renewed during its initial term (1931-1963 publication
@@ -139,7 +143,9 @@ rules:
       - predicate: published_between
         args: [1978, 1989]
       - predicate: was_registered
+      - predicate: pub_year_in_reg_coverage
     then: IN_COPYRIGHT_1978_1989_CURED
+    on_coverage_fail: UNKNOWN_INSUFFICIENT_COVERAGE
     explanation: >-
       Published between 1 Jan 1978 and 28 Feb 1989 with a surviving CCE
       registration; even if notice was originally omitted, the five-year
@@ -162,7 +168,9 @@ rules:
         args: [1978, 1989]
       - predicate: was_registered
         negate: true
+      - predicate: pub_year_in_reg_coverage
     then: PD_US_PUB_NO_REGISTRATION_1978_1989
+    on_coverage_fail: UNKNOWN_INSUFFICIENT_COVERAGE
     explanation: >-
       US-published between 1 Jan 1978 and 28 Feb 1989 without notice
       and never registered within the five-year cure window; the
@@ -245,7 +253,9 @@ rules:
         args: [1931, 1977]
       - predicate: country_delayed_uraa
         negate: true
+      - predicate: pub_year_in_reg_coverage
     then: IN_COPYRIGHT_FOREIGN_URAA_RESTORED
+    on_coverage_fail: UNKNOWN_INSUFFICIENT_COVERAGE
     explanation: >-
       Foreign work first published 1931-1977 in a country whose URAA
       restoration date is 1 January 1996, with no surviving CCE

@@ -215,7 +215,11 @@ the **renewal flag** — the public-domain tell (a registration that was *not*
 renewed is the signal we care about). Next to the renewal flag the card shows
 the **matcher's predicted Cornell status** (the Phase 5 rule engine's verdict
 for the pair) as a colored chip: green for any `PD_*` status, red for any
-`IN_COPYRIGHT_*` status, grey for unknown / unresolved. When a registration
+`IN_COPYRIGHT_*` status, grey for unknown / unresolved. The chip is followed by
+an italicized `(estimate)` marker and a one-line footer caveat linking to the
+[US Copyright Office](https://www.copyright.gov/) — the prediction is a
+best-effort automated determination based on MARC vs CCE matching, not a legal
+opinion; consult copyright.gov for authoritative status. When a registration
 was renewed, a **renewal-details** sub-block also appears with the renewal
 date, the claimants as transcribed on the renewal (with a warning marker
 when they differ from the registration's claimants), any new-matter the

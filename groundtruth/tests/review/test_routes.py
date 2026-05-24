@@ -701,6 +701,34 @@ def test_card_omits_predicted_status_chip_when_absent(
     assert "predicted status" not in response.text
 
 
+def test_card_renders_estimate_caveat_next_to_chip(client: TestClient) -> None:
+    """An ``(estimate)`` marker with a tooltip referencing copyright.gov sits next to the chip."""
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'class="status-estimate"' in response.text
+    assert "(estimate)" in response.text
+    assert "copyright.gov" in response.text
+
+
+def test_card_renders_status_caveat_footer_with_link(client: TestClient) -> None:
+    """A footer caveat with a clickable copyright.gov link follows the chip."""
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'class="status-caveat"' in response.text
+    assert 'href="https://www.copyright.gov/"' in response.text
+    assert "US Copyright Office" in response.text
+
+
+def test_card_omits_estimate_caveat_when_predicted_status_absent(
+    no_predicted_status_client: TestClient,
+) -> None:
+    """The ``(estimate)`` marker is tied to the chip; if the chip is absent so is it."""
+    response = no_predicted_status_client.get("/")
+    assert response.status_code == 200
+    assert "(estimate)" not in response.text
+    assert 'class="status-caveat"' not in response.text
+
+
 def test_card_renders_renewal_details_block_when_populated(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
