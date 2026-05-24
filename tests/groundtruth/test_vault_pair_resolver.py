@@ -8,16 +8,6 @@ isolation so they stay stable under future caller changes.
 
 from pathlib import Path
 
-from pd_matcher.cli import _load_default_matching_config
-from pd_matcher.cli import _load_default_pairing_config
-from pd_matcher.match.combiners.base import CombinedScore
-from pd_matcher.match.evidence import Evidence
-from pd_matcher.match.idf import IdfTable
-from pd_matcher.match.pairing_compiler import compile_pairings
-from pd_matcher.match.result import CandidateMatch
-from pd_matcher.models import IndexedNyplRegRecord
-from pd_matcher.models import MarcRecord
-
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import VaultEntry
@@ -29,6 +19,15 @@ from pd_groundtruth.vault_pair_resolver import build_marc_index
 from pd_groundtruth.vault_pair_resolver import iter_pool_shards
 from pd_groundtruth.vault_pair_resolver import make_pair_scorer
 from pd_groundtruth.vault_pair_resolver import resolve_vault_pairs
+from pd_matcher.cli import _load_default_matching_config
+from pd_matcher.cli import _load_default_pairing_config
+from pd_matcher.match.combiners.base import CombinedScore
+from pd_matcher.match.evidence import Evidence
+from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.pairing_compiler import compile_pairings
+from pd_matcher.match.result import CandidateMatch
+from pd_matcher.models import IndexedNyplRegRecord
+from pd_matcher.models import MarcRecord
 
 _MARC_NS = "http://www.loc.gov/MARC21/slim"
 _MARCXML_TEMPLATE = (

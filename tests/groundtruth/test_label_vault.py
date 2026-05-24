@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from msgspec import DecodeError
-from pd_matcher.models import MarcRecord
 from pytest import raises
 
 from pd_groundtruth.label_vault import SCHEMA_VERSION
@@ -13,6 +12,7 @@ from pd_groundtruth.label_vault import append_entry
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.label_vault import iter_entries
+from pd_matcher.models import MarcRecord
 
 
 def _entry(

@@ -3,7 +3,7 @@
 The vault is the *source of truth* for ground-truth labels.
 :class:`~pd_groundtruth.review_db.ReviewDb` is a transient working queue: it is
 rebuilt each time ``acquire`` and ``build-queue`` re-run (for example after a
-new filter lands). The vault, ``label_vault.jsonl``, lives in the repo and is
+new filter lands). The vault, ``data/label_vault.jsonl``, lives in the repo and is
 committed to git so the human labor invested in adjudicating pairs survives
 those rebuilds.
 
@@ -26,6 +26,7 @@ from pathlib import Path
 from msgspec import Struct
 from msgspec.json import decode as json_decode
 from msgspec.json import encode as json_encode
+
 from pd_matcher.models import MarcRecord
 
 SCHEMA_VERSION: int = 1

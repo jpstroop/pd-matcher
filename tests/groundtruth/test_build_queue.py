@@ -12,23 +12,6 @@ from pathlib import Path
 from pickle import loads as pickle_loads
 
 from msgspec.json import decode as json_decode
-from pd_matcher.cli import _load_default_matching_config
-from pd_matcher.cli import _load_default_pairing_config
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.config.schemas import CopyrightRuleSet
-from pd_matcher.config.schemas import MatchingConfig
-from pd_matcher.copyright.assessment import CopyrightAssessment
-from pd_matcher.copyright.coverage import LEGACY_COVERAGE
-from pd_matcher.copyright.coverage import Coverage
-from pd_matcher.copyright.status import CopyrightStatus
-from pd_matcher.match.combiners.base import CombinedScore
-from pd_matcher.match.evidence import Evidence
-from pd_matcher.match.prepare import read_manifest
-from pd_matcher.match.result import CandidateMatch
-from pd_matcher.match.result import MatchResult
-from pd_matcher.models import IndexedNyplRegRecord
-from pd_matcher.models import MarcRecord
-from pd_matcher.workers import RunReport
 from pytest import MonkeyPatch
 from pytest import raises
 
@@ -55,6 +38,23 @@ from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import BudgetModel
 from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
 from pd_groundtruth.vault_pair_resolver import ResolveSummary
+from pd_matcher.cli import _load_default_matching_config
+from pd_matcher.cli import _load_default_pairing_config
+from pd_matcher.config.schemas import CopyrightAssessmentConfig
+from pd_matcher.config.schemas import CopyrightRuleSet
+from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.copyright.assessment import CopyrightAssessment
+from pd_matcher.copyright.coverage import LEGACY_COVERAGE
+from pd_matcher.copyright.coverage import Coverage
+from pd_matcher.copyright.status import CopyrightStatus
+from pd_matcher.match.combiners.base import CombinedScore
+from pd_matcher.match.evidence import Evidence
+from pd_matcher.match.prepare import read_manifest
+from pd_matcher.match.result import CandidateMatch
+from pd_matcher.match.result import MatchResult
+from pd_matcher.models import IndexedNyplRegRecord
+from pd_matcher.models import MarcRecord
+from pd_matcher.workers import RunReport
 
 _MARC_NS = "http://www.loc.gov/MARC21/slim"
 _MARCXML_TEMPLATE = (
@@ -1010,10 +1010,9 @@ def test_load_calibrator_returns_none_when_file_absent(tmp_path: Path) -> None:
 
 
 def test_load_calibrator_reads_file_when_present(tmp_path: Path) -> None:
+    from pd_groundtruth.build_queue import _load_calibrator
     from pd_matcher.match.combiners.calibrator import PlattCalibrator
     from pd_matcher.match.combiners.calibrator import save_calibrator
-
-    from pd_groundtruth.build_queue import _load_calibrator
 
     saved = PlattCalibrator(
         a=-0.5, b=0.25, trained_at="2026-05-22T00:00:00+00:00", n_positive=10, n_negative=20
