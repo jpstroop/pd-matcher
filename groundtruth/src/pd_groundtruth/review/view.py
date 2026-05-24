@@ -35,6 +35,7 @@ CLAIMANT_LABEL: str = "Author is claimant"
 _ONLINE_RESOURCE_MARKER: str = "online resource"
 
 _LCCN_BASE_URL: str = "https://lccn.loc.gov/"
+_OCLC_BASE_URL: str = "https://www.worldcat.org/oclc/"
 
 
 class EvidenceBar(Struct, frozen=True, forbid_unknown_fields=True):
@@ -57,14 +58,22 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
 
     marc_title: str
     marc_title_main: str | None
+    marc_title_part_number: str | None
+    marc_title_part_name: str | None
     marc_statement_of_responsibility: str | None
     marc_main_author: str | None
     marc_added_authors: tuple[str, ...]
     marc_publisher: str | None
+    marc_publication_place: str | None
     marc_year: int | None
+    marc_publication_date_raw: str | None
     marc_edition: str | None
+    marc_extent: str | None
     marc_series_titles: tuple[str, ...]
     marc_lccn: str | None
+    marc_isbns: tuple[str, ...]
+    marc_oclc: str | None
+    marc_oclc_url: str | None
     marc_language_code: str | None
     marc_country_code: str | None
     marc_is_online_resource: bool
@@ -157,6 +166,13 @@ def _lccn_url(lccn: str | None) -> str | None:
     return f"{_LCCN_BASE_URL}{lccn}"
 
 
+def _oclc_url(oclc: str | None) -> str | None:
+    """Return the WorldCat permalink for ``oclc`` or ``None`` when absent."""
+    if not oclc:
+        return None
+    return f"{_OCLC_BASE_URL}{oclc}"
+
+
 def _parse_iso_date(raw: str | None) -> date | None:
     """Parse an ISO-formatted date string or return ``None`` when absent."""
     if raw is None:
@@ -180,6 +196,24 @@ def _title_main_if_distinct(marc: MarcRecord) -> str | None:
     if marc.title_main and marc.title_main != marc.title:
         return marc.title_main
     return None
+
+
+def _publication_date_raw_if_distinct(marc: MarcRecord) -> str | None:
+    """Return ``publication_date_raw`` only when it adds detail beyond the year.
+
+    The raw 260/264 ``$c`` often duplicates the four-digit ``publication_year``
+    (e.g. ``"1953"``); collapsing those cases to ``None`` keeps the rendered
+    card free of redundant rows. When the raw form carries extra punctuation,
+    qualifiers, or a different value entirely (e.g. ``"c1953."`` or
+    ``"[1953?]"``), the row is shown.
+    """
+    raw = marc.publication_date_raw
+    if not raw:
+        return None
+    year = marc.publication_year
+    if year is not None and raw.strip() == str(year):
+        return None
+    return raw
 
 
 def _is_online_resource(extent: str | None) -> bool:
@@ -214,14 +248,22 @@ def build_card(row: ReviewPairRow) -> ReviewCard:
         nypl_uuid=row.nypl_uuid,
         marc_title=marc.title,
         marc_title_main=_title_main_if_distinct(marc),
+        marc_title_part_number=marc.title_part_number,
+        marc_title_part_name=marc.title_part_name,
         marc_statement_of_responsibility=marc.statement_of_responsibility,
         marc_main_author=marc.main_author,
         marc_added_authors=marc.added_authors,
         marc_publisher=marc.publisher,
+        marc_publication_place=marc.publication_place,
         marc_year=marc.publication_year,
+        marc_publication_date_raw=_publication_date_raw_if_distinct(marc),
         marc_edition=marc.edition,
+        marc_extent=marc.extent,
         marc_series_titles=marc.series_titles,
         marc_lccn=marc.lccn,
+        marc_isbns=marc.isbns,
+        marc_oclc=marc.oclc,
+        marc_oclc_url=_oclc_url(marc.oclc),
         marc_language_code=marc.language_code,
         marc_country_code=marc.country_code,
         marc_is_online_resource=_is_online_resource(marc.extent),

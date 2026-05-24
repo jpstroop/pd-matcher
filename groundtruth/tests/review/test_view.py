@@ -12,6 +12,7 @@ from pd_groundtruth.review.view import CLAIMANT_LABEL
 from pd_groundtruth.review.view import RENEWAL_NOT_RENEWED
 from pd_groundtruth.review.view import RENEWAL_RENEWED
 from pd_groundtruth.review.view import RENEWAL_UNKNOWN
+from pd_groundtruth.review.view import _publication_date_raw_if_distinct
 from pd_groundtruth.review.view import author_is_claimant_label
 from pd_groundtruth.review.view import build_card
 from pd_groundtruth.review.view import build_labeled_row
@@ -26,18 +27,31 @@ def _marc(
     title: str = "The Full Title : a subtitle",
     title_main: str = "The Full Title",
     extent: str | None = None,
+    publication_place: str | None = None,
+    publication_date_raw: str | None = None,
+    publication_year: int | None = 1953,
+    isbns: tuple[str, ...] = (),
+    oclc: str | None = None,
+    title_part_number: str | None = None,
+    title_part_name: str | None = None,
 ) -> MarcRecord:
     return MarcRecord(
         control_id="ctrl-1",
         title=title,
         title_main=title_main,
         lccn="53001234",
+        oclc=oclc,
+        isbns=isbns,
+        title_part_number=title_part_number,
+        title_part_name=title_part_name,
         main_author="Doe, Jane",
         added_authors=("Roe, Richard",),
         statement_of_responsibility="by Jane Doe",
         edition="2nd ed.",
+        publication_place=publication_place,
         publisher="Acme Press",
-        publication_year=1953,
+        publication_date_raw=publication_date_raw,
+        publication_year=publication_year,
         extent=extent,
         series_titles=("Acme Studies",),
         language_code="eng",
@@ -290,6 +304,111 @@ def test_build_card_prev_regnums_empty_tuple_when_absent() -> None:
 def test_build_card_prev_regnums_drops_blank_chunks() -> None:
     card = build_card(_row(_marc(), evidence_json="{}", cce_prev_regnums="A100000;  ; A200000"))
     assert card.cce_prev_regnums == ("A100000", "A200000")
+
+
+def test_build_card_projects_publication_place_when_present() -> None:
+    marc = _marc(publication_place="New York")
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_publication_place == "New York"
+
+
+def test_build_card_publication_place_none_when_absent() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.marc_publication_place is None
+
+
+def test_build_card_projects_extent_when_present() -> None:
+    marc = _marc(extent="xxiv, 841 p.")
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_extent == "xxiv, 841 p."
+
+
+def test_build_card_extent_none_when_absent() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.marc_extent is None
+
+
+def test_build_card_projects_isbns_when_present() -> None:
+    marc = _marc(isbns=("9780000000000", "9781111111111"))
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_isbns == ("9780000000000", "9781111111111")
+
+
+def test_build_card_isbns_empty_tuple_when_absent() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.marc_isbns == ()
+
+
+def test_build_card_projects_oclc_and_url_when_present() -> None:
+    marc = _marc(oclc="123456")
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_oclc == "123456"
+    assert card.marc_oclc_url == "https://www.worldcat.org/oclc/123456"
+
+
+def test_build_card_oclc_and_url_none_when_absent() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.marc_oclc is None
+    assert card.marc_oclc_url is None
+
+
+def test_build_card_projects_title_part_number_when_present() -> None:
+    marc = _marc(title_part_number="Pt. 2")
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_title_part_number == "Pt. 2"
+
+
+def test_build_card_title_part_number_none_when_absent() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.marc_title_part_number is None
+
+
+def test_build_card_projects_title_part_name_when_present() -> None:
+    marc = _marc(title_part_name="The empire of Sebastopol")
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_title_part_name == "The empire of Sebastopol"
+
+
+def test_build_card_title_part_name_none_when_absent() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.marc_title_part_name is None
+
+
+def test_build_card_projects_publication_date_raw_when_distinct_from_year() -> None:
+    marc = _marc(publication_date_raw="c1953.", publication_year=1953)
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_publication_date_raw == "c1953."
+
+
+def test_build_card_publication_date_raw_none_when_equals_year() -> None:
+    marc = _marc(publication_date_raw="1953", publication_year=1953)
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_publication_date_raw is None
+
+
+def test_build_card_publication_date_raw_none_when_absent() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.marc_publication_date_raw is None
+
+
+def test_publication_date_raw_if_distinct_returns_none_when_raw_absent() -> None:
+    marc = _marc(publication_date_raw=None, publication_year=1953)
+    assert _publication_date_raw_if_distinct(marc) is None
+
+
+def test_publication_date_raw_if_distinct_returns_none_when_matches_year() -> None:
+    marc = _marc(publication_date_raw="1953", publication_year=1953)
+    assert _publication_date_raw_if_distinct(marc) is None
+
+
+def test_publication_date_raw_if_distinct_returns_raw_when_differs_from_year() -> None:
+    marc = _marc(publication_date_raw="[1953?]", publication_year=1953)
+    assert _publication_date_raw_if_distinct(marc) == "[1953?]"
+
+
+def test_publication_date_raw_if_distinct_returns_raw_when_year_missing() -> None:
+    marc = _marc(publication_date_raw="n.d.", publication_year=None)
+    assert _publication_date_raw_if_distinct(marc) == "n.d."
 
 
 def _labeled_row(

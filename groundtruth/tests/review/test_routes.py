@@ -38,10 +38,15 @@ def _pair(
         lccn="40012345",
         oclc="0001",
         isbns=("9780000000000",),
+        title_part_number="Pt. 2",
+        title_part_name="The empire of Sebastopol",
         main_author="Doe, Jane",
+        edition="2nd ed.",
+        publication_place="New York",
         publisher="Acme Press",
+        publication_date_raw="c1953.",
         publication_year=1953,
-        extent=extent,
+        extent=extent if extent is not None else "xxiv, 841 p.",
         language_code=language,
         country_code="nyu",
     )
@@ -584,3 +589,31 @@ def test_card_renders_prev_regnums_row(client: TestClient) -> None:
     assert response.status_code == 200
     assert "previous registrations" in response.text
     assert "A100000; A200000" in response.text
+
+
+def test_card_renders_extended_marc_fields(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "publication place" in response.text
+    assert ">New York<" in response.text
+    assert "date (raw)" in response.text
+    assert "c1953." in response.text
+    assert ">extent<" in response.text
+    assert "xxiv, 841 p." in response.text
+    assert ">isbns<" in response.text
+    assert "9780000000000" in response.text
+    assert ">oclc<" in response.text
+    assert 'href="https://www.worldcat.org/oclc/0001"' in response.text
+    assert "title parts" in response.text
+    assert "Pt. 2: The empire of Sebastopol" in response.text
+
+
+def test_card_omits_extended_marc_rows_when_absent(empty_client: TestClient) -> None:
+    response = empty_client.get("/")
+    assert response.status_code == 200
+    assert "publication place" not in response.text
+    assert "date (raw)" not in response.text
+    assert "title parts" not in response.text
+    assert ">isbns<" not in response.text
+    assert ">oclc<" not in response.text
+    assert "worldcat.org" not in response.text
