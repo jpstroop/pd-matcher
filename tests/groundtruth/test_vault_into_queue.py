@@ -5,15 +5,6 @@ from typing import Self
 from unittest.mock import patch
 
 from msgspec.json import encode as json_encode
-from pd_matcher.cli import _load_default_matching_config
-from pd_matcher.cli import _load_default_pairing_config
-from pd_matcher.copyright.coverage import LEGACY_COVERAGE
-from pd_matcher.copyright.coverage import Coverage
-from pd_matcher.match.combiners.base import CombinedScore
-from pd_matcher.match.evidence import Evidence
-from pd_matcher.match.result import CandidateMatch
-from pd_matcher.models import IndexedNyplRegRecord
-from pd_matcher.models import MarcRecord
 from typer.testing import CliRunner
 
 from pd_groundtruth.cli import app
@@ -29,6 +20,15 @@ from pd_groundtruth.vault_into_queue import BackfillSummary
 from pd_groundtruth.vault_into_queue import _make_pair_scorer
 from pd_groundtruth.vault_into_queue import build_marc_index
 from pd_groundtruth.vault_into_queue import run_backfill
+from pd_matcher.cli import _load_default_matching_config
+from pd_matcher.cli import _load_default_pairing_config
+from pd_matcher.copyright.coverage import LEGACY_COVERAGE
+from pd_matcher.copyright.coverage import Coverage
+from pd_matcher.match.combiners.base import CombinedScore
+from pd_matcher.match.evidence import Evidence
+from pd_matcher.match.result import CandidateMatch
+from pd_matcher.models import IndexedNyplRegRecord
+from pd_matcher.models import MarcRecord
 
 _RUNNER = CliRunner()
 

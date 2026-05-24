@@ -59,7 +59,7 @@ indicator — please note the `pair_id` so we can extend the filter. The
 [label vault](README.md#the-label-vault) (implemented in
 [#28](https://github.com/jpstroop/pd-matcher/issues/28)) is what makes that
 rebuild safe — every adjudicated verdict is persisted to
-`label_vault.jsonl` and re-applied automatically the next time
+`data/label_vault.jsonl` and re-applied automatically the next time
 `build-queue` runs.
 
 ## When to use each chip

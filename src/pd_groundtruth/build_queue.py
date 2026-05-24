@@ -37,6 +37,21 @@ from typing import Self
 from msgspec import Struct
 from msgspec.json import encode as json_encode
 from msgspec.structs import replace
+
+from pd_groundtruth.build_queue_vault import resolve_vault_for_build
+from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.label_vault import current_entries
+from pd_groundtruth.progress import render_kept_suffix
+from pd_groundtruth.review_db import PairInsert
+from pd_groundtruth.review_db import ReviewDb
+from pd_groundtruth.sampling import BAND_BELOW
+from pd_groundtruth.sampling import SOURCE_BANDED
+from pd_groundtruth.sampling import SOURCE_BELOW_SAMPLE
+from pd_groundtruth.sampling import BudgetModel
+from pd_groundtruth.sampling import band_of
+from pd_groundtruth.sampling import reservoir_sample
+from pd_groundtruth.vault_pair_resolver import IDF_CACHE_NAME as _SHARED_IDF_CACHE_NAME
+from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
 from pd_matcher.config.loader import load_copyright_rules
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
@@ -54,21 +69,6 @@ from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 from pd_matcher.parsers.marc import iter_marc_records
 from pd_matcher.workers import run_match
-
-from pd_groundtruth.build_queue_vault import resolve_vault_for_build
-from pd_groundtruth.label_vault import VaultEntry
-from pd_groundtruth.label_vault import current_entries
-from pd_groundtruth.progress import render_kept_suffix
-from pd_groundtruth.review_db import PairInsert
-from pd_groundtruth.review_db import ReviewDb
-from pd_groundtruth.sampling import BAND_BELOW
-from pd_groundtruth.sampling import SOURCE_BANDED
-from pd_groundtruth.sampling import SOURCE_BELOW_SAMPLE
-from pd_groundtruth.sampling import BudgetModel
-from pd_groundtruth.sampling import band_of
-from pd_groundtruth.sampling import reservoir_sample
-from pd_groundtruth.vault_pair_resolver import IDF_CACHE_NAME as _SHARED_IDF_CACHE_NAME
-from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
 
 _LOGGER = getLogger(__name__)
 

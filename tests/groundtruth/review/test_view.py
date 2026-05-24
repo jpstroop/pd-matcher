@@ -6,7 +6,6 @@ from datetime import datetime
 from datetime import timedelta
 
 from msgspec.json import encode as json_encode
-from pd_matcher.models import MarcRecord
 
 from pd_groundtruth.review.view import CLAIMANT_LABEL
 from pd_groundtruth.review.view import PREDICTED_STATUS_FAMILY_IN_COPYRIGHT
@@ -24,6 +23,7 @@ from pd_groundtruth.review.view import predicted_status_family
 from pd_groundtruth.review.view import render_renewal_label
 from pd_groundtruth.review_db import LabeledPairRow
 from pd_groundtruth.review_db import ReviewPairRow
+from pd_matcher.models import MarcRecord
 
 
 def _marc(

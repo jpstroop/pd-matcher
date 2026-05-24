@@ -11,7 +11,6 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from msgspec.json import encode as json_encode
-from pd_matcher.models import MarcRecord
 from pytest import fixture
 from pytest import mark
 
@@ -20,6 +19,7 @@ from pd_groundtruth.label_vault import iter_entries
 from pd_groundtruth.review.app import create_app
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
+from pd_matcher.models import MarcRecord
 
 pytestmark = mark.webui
 

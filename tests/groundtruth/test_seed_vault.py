@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from msgspec.json import encode as json_encode
-from pd_matcher.models import MarcRecord
 from typer.testing import CliRunner
 
 from pd_groundtruth.cli import app
@@ -12,6 +11,7 @@ from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
+from pd_matcher.models import MarcRecord
 
 _RUNNER = CliRunner()
 

@@ -13,6 +13,15 @@ from datetime import date
 from logging import getLogger
 from pathlib import Path
 
+from pd_groundtruth.label_vault import current_entries
+from pd_groundtruth.review_db import PairInsert
+from pd_groundtruth.sampling import SOURCE_BANDED
+from pd_groundtruth.sampling import band_of
+from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
+from pd_groundtruth.vault_pair_resolver import ResolveSummary
+from pd_groundtruth.vault_pair_resolver import build_marc_index
+from pd_groundtruth.vault_pair_resolver import make_pair_scorer
+from pd_groundtruth.vault_pair_resolver import resolve_vault_pairs
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
@@ -28,16 +37,6 @@ from pd_matcher.match.result import CandidateMatch
 from pd_matcher.match.result import MatchResult
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
-
-from pd_groundtruth.label_vault import current_entries
-from pd_groundtruth.review_db import PairInsert
-from pd_groundtruth.sampling import SOURCE_BANDED
-from pd_groundtruth.sampling import band_of
-from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
-from pd_groundtruth.vault_pair_resolver import ResolveSummary
-from pd_groundtruth.vault_pair_resolver import build_marc_index
-from pd_groundtruth.vault_pair_resolver import make_pair_scorer
-from pd_groundtruth.vault_pair_resolver import resolve_vault_pairs
 
 _LOGGER = getLogger(__name__)
 

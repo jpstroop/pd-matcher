@@ -23,24 +23,6 @@ from logging import getLogger
 from pathlib import Path
 
 from msgspec import Struct
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.config.schemas import CopyrightRuleSet
-from pd_matcher.config.schemas import MatchingConfig
-from pd_matcher.config.schemas import PairingConfig
-from pd_matcher.copyright.coverage import LEGACY_COVERAGE
-from pd_matcher.copyright.coverage import Coverage
-from pd_matcher.copyright.facts import build_facts
-from pd_matcher.copyright.rules import assess
-from pd_matcher.index.lookup import NyplIndexLookup
-from pd_matcher.match.combiners.calibrator import PlattCalibrator
-from pd_matcher.match.idf import IdfTable
-from pd_matcher.match.idf import load_or_build_idf
-from pd_matcher.match.pairing_compiler import CompiledPairings
-from pd_matcher.match.pairing_compiler import compile_pairings
-from pd_matcher.match.result import CandidateMatch
-from pd_matcher.match.result import MatchResult
-from pd_matcher.models import IndexedNyplRegRecord
-from pd_matcher.models import MarcRecord
 
 from pd_groundtruth.build_queue import _build_pair_insert
 from pd_groundtruth.build_queue import _language_of
@@ -59,6 +41,24 @@ from pd_groundtruth.vault_pair_resolver import ScorePairFn
 from pd_groundtruth.vault_pair_resolver import build_marc_index
 from pd_groundtruth.vault_pair_resolver import make_pair_scorer
 from pd_groundtruth.vault_pair_resolver import resolve_vault_pairs
+from pd_matcher.config.schemas import CopyrightAssessmentConfig
+from pd_matcher.config.schemas import CopyrightRuleSet
+from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.config.schemas import PairingConfig
+from pd_matcher.copyright.coverage import LEGACY_COVERAGE
+from pd_matcher.copyright.coverage import Coverage
+from pd_matcher.copyright.facts import build_facts
+from pd_matcher.copyright.rules import assess
+from pd_matcher.index.lookup import NyplIndexLookup
+from pd_matcher.match.combiners.calibrator import PlattCalibrator
+from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.idf import load_or_build_idf
+from pd_matcher.match.pairing_compiler import CompiledPairings
+from pd_matcher.match.pairing_compiler import compile_pairings
+from pd_matcher.match.result import CandidateMatch
+from pd_matcher.match.result import MatchResult
+from pd_matcher.models import IndexedNyplRegRecord
+from pd_matcher.models import MarcRecord
 
 BuildPairFn = Callable[[MarcRecord, IndexedNyplRegRecord, CandidateMatch], PairInsert]
 

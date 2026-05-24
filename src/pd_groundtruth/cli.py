@@ -12,10 +12,6 @@ from pathlib import Path
 from typing import Annotated
 
 from msgspec.json import decode as json_decode
-from pd_matcher.cli import _load_default_matching_config
-from pd_matcher.cli import _load_default_pairing_config
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.models import MarcRecord
 from typer import Exit
 from typer import Option
 from typer import Typer
@@ -36,6 +32,10 @@ from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import default_budget
 from pd_groundtruth.sampling import scale_budget
 from pd_groundtruth.vault_into_queue import vault_into_queue
+from pd_matcher.cli import _load_default_matching_config
+from pd_matcher.cli import _load_default_pairing_config
+from pd_matcher.config.schemas import CopyrightAssessmentConfig
+from pd_matcher.models import MarcRecord
 
 app = Typer(add_completion=False, help="Acquire Princeton MARC ground-truth candidates.")
 
@@ -45,7 +45,7 @@ _DEFAULT_WORKERS = 8
 _DEFAULT_SAMPLE_PER_LANG = 1500
 _DEFAULT_REVIEW_HOST = "127.0.0.1"
 _DEFAULT_REVIEW_PORT = 8000
-_DEFAULT_VAULT_PATH = Path("label_vault.jsonl")
+_DEFAULT_VAULT_PATH = Path("data/label_vault.jsonl")
 _LABELER = "jpstroop"
 _LOG_DIR_NAME = "logs"
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"

@@ -2,6 +2,9 @@
 
 from datetime import date
 
+from pd_groundtruth.build_queue import load_default_ruleset
+from pd_groundtruth.build_queue_vault import _make_vault_pair_builder
+from pd_groundtruth.sampling import SOURCE_BANDED
 from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.copyright.coverage import LEGACY_COVERAGE
 from pd_matcher.match.combiners.base import CombinedScore
@@ -9,10 +12,6 @@ from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.result import CandidateMatch
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
-
-from pd_groundtruth.build_queue import load_default_ruleset
-from pd_groundtruth.build_queue_vault import _make_vault_pair_builder
-from pd_groundtruth.sampling import SOURCE_BANDED
 
 
 def _marc() -> MarcRecord:

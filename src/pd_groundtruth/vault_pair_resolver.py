@@ -17,6 +17,9 @@ from logging import getLogger
 from pathlib import Path
 
 from msgspec import Struct
+
+from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.review_db import PairInsert
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
@@ -28,9 +31,6 @@ from pd_matcher.match.result import CandidateMatch
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 from pd_matcher.parsers.marc import iter_marc_records
-
-from pd_groundtruth.label_vault import VaultEntry
-from pd_groundtruth.review_db import PairInsert
 
 _LOGGER = getLogger(__name__)
 

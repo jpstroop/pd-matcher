@@ -1,7 +1,7 @@
 [project]
 name = "pd-matcher"
 version = "0.1.0"
-description = "Match MARC XML records against NYPL's transcription of the LoC Catalog of Copyright Entries to determine public-domain status."
+description = "Match MARC XML records against NYPL's transcription of the LoC Catalog of Copyright Entries to determine public-domain status, plus the labeling tooling used to build the project's ground-truth corpus."
 authors = [
     {name = "jstroop"},
 ]
@@ -21,8 +21,23 @@ dependencies = [
     "ftfy>=6.3.1",
 ]
 
+[project.optional-dependencies]
+acquire = [
+    "requests>=2.32.0",
+]
+review = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.18",
+]
+all = [
+    "pd-matcher[acquire,review]",
+]
+
 [project.scripts]
 pd-matcher = "pd_matcher.cli:app"
+pd-groundtruth = "pd_groundtruth.cli:app"
 
 [build-system]
 requires = ["pdm-backend"]
@@ -37,6 +52,7 @@ lint = "ruff check src tests"
 lint-fix = "ruff check --fix src tests"
 typecheck = "mypy src tests"
 test = "pytest"
+webui = "pytest -m webui -o addopts= --no-header"
 regression = "pytest -m regression --no-cov tests/regression"
 regression-baseline = "python tests/regression/update_baseline.py"
 gates = {composite = ["fmt", "lint", "typecheck", "test"]}
@@ -47,6 +63,8 @@ includes = [
     "src/pd_matcher/py.typed",
     "src/pd_matcher/config/defaults/*.yaml",
     "src/pd_matcher/normalize/stopwords_data/*.json",
+    "src/pd_groundtruth",
+    "src/pd_groundtruth/review/templates/*.html",
 ]
 package-dir = "src"
 
@@ -103,15 +121,20 @@ line-ending = "lf"
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-addopts = "--cov=src/pd_matcher --cov-branch --cov-fail-under=100 --cov-report=term-missing -m 'not slow and not regression'"
+addopts = "--cov=src/pd_matcher --cov=src/pd_groundtruth --cov-branch --cov-fail-under=100 --cov-report=term-missing -m 'not slow and not regression and not webui'"
 markers = [
     "slow: long-running integration tests (excluded from default run)",
     "regression: index-dependent end-to-end eval gate (excluded from default run)",
+    "webui: thin FastAPI route + template smoke tests (excluded from default run; runs via `pdm run webui`)",
 ]
 
 [tool.coverage.run]
 branch = true
-source = ["src/pd_matcher"]
+source = ["src/pd_matcher", "src/pd_groundtruth"]
+omit = [
+    "src/pd_groundtruth/review/app.py",
+    "src/pd_groundtruth/review/server.py",
+]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -129,6 +152,14 @@ dev = [
     "ruff>=0.8.0",
     "hypothesis>=6.115.0",
     "types-PyYAML>=6.0.12",
+    "types-requests>=2.32.0",
     "lxml-stubs>=0.5.1",
     "pre-commit>=4.6.0",
+    "responses>=0.25.0",
+    "httpx>=0.28.0",
+    "requests>=2.32.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.18",
 ]

@@ -31,7 +31,6 @@ from fastapi.responses import HTMLResponse
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from msgspec.json import decode as json_decode
-from pd_matcher.models import MarcRecord
 
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import VaultEntry
@@ -50,6 +49,7 @@ from pd_groundtruth.review.reasons import summarize_reasons
 from pd_groundtruth.review.view import build_card
 from pd_groundtruth.review.view import build_labeled_row
 from pd_groundtruth.review_db import ReviewDb
+from pd_matcher.models import MarcRecord
 
 _LOGGER = getLogger(__name__)
 

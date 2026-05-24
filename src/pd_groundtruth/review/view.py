@@ -16,12 +16,12 @@ from datetime import datetime
 
 from msgspec import Struct
 from msgspec.json import decode as json_decode
-from pd_matcher.models import MarcRecord
 
 from pd_groundtruth.review.reasons import reasons_for
 from pd_groundtruth.review.relative_time import format_relative
 from pd_groundtruth.review_db import LabeledPairRow
 from pd_groundtruth.review_db import ReviewPairRow
+from pd_matcher.models import MarcRecord
 
 _TITLE_TRUNCATE: int = 60
 _ELLIPSIS: str = "…"
