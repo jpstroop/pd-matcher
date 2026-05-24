@@ -92,7 +92,7 @@ line-ending = "lf"
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-addopts = "-m 'not webui' --cov=src/pd_groundtruth --cov-branch --cov-fail-under=90 --cov-report=term-missing"
+addopts = "-m 'not webui' --cov=src/pd_groundtruth --cov-branch --cov-fail-under=100 --cov-report=term-missing"
 markers = [
     "webui: thin FastAPI route + template smoke tests (deselected from the default run)",
 ]

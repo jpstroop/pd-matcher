@@ -302,6 +302,25 @@ def test_md5_mismatch_raises(tmp_path: Path) -> None:
             )
 
 
+def test_zero_per_decade_cap_stops_immediately_with_quotas_reached(tmp_path: Path) -> None:
+    archive = _make_targz(_collection(_eligible_records("eng", 1950, 1)))
+    digest = md5(archive).hexdigest()
+    dump_url = "https://example.test/dumps/dump1.tar.gz"
+
+    with RequestsMock() as mock:
+        mock.add(GET, _MANIFEST_URL, body=_manifest_payload([(dump_url, digest)]))
+        report = acquire(
+            out_dir=tmp_path / "out",
+            per_decade_cap=0,
+            min_year=_MIN_YEAR,
+            manifest_url=_MANIFEST_URL,
+        )
+
+    assert report.dumps_processed == 0
+    assert report.stopped_reason == "quotas_reached"
+    assert report.shards_written == 0
+
+
 def test_dumps_exhausted_across_two_dumps(tmp_path: Path) -> None:
     archive = _make_targz(_collection(_eligible_records("eng", 1950, 2)))
     digest = md5(archive).hexdigest()

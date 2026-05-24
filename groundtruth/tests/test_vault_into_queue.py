@@ -24,6 +24,7 @@ from pd_groundtruth.review_db import VERDICT_NO_MATCH
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.vault_into_queue import BackfillSummary
+from pd_groundtruth.vault_into_queue import _make_pair_scorer
 from pd_groundtruth.vault_into_queue import build_marc_index
 from pd_groundtruth.vault_into_queue import run_backfill
 
@@ -527,6 +528,28 @@ def test_vault_into_queue_end_to_end_against_fake_index(tmp_path: Path) -> None:
         rows = list(db.iter_current_labels())
     assert len(rows) == 1
     assert rows[0].marc_control_id == "id-1"
+
+
+def test_make_pair_scorer_delegates_to_shared_helper() -> None:
+    from pd_matcher.match.idf import IdfTable
+    from pd_matcher.match.pairing_compiler import compile_pairings
+
+    idf = IdfTable(
+        document_count=1,
+        default_idf=1.0,
+        source_hash="test",
+        language="eng",
+        idf={},
+    )
+    pairings = compile_pairings(_load_default_pairing_config())
+    scorer = _make_pair_scorer(
+        matching_config=_load_default_matching_config(),
+        pairings=pairings,
+        idf=idf,
+        calibrator=None,
+    )
+    candidate = scorer(_marc("ctrl-1"), _cce("uuid-1"))
+    assert candidate.nypl_uuid == "uuid-1"
 
 
 def test_vault_into_queue_with_empty_vault_returns_zero_summary(tmp_path: Path) -> None:
