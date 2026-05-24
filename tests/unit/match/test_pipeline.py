@@ -334,6 +334,93 @@ def test_match_record_handles_groups_with_no_pairings(tmp_path: Path) -> None:
     assert not any(ev.scorer == "name.publisher" for ev in result.best.evidence)
 
 
+def test_match_record_captures_winning_source_for_each_evidence(
+    tmp_path: Path, compiled_pairings: CompiledPairings
+) -> None:
+    """``evidence_sources`` lines up 1:1 with ``evidence`` and labels each entry.
+
+    Group scorers (title, author, publisher) carry the YAML pairing names of
+    the winning pairing; non-group scorers carry the empty sentinel.
+    """
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        idf = _idf(lookup)
+        config = _config(min_score=0.0)
+        marc = MarcRecord(
+            control_id="m",
+            title="A study of widgets",
+            title_main="A study of widgets",
+            main_author="Smith, John",
+            publisher="Acme Press",
+            publication_year=1940,
+        )
+        result = match_record(
+            marc,
+            lookup=lookup,
+            config=config,
+            idf=idf,
+            calibrator=None,
+            combiner=WeightedMeanCombiner(config=config),
+            pairings=compiled_pairings,
+        )
+    assert result.best is not None
+    assert len(result.best.evidence_sources) == len(result.best.evidence)
+    by_scorer = dict(zip(result.best.evidence, result.best.evidence_sources, strict=True))
+    title_source = next(src for ev, src in by_scorer.items() if ev.scorer == "title.token_set")
+    assert title_source[0] in {"title_full", "title_main", "series_lead"}
+    assert title_source[1] == "title"
+    lccn_source = next(src for ev, src in by_scorer.items() if ev.scorer == "lccn.exact")
+    assert lccn_source == ("", "")
+
+
+def test_match_record_source_reflects_winning_pairing_when_cross_pairing_wins(
+    tmp_path: Path,
+) -> None:
+    """When a group's second pairing wins, the captured source labels it.
+
+    Compiles a one-group config with two title pairings where the second
+    pairing (``backup_field`` ↔ ``title``) is the only one that can score
+    non-zero because the first MARC field is absent. The captured source
+    must point at the winning second pairing, not the first.
+    """
+    cfg = PairingConfig(
+        marc_fields={
+            "missing": FieldSpec(fields=("series_titles",), combine="first"),
+            "backup": FieldSpec(fields=("title_main",), combine="first"),
+        },
+        cce_fields={"t": FieldSpec(fields=("title",), combine="first")},
+        pairings=(
+            PairingSpec(group="title", marc="missing", cce="t"),
+            PairingSpec(group="title", marc="backup", cce="t"),
+        ),
+    )
+    pairings = compile_pairings(cfg)
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        idf = _idf(lookup)
+        config = _config(min_score=0.0)
+        marc = MarcRecord(
+            control_id="m",
+            title="A study of widgets",
+            title_main="A study of widgets",
+            publication_year=1940,
+        )
+        result = match_record(
+            marc,
+            lookup=lookup,
+            config=config,
+            idf=idf,
+            calibrator=None,
+            combiner=WeightedMeanCombiner(config=config),
+            pairings=pairings,
+        )
+    assert result.best is not None
+    title_index = next(
+        i for i, ev in enumerate(result.best.evidence) if ev.scorer == "title.token_set"
+    )
+    assert result.best.evidence_sources[title_index] == ("backup", "t")
+
+
 def test_match_record_author_via_sor_pairing_recovers_match(
     tmp_path: Path, compiled_pairings: CompiledPairings
 ) -> None:

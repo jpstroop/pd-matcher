@@ -21,6 +21,7 @@ from pd_groundtruth.build_queue import StratifyingResultWriter
 from pd_groundtruth.build_queue import StratifyingWriterFactory
 from pd_groundtruth.build_queue import _decade_of
 from pd_groundtruth.build_queue import _evidence_payload
+from pd_groundtruth.build_queue import _evidence_sources_payload
 from pd_groundtruth.build_queue import _iso_or_none
 from pd_groundtruth.build_queue import _iter_language_dirs
 from pd_groundtruth.build_queue import _join
@@ -140,16 +141,26 @@ def _cce(uuid: str = "uuid-1") -> IndexedNyplRegRecord:
     )
 
 
-def _match(score: float, *, uuid: str = "uuid-1") -> MatchResult:
+def _match(
+    score: float,
+    *,
+    uuid: str = "uuid-1",
+    evidence: tuple[Evidence, ...] = (
+        _evidence("title.token_set", 0.9),
+        _evidence("lccn.exact", 0.0, skipped=True),
+    ),
+    evidence_sources: tuple[tuple[str, str], ...] = (
+        ("title_main", "title"),
+        ("", ""),
+    ),
+) -> MatchResult:
     best = CandidateMatch(
         nypl_uuid=uuid,
         nypl_year=1953,
         combined=CombinedScore(raw=score * 100.0, calibrated=score),
-        evidence=(
-            _evidence("title.token_set", 0.9),
-            _evidence("lccn.exact", 0.0, skipped=True),
-        ),
+        evidence=evidence,
         losing_evidence=(),
+        evidence_sources=evidence_sources,
     )
     return MatchResult(marc_control_id="ctrl-1", best=best, alternates=(), candidates_considered=3)
 
@@ -194,6 +205,45 @@ def test_evidence_payload_drops_skipped() -> None:
         (_evidence("title.token_set", 0.9), _evidence("lccn.exact", 0.0, skipped=True))
     )
     assert payload == {"title.token_set": 0.9}
+
+
+def test_evidence_sources_payload_labels_group_scorers_only() -> None:
+    payload = _evidence_sources_payload(
+        (
+            _evidence("title.token_set", 0.9),
+            _evidence("name.publisher", 0.4),
+            _evidence("lccn.exact", 1.0),
+        ),
+        (("title_main", "title"), ("publisher", "author_name"), ("", "")),
+    )
+    assert payload == {
+        "title.token_set": "title_main ↔ title",
+        "name.publisher": "publisher ↔ author_name",
+    }
+
+
+def test_evidence_sources_payload_drops_skipped_entries() -> None:
+    payload = _evidence_sources_payload(
+        (
+            _evidence("title.token_set", 0.0, skipped=True),
+            _evidence("name.publisher", 0.4),
+        ),
+        (("title_main", "title"), ("publisher", "publisher_names")),
+    )
+    assert payload == {"name.publisher": "publisher ↔ publisher_names"}
+
+
+def test_evidence_sources_payload_returns_empty_when_sources_misaligned() -> None:
+    payload = _evidence_sources_payload(
+        (_evidence("title.token_set", 0.9), _evidence("name.publisher", 0.4)),
+        (("title_main", "title"),),
+    )
+    assert payload == {}
+
+
+def test_evidence_sources_payload_returns_empty_when_sources_omitted() -> None:
+    payload = _evidence_sources_payload((_evidence("title.token_set", 0.9),), ())
+    assert payload == {}
 
 
 def test_iter_language_dirs_yields_only_subdirs(tmp_path: Path) -> None:
@@ -345,6 +395,45 @@ def test_writer_persists_snapshot_fields(tmp_path: Path) -> None:
     assert row.cce_lccn == "28000854"
     assert row.cce_prev_regnums == "A100000; A200000"
     assert row.cce_predicted_status == "PD_REGISTERED_NOT_RENEWED"
+
+
+def test_writer_persists_evidence_sources_for_obvious_pairing(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    budget = BudgetModel(caps={("eng", "ge90"): 1})
+    with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
+        writer.write(_marc(control_id="c-obvious"), _match(0.95), _ASSESSMENT, _cce())
+    with ReviewDb.connect(db_path) as db:
+        row = db.next_unlabeled()
+    assert row is not None
+    assert json_decode(row.evidence_sources_json.encode("utf-8")) == {
+        "title.token_set": "title_main ↔ title"
+    }
+
+
+def test_writer_persists_evidence_sources_for_cross_pairing(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    budget = BudgetModel(caps={("eng", "ge90"): 1})
+    cross_match = _match(
+        0.95,
+        evidence=(
+            _evidence("title.token_set", 0.9),
+            _evidence("name.publisher", 0.29),
+        ),
+        evidence_sources=(
+            ("title_main", "title"),
+            ("publisher", "author_name"),
+        ),
+    )
+    with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
+        writer.write(_marc(control_id="c-cross"), cross_match, _ASSESSMENT, _cce())
+    with ReviewDb.connect(db_path) as db:
+        row = db.next_unlabeled()
+    assert row is not None
+    payload = json_decode(row.evidence_sources_json.encode("utf-8"))
+    assert payload == {
+        "title.token_set": "title_main ↔ title",
+        "name.publisher": "publisher ↔ author_name",
+    }
 
 
 def test_writer_persists_renewal_projection_when_matched_nypl_carries_it(

@@ -45,10 +45,18 @@ _OCLC_BASE_URL: str = "https://www.worldcat.org/oclc/"
 
 
 class EvidenceBar(Struct, frozen=True, forbid_unknown_fields=True):
-    """One per-field evidence reading for a horizontal score bar."""
+    """One per-field evidence reading for a horizontal score bar.
+
+    ``source`` is the human-readable ``"marc_field ↔ cce_field"`` label of the
+    pairing that produced the winning Evidence for group scorers (title /
+    author / publisher). It is ``None`` for non-group scorers (lccn, isbn,
+    year, edition) and for rows persisted before evidence-source capture
+    landed; the card template suppresses the breadcrumb in either case.
+    """
 
     scorer: str
     normalized: float
+    source: str | None = None
 
 
 class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
@@ -234,6 +242,17 @@ def parse_evidence(evidence_json: str) -> tuple[EvidenceBar, ...]:
     return tuple(EvidenceBar(scorer=scorer, normalized=score) for scorer, score in payload.items())
 
 
+def parse_evidence_sources(evidence_sources_json: str) -> dict[str, str]:
+    """Decode ``evidence_sources_json`` into a ``scorer -> "marc ↔ cce"`` map.
+
+    The stored shape is a flat JSON object mapping scorer name to the human
+    label of the winning pairing's ``(marc_field, cce_field)`` source. Older
+    rows persisted before evidence-source capture landed are missing keys
+    here and surface as ``EvidenceBar.source = None`` downstream.
+    """
+    return json_decode(evidence_sources_json, type=dict[str, str])
+
+
 def _title_main_if_distinct(marc: MarcRecord) -> str | None:
     """Return ``title_main`` only when it differs from the full ``title``."""
     if marc.title_main and marc.title_main != marc.title:
@@ -382,7 +401,16 @@ def build_card(row: ReviewPairRow) -> ReviewCard:
             row.cce_claimants, row.cce_renewal_claimants
         ),
         cce_has_renewal_details=_has_renewal_details(row),
-        evidence=parse_evidence(row.evidence_json),
+        evidence=_build_evidence(row.evidence_json, row.evidence_sources_json),
+    )
+
+
+def _build_evidence(evidence_json: str, evidence_sources_json: str) -> tuple[EvidenceBar, ...]:
+    """Combine the decoded score map with the decoded source map into bars."""
+    sources = parse_evidence_sources(evidence_sources_json)
+    return tuple(
+        EvidenceBar(scorer=bar.scorer, normalized=bar.normalized, source=sources.get(bar.scorer))
+        for bar in parse_evidence(evidence_json)
     )
 
 
@@ -472,6 +500,7 @@ __all__ = [
     "build_card",
     "build_labeled_row",
     "parse_evidence",
+    "parse_evidence_sources",
     "predicted_status_family",
     "render_renewal_label",
 ]

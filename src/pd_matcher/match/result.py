@@ -16,13 +16,24 @@ from pd_matcher.match.evidence import Evidence
 
 
 class CandidateMatch(Struct, frozen=True, forbid_unknown_fields=True):
-    """One scored (MARC, NYPL) candidate pair."""
+    """One scored (MARC, NYPL) candidate pair.
+
+    ``evidence_sources`` is a parallel tuple to ``evidence``: each element is
+    the ``(marc_field_name, cce_field_name)`` of the pairing that produced the
+    winning Evidence. For group scorers this surfaces which pairing won when a
+    group has multiple pairings (e.g. publisher↔publisher_names vs.
+    publisher↔author_name). For non-group scorers (lccn, isbn, year, edition)
+    the pair is ``("", "")`` because those scorers operate on a single fixed
+    field pairing built into the pipeline; downstream code (e.g. the review
+    UI's ``evidence_sources_json`` payload) suppresses empty-pair entries.
+    """
 
     nypl_uuid: str
     nypl_year: int | None
     combined: CombinedScore
     evidence: tuple[Evidence, ...]
     losing_evidence: tuple[Evidence, ...]
+    evidence_sources: tuple[tuple[str, str], ...] = ()
 
 
 class MatchResult(Struct, frozen=True, forbid_unknown_fields=True):

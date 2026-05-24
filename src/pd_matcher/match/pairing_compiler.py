@@ -86,9 +86,17 @@ _COMBINE_OPS: dict[str, CombineOp] = {
 
 
 class CompiledPairing(Struct, frozen=True, forbid_unknown_fields=True):
-    """One pairing as a pair of compiled, typed accessors plus its group."""
+    """One pairing as a pair of compiled, typed accessors plus its group.
+
+    ``marc_name`` and ``cce_name`` retain the YAML pairing entries' ``marc:``
+    and ``cce:`` keys so downstream code (e.g. evidence-source breadcrumbs in
+    the review UI) can label which composed-field pair produced a winning
+    score, even when the same scorer group has multiple pairings.
+    """
 
     group: str
+    marc_name: str
+    cce_name: str
     marc_accessor: MarcAccessor
     cce_accessor: CceAccessor
 
@@ -171,6 +179,8 @@ def _compile_pairing(
         raise ConfigError(f"pairing references unknown cce field {pairing.cce!r}")
     return CompiledPairing(
         group=pairing.group,
+        marc_name=pairing.marc,
+        cce_name=pairing.cce,
         marc_accessor=marc_accessor,
         cce_accessor=cce_accessor,
     )

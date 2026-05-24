@@ -116,6 +116,36 @@ def _evidence_payload(evidence: tuple[Evidence, ...]) -> dict[str, float]:
     return {ev.scorer: ev.normalized for ev in evidence if not ev.skipped}
 
 
+_SOURCE_SEPARATOR: str = " ↔ "
+
+
+def _evidence_sources_payload(
+    evidence: tuple[Evidence, ...],
+    sources: tuple[tuple[str, str], ...],
+) -> dict[str, str]:
+    """Return a ``scorer -> "marc_field ↔ cce_field"`` mapping for the 2b card.
+
+    Sources from non-group scorers (lccn, isbn, year, edition) carry the
+    sentinel ``("", "")`` pair from the pipeline and are dropped here; the
+    card already implies their field pairing from the scorer name. Skipped
+    Evidence is dropped to mirror :func:`_evidence_payload`. Length mismatch
+    between ``evidence`` and ``sources`` (e.g. an Evidence tuple from a
+    pre-#50 cache) collapses to an empty payload so the persisted column is
+    still valid JSON.
+    """
+    if len(sources) != len(evidence):
+        return {}
+    payload: dict[str, str] = {}
+    for ev, source in zip(evidence, sources, strict=True):
+        if ev.skipped:
+            continue
+        marc_field, cce_field = source
+        if not marc_field or not cce_field:
+            continue
+        payload[ev.scorer] = f"{marc_field}{_SOURCE_SEPARATOR}{cce_field}"
+    return payload
+
+
 def _language_of(marc: MarcRecord) -> str:
     """Return the MARC language code, falling back to :data:`_DEFAULT_LANGUAGE`."""
     return marc.language_code or _DEFAULT_LANGUAGE
@@ -139,6 +169,7 @@ def _build_pair_insert(
     band: str,
     source: str,
     predicted_status: str | None,
+    evidence_sources: tuple[tuple[str, str], ...] = (),
 ) -> PairInsert:
     """Assemble a :class:`PairInsert` snapshot from one matched record."""
     return PairInsert(
@@ -183,6 +214,9 @@ def _build_pair_insert(
         cce_renewal_title=matched_nypl.renewal_title,
         cce_renewal_claimants=matched_nypl.renewal_claimants,
         cce_renewal_new_matter=matched_nypl.renewal_new_matter,
+        evidence_sources_json=json_encode(
+            _evidence_sources_payload(evidence, evidence_sources)
+        ).decode("utf-8"),
     )
 
 
@@ -297,6 +331,7 @@ class StratifyingResultWriter:
                 band=BAND_BELOW,
                 source=SOURCE_BELOW_SAMPLE,
                 predicted_status=predicted_status,
+                evidence_sources=match.best.evidence_sources,
             )
             self._below_buffer.setdefault(language, []).append(
                 _BufferedCandidate(language=language, score=score, pair=pair)
@@ -314,6 +349,7 @@ class StratifyingResultWriter:
             band=band,
             source=SOURCE_BANDED,
             predicted_status=predicted_status,
+            evidence_sources=match.best.evidence_sources,
         )
         self._insert_with_vault(db, pair)
         self._kept[key] = self._kept.get(key, 0) + 1
