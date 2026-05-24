@@ -42,6 +42,8 @@
     {% if card.cce_claimants %}<div class="field"><div class="k">claimants</div><div class="v">{{ card.cce_claimants }}</div></div>{% endif %}
     {% if card.cce_reg_year is not none %}<div class="field"><div class="k">reg year</div><div class="v">{{ card.cce_reg_year }}</div></div>{% endif %}
     {% if card.cce_regnum %}<div class="field"><div class="k">reg number</div><div class="v">{{ card.cce_regnum }}</div></div>{% endif %}
+    {% if card.cce_lccn %}<div class="field"><div class="k">lccn</div><div class="v"><a href="{{ card.cce_lccn_url }}" target="_blank" rel="noopener noreferrer">{{ card.cce_lccn }}</a></div></div>{% endif %}
+    {% if card.cce_prev_regnums %}<div class="field"><div class="k">previous registrations</div><div class="v">{{ card.cce_prev_regnums | join("; ") }}</div></div>{% endif %}
     <div class="field"><div class="k">renewal</div><div class="v"><span class="renewal {{ card.cce_renewal_label | replace(' ', '') }}">{{ card.cce_renewal_label }}</span></div></div>
     {% if card.cce_edition %}<div class="field"><div class="k">edition</div><div class="v">{{ card.cce_edition }}</div></div>{% endif %}
     {% if card.cce_publication_places %}<div class="field"><div class="k">publication places</div><div class="v">{{ card.cce_publication_places | join("; ") }}</div></div>{% endif %}

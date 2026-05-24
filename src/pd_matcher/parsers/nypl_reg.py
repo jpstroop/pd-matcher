@@ -232,6 +232,35 @@ def _collect_notes(entry: _Element, stats: NyplRegParseStats) -> tuple[str, ...]
     return tuple(out)
 
 
+def _extract_lccn(entry: _Element, stats: NyplRegParseStats) -> str | None:
+    """Return the LCCN for ``entry`` or ``None`` when no usable value exists.
+
+    Prefers the ``normalized`` attribute (an 8-digit canonical form, e.g.
+    ``"28000854"``) when present and non-empty; falls back to the element's
+    encoding-cleaned text (e.g. ``"28-854"``). Takes the first ``<lccn>``
+    when several exist (same convention as ``<author>``).
+    """
+    elem = entry.find("lccn")
+    if elem is None:
+        return None
+    normalized = elem.get("normalized")
+    if normalized is not None:
+        stripped = normalized.strip()
+        if stripped:
+            return stripped
+    return _text(elem, stats)
+
+
+def _collect_prev_regnums(entry: _Element, stats: NyplRegParseStats) -> tuple[str, ...]:
+    """Return the text of every ``<prev-regNum>`` child of ``entry`` in order."""
+    out: list[str] = []
+    for prev in entry.iterfind("prev-regNum"):
+        value = _text(prev, stats)
+        if value is not None:
+            out.append(value)
+    return tuple(out)
+
+
 def _build_record(entry: _Element, stats: NyplRegParseStats) -> NyplRegRecord | None:
     """Translate one ``<copyrightEntry>`` into a :class:`NyplRegRecord`.
 
@@ -272,6 +301,8 @@ def _build_record(entry: _Element, stats: NyplRegParseStats) -> NyplRegRecord | 
     new_matter_claimed = _text(entry.find("newMatterClaimed"), stats)
     copy_date = _extract_date_attr(entry, "copyDate")
     notice_date = _extract_date_attr(entry, "noticeDate")
+    lccn = _extract_lccn(entry, stats)
+    prev_regnums = _collect_prev_regnums(entry, stats)
 
     stats.emitted += 1
     return NyplRegRecord(
@@ -294,6 +325,8 @@ def _build_record(entry: _Element, stats: NyplRegParseStats) -> NyplRegRecord | 
         new_matter_claimed=new_matter_claimed,
         copy_date=copy_date,
         notice_date=notice_date,
+        lccn=lccn,
+        prev_regnums=prev_regnums,
     )
 
 

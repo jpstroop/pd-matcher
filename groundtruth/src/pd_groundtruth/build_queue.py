@@ -101,6 +101,11 @@ def _join_notes(values: tuple[str, ...]) -> str | None:
     return "\n".join(values) if values else None
 
 
+def _join_prev_regnums(values: tuple[str, ...]) -> str | None:
+    """Join a tuple of CCE prev-regnums with ``"; "`` or return ``None``."""
+    return "; ".join(values) if values else None
+
+
 def _iso_or_none(value: date | None) -> str | None:
     """Return ``value.isoformat()`` or ``None`` when the date is absent."""
     return value.isoformat() if value is not None else None
@@ -167,6 +172,8 @@ def _build_pair_insert(
         cce_new_matter_claimed=matched_nypl.new_matter_claimed,
         cce_copy_date=_iso_or_none(matched_nypl.copy_date),
         cce_notice_date=_iso_or_none(matched_nypl.notice_date),
+        cce_lccn=matched_nypl.lccn,
+        cce_prev_regnums=_join_prev_regnums(matched_nypl.prev_regnums),
     )
 
 

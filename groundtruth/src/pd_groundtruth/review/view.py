@@ -34,6 +34,8 @@ CLAIMANT_LABEL: str = "Author is claimant"
 
 _ONLINE_RESOURCE_MARKER: str = "online resource"
 
+_LCCN_BASE_URL: str = "https://lccn.loc.gov/"
+
 
 class EvidenceBar(Struct, frozen=True, forbid_unknown_fields=True):
     """One per-field evidence reading for a horizontal score bar."""
@@ -87,6 +89,9 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     cce_new_matter_claimed: str | None
     cce_copy_date: date | None
     cce_notice_date: date | None
+    cce_lccn: str | None
+    cce_lccn_url: str | None
+    cce_prev_regnums: tuple[str, ...]
 
     evidence: tuple[EvidenceBar, ...]
 
@@ -131,6 +136,25 @@ def _split_notes(raw: str | None) -> tuple[str, ...]:
     if not raw:
         return ()
     return tuple(line for line in raw.splitlines() if line)
+
+
+def _split_prev_regnums(raw: str | None) -> tuple[str, ...]:
+    """Split a ``"; "``-joined prev-regnums string into a tuple, dropping blanks."""
+    if not raw:
+        return ()
+    return tuple(part for part in (chunk.strip() for chunk in raw.split(";")) if part)
+
+
+def _lccn_url(lccn: str | None) -> str | None:
+    """Return the public ``lccn.loc.gov`` URL for ``lccn`` or ``None`` when absent.
+
+    The LCCN permalink service accepts both the 8-digit normalized form and
+    the human ``NN-NNNN`` form, so no normalization is required here — the
+    value is interpolated as stored.
+    """
+    if not lccn:
+        return None
+    return f"{_LCCN_BASE_URL}{lccn}"
 
 
 def _parse_iso_date(raw: str | None) -> date | None:
@@ -220,6 +244,9 @@ def build_card(row: ReviewPairRow) -> ReviewCard:
         cce_new_matter_claimed=row.cce_new_matter_claimed,
         cce_copy_date=_parse_iso_date(row.cce_copy_date),
         cce_notice_date=_parse_iso_date(row.cce_notice_date),
+        cce_lccn=row.cce_lccn,
+        cce_lccn_url=_lccn_url(row.cce_lccn),
+        cce_prev_regnums=_split_prev_regnums(row.cce_prev_regnums),
         evidence=parse_evidence(row.evidence_json),
     )
 

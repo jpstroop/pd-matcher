@@ -198,8 +198,10 @@ database, so you can stop and resume any time.
 the **renewal flag** — the public-domain tell (a registration that was *not*
 renewed is the signal we care about). The CCE panel shows author place,
 claimant flag, edition, publication places, physical description,
-new-matter-claimed, copies, notes, copyright date, affidavit date, and notice
-date — every field the parser was able to extract from the CCE source.
+new-matter-claimed, copies, notes, copyright date, affidavit date, notice
+date, the LCCN (linked to lccn.loc.gov for cross-referencing), and any
+previous registration numbers — every field the parser was able to extract
+from the CCE source.
 
 **Label with the keyboard.** The UI auto-advances to the next unlabeled pair, and
 every keypress writes to `review.db`:
@@ -320,7 +322,7 @@ review_pair (id PK, language, decade, score, band, source,
              cce_edition, cce_publication_places, cce_author_place,
              cce_author_is_claimant, cce_copies, cce_aff_date, cce_desc,
              cce_notes, cce_new_matter_claimed, cce_copy_date,
-             cce_notice_date,
+             cce_notice_date, cce_lccn, cce_prev_regnums,
              evidence_json, created_at)
 label       (id PK, pair_id FK→review_pair, verdict, reason, note,
              labeled_at)

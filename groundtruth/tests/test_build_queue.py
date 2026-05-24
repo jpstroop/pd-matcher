@@ -41,6 +41,7 @@ from pd_groundtruth.build_queue import _iter_language_dirs
 from pd_groundtruth.build_queue import _join
 from pd_groundtruth.build_queue import _join_notes
 from pd_groundtruth.build_queue import _join_places
+from pd_groundtruth.build_queue import _join_prev_regnums
 from pd_groundtruth.build_queue import _sample_language
 from pd_groundtruth.build_queue import _write_sample_chunks
 from pd_groundtruth.build_queue import build_queue
@@ -130,6 +131,8 @@ def _cce(uuid: str = "uuid-1") -> IndexedNyplRegRecord:
         new_matter_claimed="added ch. 5",
         copy_date=date(1953, 4, 1),
         notice_date=date(1953, 4, 2),
+        lccn="28000854",
+        prev_regnums=("A100000", "A200000"),
     )
 
 
@@ -169,6 +172,12 @@ def test_join_notes_uses_newline_separator() -> None:
     assert _join_notes(()) is None
     assert _join_notes(("one",)) == "one"
     assert _join_notes(("one", "two")) == "one\ntwo"
+
+
+def test_join_prev_regnums_uses_semicolon_separator() -> None:
+    assert _join_prev_regnums(()) is None
+    assert _join_prev_regnums(("A100000",)) == "A100000"
+    assert _join_prev_regnums(("A100000", "A200000")) == "A100000; A200000"
 
 
 def test_iso_or_none_formats_date_or_returns_none() -> None:
@@ -329,6 +338,8 @@ def test_writer_persists_snapshot_fields(tmp_path: Path) -> None:
     assert row.cce_new_matter_claimed == "added ch. 5"
     assert row.cce_copy_date == "1953-04-01"
     assert row.cce_notice_date == "1953-04-02"
+    assert row.cce_lccn == "28000854"
+    assert row.cce_prev_regnums == "A100000; A200000"
 
 
 def test_writer_below_sample_reservoir_caps_on_close(tmp_path: Path) -> None:

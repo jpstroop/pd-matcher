@@ -37,6 +37,8 @@ def test_encode_reg_round_trips_full_record() -> None:
         new_matter_claimed="ch. 5 added",
         copy_date=date(1940, 4, 1),
         notice_date=date(1940, 4, 2),
+        lccn="28000854",
+        prev_regnums=("A100000", "A200000"),
     )
     assert decode_reg(encode_reg(record)) == record
 
@@ -73,6 +75,8 @@ def test_decode_reg_accepts_legacy_record_missing_new_cce_fields() -> None:
     assert decoded.new_matter_claimed is None
     assert decoded.copy_date is None
     assert decoded.notice_date is None
+    assert decoded.lccn is None
+    assert decoded.prev_regnums == ()
 
 
 def test_encode_ren_round_trips_full_record() -> None:

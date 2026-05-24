@@ -289,6 +289,8 @@ def test_round_trip_preserves_extended_cce_columns(tmp_path: Path) -> None:
         cce_new_matter_claimed="added ch. 5",
         cce_copy_date="1953-04-01",
         cce_notice_date="1953-04-02",
+        cce_lccn="28000854",
+        cce_prev_regnums="A100000; A200000",
     )
     with ReviewDb.connect(tmp_path / "review.db") as db:
         db.insert_pair(extended)
@@ -305,6 +307,8 @@ def test_round_trip_preserves_extended_cce_columns(tmp_path: Path) -> None:
     assert row.cce_new_matter_claimed == "added ch. 5"
     assert row.cce_copy_date == "1953-04-01"
     assert row.cce_notice_date == "1953-04-02"
+    assert row.cce_lccn == "28000854"
+    assert row.cce_prev_regnums == "A100000; A200000"
 
 
 def test_extended_cce_columns_default_to_null(tmp_path: Path) -> None:
@@ -323,6 +327,8 @@ def test_extended_cce_columns_default_to_null(tmp_path: Path) -> None:
     assert row.cce_new_matter_claimed is None
     assert row.cce_copy_date is None
     assert row.cce_notice_date is None
+    assert row.cce_lccn is None
+    assert row.cce_prev_regnums is None
 
 
 def test_cce_author_is_claimant_stored_as_integer_flag(tmp_path: Path) -> None:
@@ -429,10 +435,14 @@ def test_init_schema_adds_extended_cce_columns_to_legacy_pair_table(tmp_path: Pa
         assert "cce_new_matter_claimed" in columns
         assert "cce_copy_date" in columns
         assert "cce_notice_date" in columns
+        assert "cce_lccn" in columns
+        assert "cce_prev_regnums" in columns
         row = db.get_pair(1)
     assert row is not None
     assert row.cce_edition is None
     assert row.cce_author_is_claimant is None
+    assert row.cce_lccn is None
+    assert row.cce_prev_regnums is None
 
 
 def test_previous_labeled_none_when_nothing_labeled(tmp_path: Path) -> None:
