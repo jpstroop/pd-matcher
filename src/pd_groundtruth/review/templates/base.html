@@ -69,7 +69,11 @@
               align-items: center; margin: .3rem 0; font-size: .85rem; }
     .ev-bar { display: block; width: 100%; background: #ececef; border-radius: 5px; height: 12px; overflow: hidden; }
     .ev-fill { display: block; background: var(--accent); height: 100%; min-width: 1px; }
-    .actions { display: flex; gap: .6rem; margin-top: 1.2rem; }
+    .actions { display: flex; gap: .6rem;
+               position: sticky; top: 0; z-index: 10;
+               background: var(--bg); padding: .8rem 1.2rem;
+               border-bottom: 1px solid var(--line);
+               margin: 0 -1.2rem 1.2rem; }
     .actions button { flex: 1; padding: .8rem; font-size: 1rem; font-weight: 600;
                       border: 1px solid var(--line); border-radius: 10px; cursor: pointer; background: #fff; }
     .actions button.match { color: var(--match); }
