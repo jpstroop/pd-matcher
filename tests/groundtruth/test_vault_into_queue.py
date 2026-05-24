@@ -12,6 +12,8 @@ from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import append_entry
+from pd_groundtruth.review.field_annotations import JUDGMENT_UNDERSCORED
+from pd_groundtruth.review.field_annotations import FieldAnnotation
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
 from pd_groundtruth.review_db import PairInsert
@@ -135,6 +137,7 @@ def _vault_entry(
     labeled_at: str = "2026-05-22T10:00:00+00:00",
     reasons: tuple[str, ...] = (),
     note: str | None = None,
+    field_annotations: tuple[FieldAnnotation, ...] = (),
 ) -> VaultEntry:
     return VaultEntry(
         schema=SCHEMA_VERSION,
@@ -146,6 +149,7 @@ def _vault_entry(
         labeled_at=labeled_at,
         labeler="jpstroop",
         marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+        field_annotations=field_annotations,
     )
 
 
@@ -555,6 +559,36 @@ def test_make_pair_scorer_delegates_to_shared_helper() -> None:
     )
     candidate = scorer(_marc("ctrl-1"), _cce("uuid-1"))
     assert candidate.nypl_uuid == "uuid-1"
+
+
+def test_run_backfill_carries_field_annotations_into_db(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path):
+        pass
+
+    annotations = (FieldAnnotation(field="author", judgment=JUDGMENT_UNDERSCORED),)
+    vault = {
+        ("ctrl-a", "uuid-a"): _vault_entry(
+            "ctrl-a",
+            "uuid-a",
+            verdict=VERDICT_NO_MATCH,
+            reasons=("diff_work",),
+            field_annotations=annotations,
+        )
+    }
+
+    summary = run_backfill(
+        db_path=db_path,
+        vault=vault,
+        marc_lookup={"ctrl-a": _marc("ctrl-a")}.get,
+        cce_lookup={"uuid-a": _cce("uuid-a")}.get,
+        score_pair=lambda _m, _c: _candidate(0.95, "uuid-a"),
+    )
+    assert summary.backfilled == 1
+
+    with ReviewDb.connect(db_path) as db:
+        [label] = list(db.iter_current_labels())
+    assert label.field_annotations == annotations
 
 
 def test_vault_into_queue_with_empty_vault_returns_zero_summary(tmp_path: Path) -> None:

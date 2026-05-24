@@ -4,6 +4,11 @@ from pathlib import Path
 
 from pytest import raises
 
+from pd_groundtruth.review.field_annotations import JUDGMENT_CORRECT
+from pd_groundtruth.review.field_annotations import JUDGMENT_NA
+from pd_groundtruth.review.field_annotations import JUDGMENT_OVERSCORED
+from pd_groundtruth.review.field_annotations import JUDGMENT_UNDERSCORED
+from pd_groundtruth.review.field_annotations import FieldAnnotation
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
 from pd_groundtruth.review_db import VERDICT_UNSURE
@@ -924,3 +929,157 @@ def test_init_schema_adds_predicted_status_and_renewal_columns_to_legacy_pair_ta
     assert row.cce_predicted_status is None
     assert row.cce_renewal_id is None
     assert row.cce_renewal_new_matter is None
+
+
+def test_add_label_round_trips_field_annotations_in_vocab_order(tmp_path: Path) -> None:
+    annotations = (
+        FieldAnnotation(field="author", judgment=JUDGMENT_OVERSCORED),
+        FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),
+    )
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair = db.insert_pair(_pair())
+        result = db.add_label(pair, VERDICT_MATCH, annotations=annotations)
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        round_tripped = db.annotations_for_label(result.label_id)
+    assert round_tripped == (
+        FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),
+        FieldAnnotation(field="author", judgment=JUDGMENT_OVERSCORED),
+    )
+
+
+def test_annotations_for_label_returns_empty_for_label_without_annotations(
+    tmp_path: Path,
+) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair = db.insert_pair(_pair())
+        result = db.add_label(pair, VERDICT_MATCH)
+        assert db.annotations_for_label(result.label_id) == ()
+
+
+def test_iter_current_labels_exposes_field_annotations(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair())
+        db.add_label(
+            pair_id,
+            VERDICT_MATCH,
+            annotations=(FieldAnnotation(field="year", judgment=JUDGMENT_NA),),
+        )
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        [label] = list(db.iter_current_labels())
+    assert label.field_annotations == (FieldAnnotation(field="year", judgment=JUDGMENT_NA),)
+
+
+def test_iter_labeled_pairs_exposes_field_annotations(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair())
+        db.add_label(
+            pair_id,
+            VERDICT_NO_MATCH,
+            reasons=("diff_work",),
+            annotations=(FieldAnnotation(field="title", judgment=JUDGMENT_OVERSCORED),),
+        )
+        rows = db.iter_labeled_pairs()
+    assert rows[0].field_annotations == (
+        FieldAnnotation(field="title", judgment=JUDGMENT_OVERSCORED),
+    )
+
+
+def test_field_annotation_counts_uses_only_current_label(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        db.add_label(
+            pair,
+            VERDICT_MATCH,
+            annotations=(FieldAnnotation(field="title", judgment=JUDGMENT_OVERSCORED),),
+        )
+        db.add_label(
+            pair,
+            VERDICT_NO_MATCH,
+            annotations=(FieldAnnotation(field="title", judgment=JUDGMENT_UNDERSCORED),),
+        )
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        assert db.field_annotation_counts() == {("title", JUDGMENT_UNDERSCORED): 1}
+
+
+def test_field_annotation_counts_aggregates_across_pairs(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        db.add_label(
+            first,
+            VERDICT_MATCH,
+            annotations=(
+                FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),
+                FieldAnnotation(field="author", judgment=JUDGMENT_OVERSCORED),
+            ),
+        )
+        db.add_label(
+            second,
+            VERDICT_MATCH,
+            annotations=(FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),),
+        )
+        assert db.field_annotation_counts() == {
+            ("title", JUDGMENT_CORRECT): 2,
+            ("author", JUDGMENT_OVERSCORED): 1,
+        }
+
+
+def test_insert_existing_label_round_trips_annotations(tmp_path: Path) -> None:
+    annotations = (
+        FieldAnnotation(field="publisher", judgment=JUDGMENT_OVERSCORED),
+        FieldAnnotation(field="edition", judgment=JUDGMENT_NA),
+    )
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair())
+        db.insert_existing_label(
+            pair_id=pair_id,
+            verdict=VERDICT_MATCH,
+            labeled_at="2024-01-01T00:00:00+00:00",
+            annotations=annotations,
+        )
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        [label] = list(db.iter_current_labels())
+    assert label.field_annotations == annotations
+
+
+def test_init_schema_creates_field_annotation_table_on_legacy_db(tmp_path: Path) -> None:
+    from sqlite3 import connect as sqlite_connect
+
+    db_path = tmp_path / "legacy.db"
+    legacy = sqlite_connect(db_path)
+    legacy.executescript(
+        """
+        CREATE TABLE label (
+            id INTEGER PRIMARY KEY,
+            pair_id INTEGER NOT NULL,
+            verdict TEXT NOT NULL,
+            note TEXT,
+            labeled_at TEXT NOT NULL
+        );
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    with ReviewDb.connect(db_path) as db:
+        tables = {
+            row[0] for row in db._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "label_field_annotation" in tables
+
+
+def test_annotations_for_label_silently_drops_unknown_codes(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair())
+        result = db.add_label(pair_id, VERDICT_MATCH)
+        db._conn.execute(
+            "INSERT INTO label_field_annotation (label_id, field_name, judgment) VALUES (?, ?, ?)",
+            (result.label_id, "title", JUDGMENT_CORRECT),
+        )
+        db._conn.execute(
+            "INSERT OR IGNORE INTO label_field_annotation (label_id, field_name, judgment) "
+            "VALUES (?, ?, ?)",
+            (result.label_id, "title", "ignored_dup"),
+        )
+        annotations = db.annotations_for_label(result.label_id)
+    assert annotations == (FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),)

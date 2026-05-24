@@ -33,6 +33,8 @@ from pd_groundtruth.build_queue import build_queue
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.review.field_annotations import JUDGMENT_OVERSCORED
+from pd_groundtruth.review.field_annotations import FieldAnnotation
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import BudgetModel
@@ -629,6 +631,7 @@ def _vault_entry(
     labeled_at: str = "2026-05-22T10:00:00+00:00",
     reasons: tuple[str, ...] = (),
     note: str | None = None,
+    field_annotations: tuple[FieldAnnotation, ...] = (),
 ) -> VaultEntry:
     return VaultEntry(
         schema=SCHEMA_VERSION,
@@ -640,6 +643,7 @@ def _vault_entry(
         labeled_at=labeled_at,
         labeler="jpstroop",
         marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+        field_annotations=field_annotations,
     )
 
 
@@ -728,6 +732,43 @@ def test_writer_vault_injection_preserves_verdict_metadata(tmp_path: Path) -> No
     assert only.labeled_at == "2026-05-22T11:00:00+00:00"
     assert only.note == "careful read"
     assert set(only.reasons) == {"diff_work", "diff_edition"}
+
+
+def test_writer_vault_injection_preserves_field_annotations(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    annotations = (FieldAnnotation(field="title", judgment=JUDGMENT_OVERSCORED),)
+    entry = _vault_entry("ctrl-a", "uuid-a", field_annotations=annotations)
+    pair = _pair_for("ctrl-a", "uuid-a", score=0.95)
+    resolved = (ResolvedVaultPair(entry=entry, pair=pair),)
+    with StratifyingResultWriter(
+        db_path=db_path,
+        budget=BudgetModel(caps={}),
+        seed=1,
+        vault_pairs=resolved,
+    ):
+        pass
+
+    with ReviewDb.connect(db_path) as db:
+        [label] = list(db.iter_current_labels())
+    assert label.field_annotations == annotations
+
+
+def test_writer_vault_matcher_route_preapplies_field_annotations(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    annotations = (FieldAnnotation(field="author", judgment=JUDGMENT_OVERSCORED),)
+    entry = _vault_entry("ctrl-known", "uuid-known", field_annotations=annotations)
+    vault = {("ctrl-known", "uuid-known"): entry}
+    budget = BudgetModel(caps={("eng", "ge90"): 1, ("eng", "below"): 1})
+    with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1, vault=vault) as writer:
+        writer.write(
+            _marc(control_id="ctrl-known"),
+            _match(0.95),
+            _ASSESSMENT,
+            _cce("uuid-known"),
+        )
+    with ReviewDb.connect(db_path) as db:
+        [label] = list(db.iter_current_labels())
+    assert label.field_annotations == annotations
 
 
 def test_build_queue_carries_vault_pair_through_rebuild(

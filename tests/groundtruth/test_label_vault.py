@@ -12,6 +12,9 @@ from pd_groundtruth.label_vault import append_entry
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.label_vault import iter_entries
+from pd_groundtruth.review.field_annotations import JUDGMENT_CORRECT
+from pd_groundtruth.review.field_annotations import JUDGMENT_OVERSCORED
+from pd_groundtruth.review.field_annotations import FieldAnnotation
 from pd_matcher.models import MarcRecord
 
 
@@ -159,3 +162,51 @@ def test_extract_marc_identifiers_handles_missing_identifiers() -> None:
     assert identifiers.lccn is None
     assert identifiers.oclc is None
     assert identifiers.isbns == ()
+
+
+def test_schema_version_is_two() -> None:
+    """New vault writes use schema 2 (adds ``field_annotations``)."""
+    assert SCHEMA_VERSION == 2
+
+
+def test_schema_one_entries_decode_with_empty_field_annotations(tmp_path: Path) -> None:
+    """Old vault lines that predate ``field_annotations`` keep loading cleanly."""
+    path = tmp_path / "legacy.jsonl"
+    path.write_text(
+        '{"schema":1,"marc_control_id":"a","nypl_uuid":"u","verdict":"match",'
+        '"reasons":[],"note":null,"labeled_at":"2026-01-01T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]}}\n',
+        encoding="utf-8",
+    )
+    [entry] = list(iter_entries(path))
+    assert entry.schema == 1
+    assert entry.field_annotations == ()
+
+
+def test_schema_two_round_trip_preserves_field_annotations(tmp_path: Path) -> None:
+    """A schema-2 line round-trips its field_annotations tuple verbatim."""
+    path = tmp_path / "vault.jsonl"
+    entry = _entry()
+    annotated = VaultEntry(
+        schema=entry.schema,
+        marc_control_id=entry.marc_control_id,
+        nypl_uuid=entry.nypl_uuid,
+        verdict="no_match",
+        reasons=("diff_work",),
+        note=None,
+        labeled_at=entry.labeled_at,
+        labeler=entry.labeler,
+        marc_identifiers=entry.marc_identifiers,
+        field_annotations=(
+            FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),
+            FieldAnnotation(field="author", judgment=JUDGMENT_OVERSCORED),
+        ),
+    )
+    append_entry(path, annotated)
+    [read_back] = list(iter_entries(path))
+    assert read_back == annotated
+
+
+def test_default_entry_has_empty_field_annotations() -> None:
+    """An entry constructed without annotations defaults to an empty tuple."""
+    assert _entry().field_annotations == ()

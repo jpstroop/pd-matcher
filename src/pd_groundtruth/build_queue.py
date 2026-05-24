@@ -348,6 +348,7 @@ class StratifyingResultWriter:
                 labeled_at=resolved.entry.labeled_at,
                 note=resolved.entry.note,
                 reasons=resolved.entry.reasons,
+                annotations=resolved.entry.field_annotations,
             )
             self._vault_applied += 1
             key = (resolved.pair.language, resolved.pair.band)
@@ -365,6 +366,7 @@ class StratifyingResultWriter:
             labeled_at=entry.labeled_at,
             note=entry.note,
             reasons=entry.reasons,
+            annotations=entry.field_annotations,
         )
         self._vault_applied += 1
 

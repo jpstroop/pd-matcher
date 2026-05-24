@@ -335,6 +335,7 @@ def seed_vault_command(
                 labeled_at=label.labeled_at,
                 labeler=_LABELER,
                 marc_identifiers=extract_marc_identifiers(marc),
+                field_annotations=label.field_annotations,
             )
             append_entry(vault, entry)
             seeded += 1

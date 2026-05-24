@@ -41,4 +41,24 @@
   </table>
 </section>
 {% endif %}
+
+{% if annotation_summary %}
+<section class="panel" style="margin-top: 1rem;">
+  <h2>Field annotations</h2>
+  <table class="stats">
+    <tr>
+      <th>field</th>
+      {% for judgment in field_judgments %}<th>{{ judgment_label(judgment) }}</th>{% endfor %}
+      <th>total</th>
+    </tr>
+    {% for row in annotation_summary %}
+    <tr>
+      <td>{{ row.field_label }}</td>
+      {% for count in row.counts %}<td>{{ count }}</td>{% endfor %}
+      <td>{{ row.total }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
 {% endblock %}

@@ -7,6 +7,8 @@ from typer.testing import CliRunner
 
 from pd_groundtruth.cli import app
 from pd_groundtruth.label_vault import current_entries
+from pd_groundtruth.review.field_annotations import JUDGMENT_OVERSCORED
+from pd_groundtruth.review.field_annotations import FieldAnnotation
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
 from pd_groundtruth.review_db import PairInsert
@@ -130,3 +132,17 @@ def test_seed_vault_on_empty_db_writes_nothing(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "seeded 0 labels" in result.stdout
     assert not vault_path.exists()
+
+
+def test_seed_vault_carries_field_annotations_forward(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    vault_path = tmp_path / "vault.jsonl"
+    annotations = (FieldAnnotation(field="title", judgment=JUDGMENT_OVERSCORED),)
+    with ReviewDb.connect(db_path) as db:
+        pair = db.insert_pair(_pair("ctrl-a", "uuid-a"))
+        db.add_label(pair, VERDICT_NO_MATCH, reasons=("diff_work",), annotations=annotations)
+
+    result = _RUNNER.invoke(app, ["seed-vault", "--db", str(db_path), "--vault", str(vault_path)])
+    assert result.exit_code == 0
+    latest = current_entries(vault_path)
+    assert latest[("ctrl-a", "uuid-a")].field_annotations == annotations

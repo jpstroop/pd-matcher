@@ -393,6 +393,8 @@ Skips are **session-local**: each skipped `pair_id` is appended to the URL as a 
 
 **Record *why* a no-match / unsure** (optional, never blocks the fast path). Each `no_match` / `unsure` reason is a chip you can toggle on or off; toggle any number of them (e.g. both "Different work / title collision" and "Garbled transcription") and then press the verdict key/button to record the verdict together with every selected code. Codes that don't belong to the chosen verdict are ignored server-side, so failure modes stay aggregatable. A free-text note field rides along for anything the codes don't cover. The reason tally shows up on `…/stats`, counting each code of a pair's current label.
 
+**Per-field annotation grid** (optional, always visible below the reason chips). Each card surfaces a small grid for the five scoring fields (`title`, `author`, `publisher`, `year`, `edition`) crossed with four judgments (`correct`, `overscored`, `underscored`, `n/a`). Click one cell per row to flag where the scorer was right, where it overweighted a field that doesn't really match, where it underweighted one that does, or where a field is missing on one side. Click again to clear. Only fields the labeler actively annotates produce signal — leaving a row blank is the default and means "no opinion". The per-field tally lives on `…/stats` and feeds the future learned-scorer ([#4](https://github.com/jpstroop/pd-matcher/issues/4)).
+
 **Focus a session** with URL filters — useful for the English-first curriculum (label the easier languages before the harder ones):
 
 - `…/?language=eng` (or `fre` / `ger` / `spa` / `ita`)
@@ -449,6 +451,9 @@ review_pair (id PK, language, decade, score, band, source,
 label       (id PK, pair_id FK→review_pair, verdict, reason, note,
              labeled_at)
 label_reason (label_id FK→label, code, PRIMARY KEY (label_id, code))
+label_field_annotation
+            (label_id FK→label, field_name, judgment,
+             PRIMARY KEY (label_id, field_name))
 ```
 
 Notes:
@@ -457,12 +462,13 @@ Notes:
 - `evidence_json` is the per-scorer `{name: normalized_score}` map the matcher produced for that pair (drives the evidence bars in the card).
 - `label` is **append-only**. Re-labeling a pair inserts a new row; the "current" verdict for a pair is the one with the largest `label.id` for that `pair_id` (or equivalently, the latest `labeled_at` with a tie-break on insertion order). `label.reason` (singular TEXT) is a legacy column kept for compatibility; reasons are read from `label_reason`.
 - `label_reason` is a normalized many-to-one: zero or more codes per label.
+- `label_field_annotation` is a normalized many-to-one: zero or one `(field_name, judgment)` per label, drawn from the fixed vocabularies (`title|author|publisher|year|edition` × `correct|overscored|underscored|n_a`).
 
 **`data/label_vault.jsonl`** — one JSON object per line, append-only:
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "marc_control_id": "9912345678906421",
   "nypl_uuid": "129B8D87-6CB2-1014-A20E-B9D6251C946A",
   "verdict": "match",
@@ -474,17 +480,22 @@ Notes:
     "lccn": "58059853",
     "oclc": null,
     "isbns": []
-  }
+  },
+  "field_annotations": [
+    {"field": "title", "judgment": "correct"},
+    {"field": "publisher", "judgment": "overscored"}
+  ]
 }
 ```
 
 Field semantics:
 
-- `schema` — integer; bumped only on breaking shape changes. Older lines stay valid forever (append-only).
+- `schema` — integer; bumped on breaking shape changes. Schema 1 lines (pre-field-annotations) decode forever via the empty-tuple default for `field_annotations`; schema 2 adds the new field.
 - `(marc_control_id, nypl_uuid)` — the natural key. Multiple entries with the same key represent a re-label history; the **last** line wins as the current verdict for that pair.
 - `reasons` — empty tuple for `match`; zero-or-more controlled codes otherwise (see [`LABELING_GUIDE.md`](LABELING_GUIDE.md) for the vocabulary).
 - `labeler` — string identifier of who labeled (today, always `"jpstroop"`; reserved for future multi-reviewer setups).
 - `marc_identifiers` — durable IDs captured at label time so the published matches dataset can cross-walk to LCCN / OCLC / ISBN later.
+- `field_annotations` — zero-or-more `{field, judgment}` records from the per-field annotation grid; empty for any label the reviewer left blank.
 
 The vault is **the** source of truth. `review.db` is a queryable, derivable working copy that the labeling app needs for fast pair-by-pair access; the vault is what survives every rebuild.
 

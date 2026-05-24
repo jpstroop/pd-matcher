@@ -84,3 +84,39 @@ def test_make_vault_pair_builder_honors_explicit_as_of_year() -> None:
     )
     pair = builder(_marc(), _cce(), _candidate(0.95))
     assert pair.cce_predicted_status is not None
+
+
+def test_resolve_vault_for_build_carries_field_annotations() -> None:
+    """A pre-resolved vault entry's annotations land in the DB on re-insert.
+
+    Exercises the writer side via :class:`StratifyingResultWriter`
+    (covered in test_build_queue too), but here we verify the
+    ``ResolvedVaultPair`` round-trip preserves the entry verbatim.
+    """
+    from pd_groundtruth.label_vault import SCHEMA_VERSION
+    from pd_groundtruth.label_vault import MarcIdentifiers
+    from pd_groundtruth.label_vault import VaultEntry
+    from pd_groundtruth.review.field_annotations import JUDGMENT_UNDERSCORED
+    from pd_groundtruth.review.field_annotations import FieldAnnotation
+    from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
+
+    builder = _make_vault_pair_builder(
+        load_default_ruleset(), CopyrightAssessmentConfig(), LEGACY_COVERAGE
+    )
+    pair = builder(_marc(), _cce(), _candidate(0.95))
+    entry = VaultEntry(
+        schema=SCHEMA_VERSION,
+        marc_control_id=pair.marc_control_id,
+        nypl_uuid=pair.nypl_uuid,
+        verdict="match",
+        reasons=(),
+        note=None,
+        labeled_at="2026-05-22T10:00:00+00:00",
+        labeler="jpstroop",
+        marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+        field_annotations=(FieldAnnotation(field="title", judgment=JUDGMENT_UNDERSCORED),),
+    )
+    resolved = ResolvedVaultPair(entry=entry, pair=pair)
+    assert resolved.entry.field_annotations == (
+        FieldAnnotation(field="title", judgment=JUDGMENT_UNDERSCORED),
+    )
