@@ -102,7 +102,7 @@
       <div class="ev-row">
         <span>{{ ev.scorer }}</span>
         <span class="ev-bar"><span class="ev-fill" style="width: {{ (ev.normalized * 100) | round(1) }}%"></span></span>
-        <span>{{ "%.2f"|format(ev.normalized) }}</span>
+        <span class="ev-score">{{ "%.2f"|format(ev.normalized) }}{% if ev.source %} <span class="ev-source">(via {{ ev.source }})</span>{% endif %}</span>
       </div>
       {% endfor %}
     {% else %}

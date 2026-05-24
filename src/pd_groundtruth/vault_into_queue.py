@@ -119,6 +119,7 @@ def _make_vault_pair_builder(
             band=band_of(score),
             source=SOURCE_BANDED,
             predicted_status=assessment.status.name,
+            evidence_sources=candidate.evidence_sources,
         )
 
     return _build

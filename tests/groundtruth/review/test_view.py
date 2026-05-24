@@ -23,6 +23,7 @@ from pd_groundtruth.review.view import author_is_claimant_label
 from pd_groundtruth.review.view import build_card
 from pd_groundtruth.review.view import build_labeled_row
 from pd_groundtruth.review.view import parse_evidence
+from pd_groundtruth.review.view import parse_evidence_sources
 from pd_groundtruth.review.view import predicted_status_family
 from pd_groundtruth.review.view import render_renewal_label
 from pd_groundtruth.review_db import LabeledPairRow
@@ -94,6 +95,7 @@ def _row(
     cce_renewal_claimants: str | None = None,
     cce_renewal_new_matter: str | None = None,
     cce_claimants: str | None = "Jane Doe",
+    evidence_sources_json: str = "{}",
 ) -> ReviewPairRow:
     return ReviewPairRow(
         id=7,
@@ -139,6 +141,7 @@ def _row(
         cce_renewal_title=cce_renewal_title,
         cce_renewal_claimants=cce_renewal_claimants,
         cce_renewal_new_matter=cce_renewal_new_matter,
+        evidence_sources_json=evidence_sources_json,
     )
 
 
@@ -156,6 +159,60 @@ def test_parse_evidence_preserves_insertion_order() -> None:
 
 def test_parse_evidence_handles_empty_object() -> None:
     assert parse_evidence("{}") == ()
+
+
+def test_parse_evidence_sources_decodes_map() -> None:
+    assert parse_evidence_sources(
+        '{"title.token_set": "title_main ↔ title", "name.publisher": "publisher ↔ author_name"}'
+    ) == {
+        "title.token_set": "title_main ↔ title",
+        "name.publisher": "publisher ↔ author_name",
+    }
+
+
+def test_parse_evidence_sources_returns_empty_for_empty_object() -> None:
+    assert parse_evidence_sources("{}") == {}
+
+
+def test_build_card_evidence_bar_source_set_when_present() -> None:
+    card = build_card(
+        _row(
+            _marc(),
+            evidence_json='{"title.token_set": 0.9, "name.publisher": 0.29}',
+            evidence_sources_json=(
+                '{"title.token_set": "title_main ↔ title", '
+                '"name.publisher": "publisher ↔ author_name"}'
+            ),
+        )
+    )
+    bars = {bar.scorer: bar for bar in card.evidence}
+    assert bars["title.token_set"].source == "title_main ↔ title"
+    assert bars["name.publisher"].source == "publisher ↔ author_name"
+
+
+def test_build_card_evidence_bar_source_none_when_sources_empty() -> None:
+    card = build_card(
+        _row(
+            _marc(),
+            evidence_json='{"title.token_set": 0.9, "name.publisher": 0.29}',
+            evidence_sources_json="{}",
+        )
+    )
+    for bar in card.evidence:
+        assert bar.source is None
+
+
+def test_build_card_evidence_bar_source_none_for_scorer_missing_from_map() -> None:
+    card = build_card(
+        _row(
+            _marc(),
+            evidence_json='{"title.token_set": 0.9, "lccn.exact": 1.0}',
+            evidence_sources_json='{"title.token_set": "title_main ↔ title"}',
+        )
+    )
+    bars = {bar.scorer: bar for bar in card.evidence}
+    assert bars["title.token_set"].source == "title_main ↔ title"
+    assert bars["lccn.exact"].source is None
 
 
 def test_build_card_exposes_marc_subfields() -> None:

@@ -44,6 +44,7 @@ from pd_matcher.normalize.stemming import stemmer_for
 from pd_matcher.normalize.stopwords import load_stopwords
 
 _DEFAULT_LANGUAGE: str = "eng"
+_FIXED_SOURCE: tuple[str, str] = ("", "")
 
 
 def _build_context(marc: MarcRecord, idf: IdfTable, config: MatchingConfig) -> ScorerContext:
@@ -57,8 +58,8 @@ def _build_context(marc: MarcRecord, idf: IdfTable, config: MatchingConfig) -> S
     )
 
 
-def _select_best(evidences: Sequence[Evidence]) -> tuple[Evidence, tuple[Evidence, ...]]:
-    """Return the highest-scoring Evidence and the losers in input order."""
+def _select_best(evidences: Sequence[Evidence]) -> tuple[int, Evidence, tuple[Evidence, ...]]:
+    """Return the highest-scoring Evidence's index plus the losers in input order."""
     best_index = 0
     best_score = evidences[0].score if not evidences[0].skipped else -1.0
     for index in range(1, len(evidences)):
@@ -68,7 +69,7 @@ def _select_best(evidences: Sequence[Evidence]) -> tuple[Evidence, tuple[Evidenc
             best_score = current_score
             best_index = index
     losers = tuple(ev for index, ev in enumerate(evidences) if index != best_index)
-    return evidences[best_index], losers
+    return best_index, evidences[best_index], losers
 
 
 _GroupScorer = Callable[[str | None, str | None, ScorerContext], Evidence]
@@ -87,12 +88,16 @@ def _score_group(
     ctx: ScorerContext,
     winning: list[Evidence],
     losing: list[Evidence],
+    winning_sources: list[tuple[str, str]],
 ) -> None:
     """Score every pairing in one group and append best/losers to the lists.
 
     The combiner keys on exactly one Evidence per scorer tag, so the best
     Evidence (the highest-scoring pairing) is appended to ``winning`` and
-    the rest to ``losing`` for audit.
+    the rest to ``losing`` for audit. The winning pairing's
+    ``(marc_name, cce_name)`` is appended to ``winning_sources`` so callers
+    can surface which composed-field pair produced the kept Evidence (vital
+    for diagnosing cross-pairings that score non-zero against fuzzy noise).
     """
     if not pairings:
         return
@@ -101,9 +106,10 @@ def _score_group(
         scorer(pairing.marc_accessor(marc), pairing.cce_accessor(candidate), ctx)
         for pairing in pairings
     )
-    best, losers = _select_best(evidences)
+    best_index, best, losers = _select_best(evidences)
     winning.append(best)
     losing.extend(losers)
+    winning_sources.append((pairings[best_index].marc_name, pairings[best_index].cce_name))
 
 
 def _score_candidate(
@@ -116,16 +122,21 @@ def _score_candidate(
 ) -> CandidateMatch:
     winning: list[Evidence] = []
     losing: list[Evidence] = []
+    sources: list[tuple[str, str]] = []
 
     winning.append(score_lccn(marc.lccn, candidate, ctx))
+    sources.append(_FIXED_SOURCE)
     winning.append(score_isbn(marc.isbns, candidate, ctx))
+    sources.append(_FIXED_SOURCE)
 
-    _score_group(pairings.title, marc, candidate, ctx, winning, losing)
-    _score_group(pairings.author, marc, candidate, ctx, winning, losing)
-    _score_group(pairings.publisher, marc, candidate, ctx, winning, losing)
+    _score_group(pairings.title, marc, candidate, ctx, winning, losing, sources)
+    _score_group(pairings.author, marc, candidate, ctx, winning, losing, sources)
+    _score_group(pairings.publisher, marc, candidate, ctx, winning, losing, sources)
 
     winning.append(score_year(marc.publication_year, candidate.reg_year, ctx))
+    sources.append(_FIXED_SOURCE)
     winning.append(score_edition(marc.edition, candidate.edition, ctx))
+    sources.append(_FIXED_SOURCE)
 
     combined = combiner.combine(tuple(winning))
     if calibrator is not None:
@@ -137,6 +148,7 @@ def _score_candidate(
         combined=combined,
         evidence=tuple(winning),
         losing_evidence=tuple(losing),
+        evidence_sources=tuple(sources),
     )
 
 

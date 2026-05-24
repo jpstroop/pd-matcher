@@ -38,6 +38,7 @@ def _pair(
     renewal_title: str | None = "A study of widgets",
     renewal_claimants: str | None = "Estate of Jane Doe|PWH",
     renewal_new_matter: str | None = "added chapter 7",
+    evidence_sources_json: str = "{}",
 ) -> PairInsert:
     marc = MarcRecord(
         control_id=control_id,
@@ -100,6 +101,7 @@ def _pair(
         cce_renewal_title=renewal_title,
         cce_renewal_claimants=renewal_claimants,
         cce_renewal_new_matter=renewal_new_matter,
+        evidence_sources_json=evidence_sources_json,
     )
 
 
@@ -194,6 +196,26 @@ def empty_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
     db_path = tmp_path / "review.db"
     with ReviewDb.connect(db_path):
         pass
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
+def evidence_source_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="es-1",
+                nypl_uuid="u-es-1",
+                evidence_sources_json=(
+                    '{"title.token_set": "title_main ↔ title", '
+                    '"name.author": "main_author ↔ author_name"}'
+                ),
+            )
+        )
     app = create_app(db_path, vault_path)
     with TestClient(app) as test_client:
         yield test_client
@@ -855,3 +877,20 @@ def test_card_includes_hidden_inputs_for_each_annotation_field(client: TestClien
     assert response.status_code == 200
     for field in ("title", "author", "publisher", "year", "edition"):
         assert f'name="annotation_{field}"' in response.text
+
+
+def test_card_renders_evidence_source_breadcrumb_when_present(
+    evidence_source_client: TestClient,
+) -> None:
+    response = evidence_source_client.get("/")
+    assert response.status_code == 200
+    assert "(via title_main ↔ title)" in response.text
+    assert "(via main_author ↔ author_name)" in response.text
+    assert 'class="ev-source"' in response.text
+
+
+def test_card_omits_evidence_source_breadcrumb_when_absent(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "(via " not in response.text
+    assert 'class="ev-source"' not in response.text
