@@ -19,16 +19,22 @@
   <section class="panel">
     <h2>MARC (Princeton)</h2>
     <div class="field"><div class="k">title</div><div class="v title">{{ card.marc_title }}</div></div>
+    {% if card.marc_title_part_number or card.marc_title_part_name %}<div class="field"><div class="k">title parts</div><div class="v"><small>{% if card.marc_title_part_number and card.marc_title_part_name %}{{ card.marc_title_part_number }}: {{ card.marc_title_part_name }}{% elif card.marc_title_part_number %}{{ card.marc_title_part_number }}{% else %}{{ card.marc_title_part_name }}{% endif %}</small></div></div>{% endif %}
     {% if card.marc_is_online_resource %}<div class="field"><span class="badge-ebook">E-book reprint</span></div>{% endif %}
     {% if card.marc_title_main %}<div class="field"><div class="k">title main</div><div class="v">{{ card.marc_title_main }}</div></div>{% endif %}
     {% if card.marc_statement_of_responsibility %}<div class="field"><div class="k">statement of responsibility</div><div class="v">{{ card.marc_statement_of_responsibility }}</div></div>{% endif %}
     {% if card.marc_main_author %}<div class="field"><div class="k">main author</div><div class="v">{{ card.marc_main_author }}</div></div>{% endif %}
     {% if card.marc_added_authors %}<div class="field"><div class="k">added authors</div><div class="v">{{ card.marc_added_authors | join("; ") }}</div></div>{% endif %}
     {% if card.marc_publisher %}<div class="field"><div class="k">publisher</div><div class="v">{{ card.marc_publisher }}</div></div>{% endif %}
+    {% if card.marc_publication_place %}<div class="field"><div class="k">publication place</div><div class="v">{{ card.marc_publication_place }}</div></div>{% endif %}
     {% if card.marc_year is not none %}<div class="field"><div class="k">year</div><div class="v">{{ card.marc_year }}</div></div>{% endif %}
+    {% if card.marc_publication_date_raw %}<div class="field"><div class="k">date (raw)</div><div class="v">{{ card.marc_publication_date_raw }}</div></div>{% endif %}
     {% if card.marc_edition %}<div class="field"><div class="k">edition</div><div class="v">{{ card.marc_edition }}</div></div>{% endif %}
+    {% if card.marc_extent %}<div class="field"><div class="k">extent</div><div class="v">{{ card.marc_extent }}</div></div>{% endif %}
     {% if card.marc_series_titles %}<div class="field"><div class="k">series</div><div class="v">{{ card.marc_series_titles | join("; ") }}</div></div>{% endif %}
     {% if card.marc_lccn %}<div class="field"><div class="k">lccn</div><div class="v">{{ card.marc_lccn }}</div></div>{% endif %}
+    {% if card.marc_isbns %}<div class="field"><div class="k">isbns</div><div class="v">{{ card.marc_isbns | join("; ") }}</div></div>{% endif %}
+    {% if card.marc_oclc %}<div class="field"><div class="k">oclc</div><div class="v"><a href="{{ card.marc_oclc_url }}" target="_blank" rel="noopener noreferrer">{{ card.marc_oclc }}</a></div></div>{% endif %}
     <div class="field"><div class="k">lang / country</div><div class="v">{{ card.marc_language_code or "?" }} / {{ card.marc_country_code or "?" }}</div></div>
   </section>
 
