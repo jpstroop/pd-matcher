@@ -420,3 +420,103 @@ def test_full_cce_entry_extracts_every_new_field(tmp_path: Path) -> None:
     assert record.notes == ("handwritten correction", "seen in second printing")
     assert record.edition == "2nd ed."
     assert record.publication_places == ("New York",)
+
+
+def test_lccn_prefers_normalized_attribute(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="L1"><title>With LCCN normalized.</title>'
+        '<lccn normalized="28000854">28-854</lccn></copyrightEntry>',
+    )
+    assert record.lccn == "28000854"
+
+
+def test_lccn_falls_back_to_text_when_normalized_absent(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="L2"><title>LCCN text only.</title>'
+        "<lccn>28-854</lccn></copyrightEntry>",
+    )
+    assert record.lccn == "28-854"
+
+
+def test_lccn_normalized_wins_over_text(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="L3"><title>Both forms present.</title>'
+        '<lccn normalized="28000854">28-854</lccn></copyrightEntry>',
+    )
+    assert record.lccn == "28000854"
+
+
+def test_lccn_absent_defaults_to_none(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="L4"><title>No LCCN.</title></copyrightEntry>',
+    )
+    assert record.lccn is None
+
+
+def test_lccn_empty_returns_none(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="L5"><title>Empty LCCN element.</title><lccn/></copyrightEntry>',
+    )
+    assert record.lccn is None
+
+
+def test_lccn_whitespace_only_text_and_attr_returns_none(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="L6"><title>Whitespace LCCN.</title>'
+        '<lccn normalized="   ">   </lccn></copyrightEntry>',
+    )
+    assert record.lccn is None
+
+
+def test_lccn_takes_first_when_multiple(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="L7"><title>Multiple LCCNs.</title>'
+        '<lccn normalized="28000854">28-854</lccn>'
+        '<lccn normalized="28000999">28-999</lccn></copyrightEntry>',
+    )
+    assert record.lccn == "28000854"
+
+
+def test_prev_regnums_single_value(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="P1"><title>One prev regnum.</title>'
+        "<prev-regNum>A100000</prev-regNum></copyrightEntry>",
+    )
+    assert record.prev_regnums == ("A100000",)
+
+
+def test_prev_regnums_preserves_order_when_multiple(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="P2"><title>Multiple prev regnums.</title>'
+        "<prev-regNum>A100000</prev-regNum>"
+        "<prev-regNum>A200000</prev-regNum>"
+        "<prev-regNum>A300000</prev-regNum></copyrightEntry>",
+    )
+    assert record.prev_regnums == ("A100000", "A200000", "A300000")
+
+
+def test_prev_regnums_empty_tuple_when_absent(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="P3"><title>No prev regnum.</title></copyrightEntry>',
+    )
+    assert record.prev_regnums == ()
+
+
+def test_prev_regnums_skips_empty_elements(tmp_path: Path) -> None:
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry id="P4"><title>Mixed prev regnums.</title>'
+        "<prev-regNum/><prev-regNum>A200000</prev-regNum>"
+        "<prev-regNum>   </prev-regNum></copyrightEntry>",
+    )
+    assert record.prev_regnums == ("A200000",)

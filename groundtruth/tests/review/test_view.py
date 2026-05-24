@@ -61,6 +61,8 @@ def _row(
     cce_new_matter_claimed: str | None = None,
     cce_copy_date: str | None = None,
     cce_notice_date: str | None = None,
+    cce_lccn: str | None = None,
+    cce_prev_regnums: str | None = None,
 ) -> ReviewPairRow:
     return ReviewPairRow(
         id=7,
@@ -96,6 +98,8 @@ def _row(
         cce_new_matter_claimed=cce_new_matter_claimed,
         cce_copy_date=cce_copy_date,
         cce_notice_date=cce_notice_date,
+        cce_lccn=cce_lccn,
+        cce_prev_regnums=cce_prev_regnums,
     )
 
 
@@ -251,6 +255,41 @@ def test_build_card_drops_blank_chunks_in_publication_places() -> None:
 def test_build_card_single_note_round_trips() -> None:
     card = build_card(_row(_marc(), evidence_json="{}", cce_notes="just one"))
     assert card.cce_notes == ("just one",)
+
+
+def test_build_card_projects_lccn_and_builds_lccn_url() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}", cce_lccn="28000854"))
+    assert card.cce_lccn == "28000854"
+    assert card.cce_lccn_url == "https://lccn.loc.gov/28000854"
+
+
+def test_build_card_lccn_url_preserves_human_form() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}", cce_lccn="28-854"))
+    assert card.cce_lccn == "28-854"
+    assert card.cce_lccn_url == "https://lccn.loc.gov/28-854"
+
+
+def test_build_card_lccn_url_none_when_lccn_absent() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.cce_lccn is None
+    assert card.cce_lccn_url is None
+
+
+def test_build_card_projects_prev_regnums_in_order() -> None:
+    card = build_card(
+        _row(_marc(), evidence_json="{}", cce_prev_regnums="A100000; A200000; A300000")
+    )
+    assert card.cce_prev_regnums == ("A100000", "A200000", "A300000")
+
+
+def test_build_card_prev_regnums_empty_tuple_when_absent() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.cce_prev_regnums == ()
+
+
+def test_build_card_prev_regnums_drops_blank_chunks() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}", cce_prev_regnums="A100000;  ; A200000"))
+    assert card.cce_prev_regnums == ("A100000", "A200000")
 
 
 def _labeled_row(

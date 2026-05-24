@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS review_pair (
     cce_new_matter_claimed TEXT,
     cce_copy_date TEXT,
     cce_notice_date TEXT,
+    cce_lccn TEXT,
+    cce_prev_regnums TEXT,
     evidence_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -178,6 +180,8 @@ class PairInsert(Struct, frozen=True, forbid_unknown_fields=True):
     cce_new_matter_claimed: str | None = None
     cce_copy_date: str | None = None
     cce_notice_date: str | None = None
+    cce_lccn: str | None = None
+    cce_prev_regnums: str | None = None
 
 
 class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
@@ -216,6 +220,8 @@ class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
     cce_new_matter_claimed: str | None = None
     cce_copy_date: str | None = None
     cce_notice_date: str | None = None
+    cce_lccn: str | None = None
+    cce_prev_regnums: str | None = None
 
 
 class LanguageProgress(Struct, frozen=True, forbid_unknown_fields=True):
@@ -272,6 +278,8 @@ _ADDITIVE_CCE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("cce_new_matter_claimed", "TEXT"),
     ("cce_copy_date", "TEXT"),
     ("cce_notice_date", "TEXT"),
+    ("cce_lccn", "TEXT"),
+    ("cce_prev_regnums", "TEXT"),
 )
 
 
@@ -311,6 +319,8 @@ def _row_to_pair(row: Row) -> ReviewPairRow:
         cce_new_matter_claimed=row["cce_new_matter_claimed"],
         cce_copy_date=row["cce_copy_date"],
         cce_notice_date=row["cce_notice_date"],
+        cce_lccn=row["cce_lccn"],
+        cce_prev_regnums=row["cce_prev_regnums"],
     )
 
 
@@ -418,10 +428,12 @@ class ReviewDb:
                 cce_edition, cce_publication_places, cce_author_place,
                 cce_author_is_claimant, cce_copies, cce_aff_date, cce_desc,
                 cce_notes, cce_new_matter_claimed, cce_copy_date, cce_notice_date,
+                cce_lccn, cce_prev_regnums,
                 created_at
             ) VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?,
                 ?
             )
             """,
@@ -457,6 +469,8 @@ class ReviewDb:
                 pair.cce_new_matter_claimed,
                 pair.cce_copy_date,
                 pair.cce_notice_date,
+                pair.cce_lccn,
+                pair.cce_prev_regnums,
                 _now(),
             ),
         )

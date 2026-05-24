@@ -67,6 +67,15 @@ class NyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     new_matter_claimed: str | None = None
     copy_date: date | None = None
     notice_date: date | None = None
+    lccn: str | None = None
+    """The Library of Congress Control Number for this registration, when the
+    CCE entry carries a ``<lccn>`` element. When the element's ``normalized``
+    attribute is present its value (the 8-digit canonical form) is preferred;
+    otherwise the element's display text (e.g. ``"28-854"``) is stored."""
+    prev_regnums: tuple[str, ...] = ()
+    """Every ``<prev-regNum>`` text under the entry, in document order. These
+    are back-references to earlier registrations (revised editions, second
+    printings, etc.); the DTD permits multiple per entry."""
 
 
 class NyplRenRecord(Struct, frozen=True, forbid_unknown_fields=True):
@@ -117,6 +126,10 @@ class IndexedNyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     new_matter_claimed: str | None = None
     copy_date: date | None = None
     notice_date: date | None = None
+    lccn: str | None = None
+    """Mirrors :attr:`NyplRegRecord.lccn`."""
+    prev_regnums: tuple[str, ...] = ()
+    """Mirrors :attr:`NyplRegRecord.prev_regnums`."""
 
 
 def index_reg(record: NyplRegRecord, *, was_renewed: bool) -> IndexedNyplRegRecord:
@@ -152,6 +165,8 @@ def index_reg(record: NyplRegRecord, *, was_renewed: bool) -> IndexedNyplRegReco
         new_matter_claimed=record.new_matter_claimed,
         copy_date=record.copy_date,
         notice_date=record.notice_date,
+        lccn=record.lccn,
+        prev_regnums=record.prev_regnums,
     )
 
 

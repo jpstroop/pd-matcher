@@ -77,6 +77,8 @@ def _pair(
         cce_new_matter_claimed="added chapter 5",
         cce_copy_date="1953-04-01",
         cce_notice_date="1953-04-02",
+        cce_lccn="28000854",
+        cce_prev_regnums="A100000; A200000",
     )
 
 
@@ -566,3 +568,19 @@ def test_card_omits_extended_cce_rows_when_absent(empty_client: TestClient) -> N
     assert "Author is claimant" not in response.text
     assert "new matter claimed" not in response.text
     assert "affidavit date" not in response.text
+    assert "lccn.loc.gov" not in response.text
+    assert "previous registrations" not in response.text
+
+
+def test_card_renders_lccn_as_lccn_loc_gov_link(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'href="https://lccn.loc.gov/28000854"' in response.text
+    assert ">28000854<" in response.text
+
+
+def test_card_renders_prev_regnums_row(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "previous registrations" in response.text
+    assert "A100000; A200000" in response.text

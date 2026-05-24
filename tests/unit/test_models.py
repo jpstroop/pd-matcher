@@ -109,6 +109,8 @@ def test_index_reg_copies_all_fields_and_adds_renewal_flag() -> None:
         new_matter_claimed="ch. 5 added",
         copy_date=date(1940, 4, 1),
         notice_date=date(1940, 4, 2),
+        lccn="28000854",
+        prev_regnums=("A100000",),
     )
     indexed = index_reg(parsed, was_renewed=True)
     assert isinstance(indexed, IndexedNyplRegRecord)
@@ -132,6 +134,8 @@ def test_index_reg_copies_all_fields_and_adds_renewal_flag() -> None:
     assert indexed.new_matter_claimed == parsed.new_matter_claimed
     assert indexed.copy_date == parsed.copy_date
     assert indexed.notice_date == parsed.notice_date
+    assert indexed.lccn == parsed.lccn
+    assert indexed.prev_regnums == parsed.prev_regnums
 
 
 def test_index_reg_preserves_defaults_for_new_cce_fields() -> None:
@@ -146,6 +150,8 @@ def test_index_reg_preserves_defaults_for_new_cce_fields() -> None:
     assert indexed.new_matter_claimed is None
     assert indexed.copy_date is None
     assert indexed.notice_date is None
+    assert indexed.lccn is None
+    assert indexed.prev_regnums == ()
 
 
 def test_indexed_nypl_reg_record_is_frozen() -> None:
