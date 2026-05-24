@@ -46,7 +46,9 @@ from pd_matcher.index.keys import title_keys
 from pd_matcher.index.store import NyplIndexStore
 from pd_matcher.index.store import _SubDb
 from pd_matcher.models import index_reg
+from pd_matcher.parsers.nypl_reg import NyplRegParseStats
 from pd_matcher.parsers.nypl_reg import iter_nypl_reg_directory
+from pd_matcher.parsers.nypl_ren import NyplRenParseStats
 from pd_matcher.parsers.nypl_ren import iter_nypl_ren_directory
 
 _LOGGER = get_logger(__name__)
@@ -245,8 +247,9 @@ def _ingest_renewals(
     try:
         written = 0
         year_counts: dict[int, int] = {}
+        parser_stats = NyplRenParseStats()
         with store.write_transaction():
-            for record in iter_nypl_ren_directory(ren_dir):
+            for record in iter_nypl_ren_directory(ren_dir, stats=parser_stats):
                 store.ren_by_id.put(record.entry_id.encode("utf-8"), encode_ren(record))
                 if record.oreg is not None and record.odat is not None:
                     join_key = make_renewal_key(record.oreg, record.odat)
@@ -254,7 +257,12 @@ def _ingest_renewals(
                 if record.rdat is not None:
                     year_counts[record.rdat.year] = year_counts.get(record.rdat.year, 0) + 1
                 written += 1
-        _LOGGER.info("index.renewals.ingested", count=written, year_buckets=len(year_counts))
+        _LOGGER.info(
+            "index.renewals.ingested",
+            count=written,
+            year_buckets=len(year_counts),
+            years_rejected_out_of_range=parser_stats.years_rejected_out_of_range,
+        )
         return _RenewalIngestResult(written=written, year_counts=year_counts)
     finally:
         unbind_contextvars("phase")
@@ -292,8 +300,9 @@ def _ingest_registrations(
         title_postings: dict[str, list[str]] = {}
         author_postings: dict[str, list[str]] = {}
         publisher_postings: dict[str, list[str]] = {}
+        parser_stats = NyplRegParseStats()
         with store.write_transaction():
-            for record in iter_nypl_reg_directory(reg_dir):
+            for record in iter_nypl_reg_directory(reg_dir, stats=parser_stats):
                 was_renewed = False
                 renewal = None
                 if record.regnum is not None:
@@ -326,6 +335,7 @@ def _ingest_registrations(
             title_tokens=len(title_postings),
             author_tokens=len(author_postings),
             publisher_tokens=len(publisher_postings),
+            years_rejected_out_of_range=parser_stats.years_rejected_out_of_range,
         )
         return _IngestResult(
             written=written,

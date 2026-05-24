@@ -223,3 +223,62 @@ def test_iter_nypl_ren_directory_accepts_shared_stats(tmp_path: Path) -> None:
     stats = NyplRenParseStats()
     records = list(iter_nypl_ren_directory(tmp_path, stats=stats))
     assert stats.emitted == len(records)
+
+
+def _row_with_dates(odat: str, rdat: str) -> bytes:
+    """Compose a TSV row that varies just the two date columns."""
+    return (
+        b"entry-001\t4\t14A\t1\t1\tSmith\tTitle\tA111111\t"
+        + odat.encode("utf-8")
+        + b"\tR200001\t"
+        + rdat.encode("utf-8")
+        + b"\t\t\t\t\t\trow"
+    )
+
+
+def test_iter_nypl_ren_records_rejects_year_below_plausible_floor(tmp_path: Path) -> None:
+    """A rdat year of ``0159`` is rejected; the field becomes ``None``."""
+    fixture = tmp_path / "low.tsv"
+    fixture.write_bytes(
+        _PRE_1978_HEADER.encode("utf-8")
+        + b"\n"
+        + _row_with_dates("1940-05-10", "0159-01-01")
+        + b"\n"
+    )
+    stats = NyplRenParseStats()
+    records = list(iter_nypl_ren_records(fixture, stats=stats))
+    assert len(records) == 1
+    assert records[0].rdat is None
+    assert records[0].odat == date(1940, 5, 10)
+    assert stats.years_rejected_out_of_range == 1
+
+
+def test_iter_nypl_ren_records_rejects_year_above_plausible_ceiling(tmp_path: Path) -> None:
+    """A rdat year of ``5764`` is rejected; the field becomes ``None``."""
+    fixture = tmp_path / "high.tsv"
+    fixture.write_bytes(
+        _PRE_1978_HEADER.encode("utf-8")
+        + b"\n"
+        + _row_with_dates("1940-05-10", "5764-01-01")
+        + b"\n"
+    )
+    stats = NyplRenParseStats()
+    records = list(iter_nypl_ren_records(fixture, stats=stats))
+    assert len(records) == 1
+    assert records[0].rdat is None
+    assert stats.years_rejected_out_of_range == 1
+
+
+def test_iter_nypl_ren_records_accepts_in_range_year(tmp_path: Path) -> None:
+    """An in-range date keeps the rejection counter at zero."""
+    fixture = tmp_path / "ok.tsv"
+    fixture.write_bytes(
+        _PRE_1978_HEADER.encode("utf-8")
+        + b"\n"
+        + _row_with_dates("1940-05-10", "1968-05-15")
+        + b"\n"
+    )
+    stats = NyplRenParseStats()
+    records = list(iter_nypl_ren_records(fixture, stats=stats))
+    assert records[0].rdat == date(1968, 5, 15)
+    assert stats.years_rejected_out_of_range == 0

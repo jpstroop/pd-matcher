@@ -197,16 +197,25 @@ def pub_year_in_reg_coverage(facts: Facts, coverage: Coverage) -> bool:
 def pub_year_in_ren_coverage(facts: Facts, coverage: Coverage) -> bool:
     """Return ``True`` when the renewal window for ``pub_year`` is in coverage.
 
-    Renewals under the 1909 Act were filed in the 28th year after
-    registration. For a registration in year ``y``, the renewal would
-    have landed in year ``y + 28``. We treat the pub-year cohort as in
-    coverage when ``y + 28`` falls inside
-    ``[coverage.ren_min_year, coverage.ren_max_year]``.
+    Renewals under the 1909 Act §24 (17 U.S.C. §24, 1909-1977) opened in
+    the 28th calendar year after the year of original registration and
+    closed at the end of that 28th year. For a registration in year
+    ``y`` the renewal could therefore land in either ``y + 27`` or
+    ``y + 28`` depending on the calendar month: a January registration's
+    28th calendar year is ``y + 27``, while a December registration's is
+    ``y + 28``. We require BOTH candidate years to be inside
+    ``[coverage.ren_min_year, coverage.ren_max_year]`` so a renewal could
+    have been observed for the full registration cohort, not just the
+    early or late half of the year.
     """
     if facts.pub_year is None:
         return False
-    renewal_year = facts.pub_year + 28
-    return coverage.ren_min_year <= renewal_year <= coverage.ren_max_year
+    early_renewal_year = facts.pub_year + 27
+    late_renewal_year = facts.pub_year + 28
+    return (
+        coverage.ren_min_year <= early_renewal_year <= coverage.ren_max_year
+        and coverage.ren_min_year <= late_renewal_year <= coverage.ren_max_year
+    )
 
 
 __all__ = [
