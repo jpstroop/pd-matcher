@@ -75,7 +75,7 @@ pd-matcher index build \
   [--force]
 ```
 
-- `--force` rebuilds even when the source-hash + schema-version in the existing index match the inputs. Without it, an unchanged index is a no-op.
+- `--force` rebuilds even when the existing index is current. Without it, the build short-circuits when the source-file hash, the schema version, **and** a content hash of the parser/model/codec modules (`parsers/nypl_reg.py`, `parsers/nypl_ren.py`, `models.py`, `index/codec.py`, `index/builder.py`) all match the inputs. Any drift in those code files invalidates the cache automatically, so a code change to e.g. `NyplRegRecord` triggers a rebuild without anyone having to bump `schema_version`. The rebuild log line names the mismatch reason (`source_hash_changed`, `schema_version_changed`, `parser_fingerprint_changed`, ...) for debugging.
 
 The index is a directory containing LMDB data files. Memory map size defaults to 16 GiB virtual; on-disk size for the current corpus is roughly 1.5 GB.
 

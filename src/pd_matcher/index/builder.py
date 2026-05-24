@@ -10,10 +10,15 @@ ingested; that way every :class:`IndexedNyplRegRecord` can have its
 of a separate join pass at the end.
 
 Idempotency is achieved by hashing source-file paths, sizes, and mtimes
-(content hashes are too slow on the 1.4 GB registration corpus). When the
-hash plus the schema version stored in the ``meta`` sub-DB match the current
-source tree the builder short-circuits and returns ``BuildReport.skipped =
-True``; passing ``force=True`` bypasses the check and rebuilds in place.
+(content hashes are too slow on the 1.4 GB registration corpus), and by
+hashing the bytes of every parser/model/codec module that contributes to the
+stored record shape. When the source hash, the schema version, and the
+parser fingerprint stored in the ``meta`` sub-DB all match the current
+source tree and code the builder short-circuits and returns
+``BuildReport.skipped = True``; passing ``force=True`` bypasses the check
+and rebuilds in place. Any drift in the parsers, in ``models.py``, in the
+LMDB codec, or in this module itself invalidates the cache automatically so
+nobody has to remember to bump ``schema_version`` for a code-only change.
 """
 
 from datetime import UTC
@@ -47,11 +52,21 @@ _LOGGER = get_logger(__name__)
 
 _META_SCHEMA_VERSION_KEY = b"schema_version"
 _META_SOURCE_HASH_KEY = b"source_hash"
+_META_PARSER_FINGERPRINT_KEY = b"parser_fingerprint"
 _META_BUILD_TIMESTAMP_KEY = b"build_timestamp"
 _META_REG_COUNT_KEY = b"registrations_written"
 _META_REN_COUNT_KEY = b"renewals_written"
 _META_RENEWAL_JOINS_KEY = b"renewal_joins"
 _META_YEAR_BUCKETS_KEY = b"year_buckets"
+
+_PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+_PARSER_FINGERPRINT_FILES: tuple[Path, ...] = (
+    _PACKAGE_ROOT / "parsers" / "nypl_reg.py",
+    _PACKAGE_ROOT / "parsers" / "nypl_ren.py",
+    _PACKAGE_ROOT / "models.py",
+    _PACKAGE_ROOT / "index" / "codec.py",
+    _PACKAGE_ROOT / "index" / "builder.py",
+)
 
 
 class _IngestResult(Struct, frozen=True, forbid_unknown_fields=True):
@@ -113,22 +128,95 @@ def _compute_source_hash(reg_dir: Path, ren_dir: Path) -> str:
     return hasher.hexdigest()
 
 
-def _read_existing_meta(store: NyplIndexStore) -> tuple[int | None, str | None]:
-    """Return ``(schema_version, source_hash)`` from an existing env, if any."""
+def _compute_parser_fingerprint() -> str:
+    """Return a sha256 over the bytes of every parser/model/codec module.
+
+    The fingerprint protects against silent staleness when the source XML/TSV
+    files are unchanged but the code that turns them into stored records has
+    drifted (a new field on :class:`NyplRegRecord`, a tweak to
+    :func:`index_reg`, an encoder change, ...). Each file's bytes are sha256'd
+    and the per-file digests are concatenated as ``path|hexdigest\\n`` in
+    path-sorted order before the final sha256, so the result is deterministic
+    and stable across check-outs of the same code at the same paths.
+    """
+    hasher = sha256()
+    for path in sorted(_PARSER_FINGERPRINT_FILES):
+        relative = path.relative_to(_PACKAGE_ROOT).as_posix()
+        file_digest = sha256(path.read_bytes()).hexdigest()
+        hasher.update(f"{relative}|{file_digest}\n".encode("ascii"))
+    return hasher.hexdigest()
+
+
+class _ExistingMeta(Struct, frozen=True, forbid_unknown_fields=True):
+    """Snapshot of cache-validity inputs read from an existing index env."""
+
+    schema_version: int | None
+    source_hash: str | None
+    parser_fingerprint: str | None
+
+
+def _read_existing_meta(store: NyplIndexStore) -> _ExistingMeta:
+    """Return the cache-validity inputs persisted in ``store``'s ``meta`` sub-DB."""
     schema_blob = store.meta.get(_META_SCHEMA_VERSION_KEY)
     hash_blob = store.meta.get(_META_SOURCE_HASH_KEY)
-    schema_version = int(schema_blob.decode("ascii")) if schema_blob is not None else None
-    source_hash = hash_blob.decode("ascii") if hash_blob is not None else None
-    return schema_version, source_hash
+    fingerprint_blob = store.meta.get(_META_PARSER_FINGERPRINT_KEY)
+    return _ExistingMeta(
+        schema_version=int(schema_blob.decode("ascii")) if schema_blob is not None else None,
+        source_hash=hash_blob.decode("ascii") if hash_blob is not None else None,
+        parser_fingerprint=(
+            fingerprint_blob.decode("ascii") if fingerprint_blob is not None else None
+        ),
+    )
 
 
-def _is_current(out_path: Path, expected_hash: str, schema_version: int) -> bool:
-    """Return ``True`` when ``out_path`` already holds a matching build."""
+def _cache_mismatch_reason(
+    existing: _ExistingMeta,
+    *,
+    expected_source_hash: str,
+    expected_schema_version: int,
+    expected_parser_fingerprint: str,
+) -> str | None:
+    """Return the first mismatched cache key, or ``None`` when all match.
+
+    Source-hash drift is reported first because it is by far the most common
+    cause of a rebuild on a developer's box; schema version and parser
+    fingerprint follow in declaration order. Missing keys (e.g., an index
+    written before the parser fingerprint existed) collapse to the relevant
+    ``*_missing`` reason so the rebuild log line is self-explanatory.
+    """
+    if existing.source_hash is None:
+        return "source_hash_missing"
+    if existing.source_hash != expected_source_hash:
+        return "source_hash_changed"
+    if existing.schema_version is None:
+        return "schema_version_missing"
+    if existing.schema_version != expected_schema_version:
+        return "schema_version_changed"
+    if existing.parser_fingerprint is None:
+        return "parser_fingerprint_missing"
+    if existing.parser_fingerprint != expected_parser_fingerprint:
+        return "parser_fingerprint_changed"
+    return None
+
+
+def _check_cache(
+    out_path: Path,
+    *,
+    expected_source_hash: str,
+    expected_schema_version: int,
+    expected_parser_fingerprint: str,
+) -> str | None:
+    """Return ``None`` when the on-disk env is current, else a mismatch reason."""
     if not out_path.exists():
-        return False
+        return "no_existing_env"
     with NyplIndexStore(out_path, readonly=True) as readonly_store:
-        existing_schema, existing_hash = _read_existing_meta(readonly_store)
-    return existing_schema == schema_version and existing_hash == expected_hash
+        existing = _read_existing_meta(readonly_store)
+    return _cache_mismatch_reason(
+        existing,
+        expected_source_hash=expected_source_hash,
+        expected_schema_version=expected_schema_version,
+        expected_parser_fingerprint=expected_parser_fingerprint,
+    )
 
 
 def _ingest_renewals(
@@ -276,6 +364,7 @@ def _write_meta(
     *,
     schema_version: int,
     source_hash: str,
+    parser_fingerprint: str,
     registrations: int,
     renewals: int,
     renewal_joins: int,
@@ -288,6 +377,7 @@ def _write_meta(
         with store.write_transaction():
             store.meta.put(_META_SCHEMA_VERSION_KEY, str(schema_version).encode("ascii"))
             store.meta.put(_META_SOURCE_HASH_KEY, source_hash.encode("ascii"))
+            store.meta.put(_META_PARSER_FINGERPRINT_KEY, parser_fingerprint.encode("ascii"))
             store.meta.put(_META_BUILD_TIMESTAMP_KEY, timestamp.encode("ascii"))
             store.meta.put(_META_REG_COUNT_KEY, str(registrations).encode("ascii"))
             store.meta.put(_META_REN_COUNT_KEY, str(renewals).encode("ascii"))
@@ -296,6 +386,7 @@ def _write_meta(
         _LOGGER.info(
             "index.meta.written",
             schema_version=schema_version,
+            parser_fingerprint=parser_fingerprint,
             registrations=registrations,
             renewals=renewals,
             renewal_joins=renewal_joins,
@@ -335,11 +426,21 @@ def build_index(
     """
     start = perf_counter()
     source_hash = _compute_source_hash(reg_dir, ren_dir)
+    parser_fingerprint = _compute_parser_fingerprint()
 
-    if not force and _is_current(out_path, source_hash, schema_version):
+    if force:
+        mismatch_reason: str | None = "force"
+    else:
+        mismatch_reason = _check_cache(
+            out_path,
+            expected_source_hash=source_hash,
+            expected_schema_version=schema_version,
+            expected_parser_fingerprint=parser_fingerprint,
+        )
+    if mismatch_reason is None:
         _LOGGER.info(
             "index.build.skipped",
-            reason="source_hash_match",
+            reason="cache_current",
             out_path=str(out_path),
         )
         return BuildReport(
@@ -351,6 +452,11 @@ def build_index(
             duration_seconds=perf_counter() - start,
         )
 
+    _LOGGER.info(
+        "index.build.rebuilding",
+        reason=mismatch_reason,
+        out_path=str(out_path),
+    )
     _purge_directory(out_path)
 
     with NyplIndexStore(out_path, readonly=False) as store:
@@ -366,6 +472,7 @@ def build_index(
             store,
             schema_version=schema_version,
             source_hash=source_hash,
+            parser_fingerprint=parser_fingerprint,
             registrations=ingest.written,
             renewals=renewals_written,
             renewal_joins=ingest.joins,
