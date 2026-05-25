@@ -209,7 +209,6 @@ def test_build_card_exposes_marc_subfields() -> None:
     card = build_card(_row(_marc(), evidence_json='{"title.token_set": 0.9}'))
     assert card.pair_id == 7
     assert card.marc_title == "The Full Title : a subtitle"
-    assert card.marc_title_main == "The Full Title"
     assert card.marc_statement_of_responsibility == "by Jane Doe"
     assert card.marc_main_author == "Doe, Jane"
     assert card.marc_added_authors == ("Roe, Richard",)
@@ -220,12 +219,6 @@ def test_build_card_exposes_marc_subfields() -> None:
     assert card.marc_lccn == "53001234"
     assert card.marc_language_code == "eng"
     assert card.marc_country_code == "nyu"
-
-
-def test_build_card_omits_title_main_when_equal_to_title() -> None:
-    marc = _marc(title="Same Title", title_main="Same Title")
-    card = build_card(_row(marc, evidence_json="{}"))
-    assert card.marc_title_main is None
 
 
 def test_build_card_renders_cce_and_renewal() -> None:

@@ -66,7 +66,6 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     nypl_uuid: str
 
     marc_title: str
-    marc_title_main: str | None
     marc_title_part_number: str | None
     marc_title_part_name: str | None
     marc_statement_of_responsibility: str | None
@@ -231,13 +230,6 @@ def parse_evidence_sources(evidence_sources_json: str) -> dict[str, str]:
     return json_decode(evidence_sources_json, type=dict[str, str])
 
 
-def _title_main_if_distinct(marc: MarcRecord) -> str | None:
-    """Return ``title_main`` only when it differs from the full ``title``."""
-    if marc.title_main and marc.title_main != marc.title:
-        return marc.title_main
-    return None
-
-
 def _publication_date_raw_if_distinct(marc: MarcRecord) -> str | None:
     """Return ``publication_date_raw`` only when it adds detail beyond the year.
 
@@ -324,7 +316,6 @@ def build_card(row: ReviewPairRow) -> ReviewCard:
         marc_control_id=row.marc_control_id,
         nypl_uuid=row.nypl_uuid,
         marc_title=marc.title,
-        marc_title_main=_title_main_if_distinct(marc),
         marc_title_part_number=marc.title_part_number,
         marc_title_part_name=marc.title_part_name,
         marc_statement_of_responsibility=marc.statement_of_responsibility,
