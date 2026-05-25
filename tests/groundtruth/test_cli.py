@@ -444,3 +444,69 @@ def test_build_queue_command_scales_budget(tmp_path: Path) -> None:
     assert kwargs["sample_per_lang"] == 500
     assert kwargs["vault_path"] == tmp_path / "vault.jsonl"
     assert kwargs["budget"].total() < default_budget().total()
+
+
+def test_build_queue_command_without_requeue_passes_empty_frozenset(tmp_path: Path) -> None:
+    """Default behavior: no ``--requeue`` flag -> empty frozenset."""
+    with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+                "--out",
+                str(tmp_path / "review.db"),
+            ],
+        )
+    assert result.exit_code == 0
+    _, kwargs = mock_build.call_args
+    assert kwargs["requeue_verdicts"] == frozenset()
+
+
+def test_build_queue_command_collects_requeue_flags(tmp_path: Path) -> None:
+    """Repeated ``--requeue`` flags collapse into a frozenset of verdicts."""
+    with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+                "--out",
+                str(tmp_path / "review.db"),
+                "--requeue",
+                "unsure",
+                "--requeue",
+                "no_match",
+            ],
+        )
+    assert result.exit_code == 0
+    _, kwargs = mock_build.call_args
+    assert kwargs["requeue_verdicts"] == frozenset({"unsure", "no_match"})
+
+
+def test_build_queue_command_rejects_invalid_requeue_value(tmp_path: Path) -> None:
+    """``--requeue invalid`` fails fast before build_queue is invoked."""
+    with patch("pd_groundtruth.cli.build_queue", return_value=_build_summary()) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+                "--out",
+                str(tmp_path / "review.db"),
+                "--requeue",
+                "invalid",
+            ],
+        )
+    assert result.exit_code != 0
+    assert "invalid" in result.stderr
+    mock_build.assert_not_called()
