@@ -7,15 +7,13 @@ from typing import Self
 
 from msgspec.msgpack import Encoder
 from pytest import MonkeyPatch
-from pytest import raises
-from typer import BadParameter
 from typer.testing import CliRunner
 
-from pd_matcher.cli import _eval_workers_upper_bound
+from pd_groundtruth.label_vault import SCHEMA_VERSION
+from pd_groundtruth.label_vault import MarcIdentifiers
+from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.label_vault import append_entry
 from pd_matcher.cli import _resolve_log_file
-from pd_matcher.cli import _validate_eval_workers
-from pd_matcher.cli import _validate_sample
-from pd_matcher.cli import _validate_year_window
 from pd_matcher.cli import app
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.index.builder import build_index
@@ -44,18 +42,83 @@ def _build_index(tmp_path: Path) -> Path:
     return out_path
 
 
-def _write_ground_truth(path: Path) -> None:
-    """Write a small ground-truth CSV using fields known to the tiny index."""
-    header = (
-        "marc_id,marc_title_original,"
-        "marc_main_author_original,"
-        "marc_publisher_original,"
-        "marc_year,marc_country_code,marc_language_code,"
-        "match_source_id"
+_MARCXML_PROLOG = (
+    "<?xml version='1.0' encoding='UTF-8'?>\n<collection xmlns='http://www.loc.gov/MARC21/slim'>\n"
+)
+_MARCXML_EPILOG = "</collection>\n"
+
+
+def _marc_record_xml(
+    control_id: str,
+    title: str,
+    author: str,
+    publisher: str,
+    year: str,
+    *,
+    language: str = "eng",
+) -> str:
+    """Return one MARCXML <record> element synthesized for tests."""
+    return (
+        "  <record>\n"
+        f"    <controlfield tag='001'>{control_id}</controlfield>\n"
+        f"    <controlfield tag='008'>200718s{year}    xxu           000 0 {language}  </controlfield>\n"  # noqa: E501
+        f"    <datafield ind1='1' ind2=' ' tag='100'><subfield code='a'>{author}</subfield></datafield>\n"  # noqa: E501
+        f"    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>{title}</subfield></datafield>\n"  # noqa: E501
+        f"    <datafield ind1=' ' ind2=' ' tag='260'><subfield code='a'>New York :</subfield><subfield code='b'>{publisher},</subfield><subfield code='c'>{year}.</subfield></datafield>\n"  # noqa: E501
+        "  </record>\n"
     )
-    row = "marc-aaa,A study of widgets,Smith John,Acme Press,1940,xxu,eng,UUID-0001"
-    bogus = "marc-bbb,Unrelated Title,,,1955,xxu,eng,"
-    path.write_text(header + "\n" + row + "\n" + bogus + "\n", encoding="utf-8")
+
+
+def _write_pool(pool_root: Path) -> None:
+    """Write a tiny eng/widgets.xml shard mirroring UUID-0001 in the tiny index."""
+    eng = pool_root / "eng"
+    eng.mkdir(parents=True)
+    body = _marc_record_xml(
+        control_id="marc-aaa",
+        title="A study of widgets",
+        author="Smith, John",
+        publisher="Acme Press",
+        year="1940",
+    )
+    (eng / "shard.xml").write_text(
+        _MARCXML_PROLOG + body + _MARCXML_EPILOG,
+        encoding="utf-8",
+    )
+
+
+def _write_vault(vault_path: Path) -> None:
+    """Append two entries to ``vault_path``: one match + one no_match."""
+    match_entry = VaultEntry(
+        schema=SCHEMA_VERSION,
+        marc_control_id="marc-aaa",
+        nypl_uuid="UUID-0001",
+        verdict="match",
+        note=None,
+        labeled_at="2026-05-22T10:00:00+00:00",
+        labeler="test",
+        marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+    )
+    no_match_entry = VaultEntry(
+        schema=SCHEMA_VERSION,
+        marc_control_id="marc-aaa",
+        nypl_uuid="UUID-0002",
+        verdict="no_match",
+        note=None,
+        labeled_at="2026-05-22T10:05:00+00:00",
+        labeler="test",
+        marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+    )
+    append_entry(vault_path, match_entry)
+    append_entry(vault_path, no_match_entry)
+
+
+def _prepare_vault_and_pool(tmp_path: Path) -> tuple[Path, Path]:
+    """Stand up a vault JSONL + pool dir; return ``(vault, pool)``."""
+    vault_path = tmp_path / "vault.jsonl"
+    pool_path = tmp_path / "pool"
+    _write_vault(vault_path)
+    _write_pool(pool_path)
+    return vault_path, pool_path
 
 
 def test_root_help_lists_subcommands() -> None:
@@ -111,12 +174,10 @@ def test_eval_help_lists_options() -> None:
     result = _runner.invoke(app, ["eval", "--help"])
     assert result.exit_code == 0
     for flag in (
-        "--ground-truth",
+        "--vault",
+        "--pool",
         "--index",
         "--report",
-        "--limit",
-        "--sample",
-        "--seed",
         "--year-window",
     ):
         assert flag in result.stdout
@@ -761,43 +822,46 @@ def test_match_surfaces_pairing_config_error(
 
 
 def test_eval_runs_against_tiny_index(tmp_path: Path) -> None:
-    """``eval`` succeeds against the tiny index + a synthetic GT CSV."""
+    """``eval`` succeeds against the tiny index + vault + pool fixtures."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
     report_path = tmp_path / "report.json"
     result = _runner.invoke(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
             "--report",
             str(report_path),
-            "--limit",
-            "2",
         ],
     )
     assert result.exit_code == 0, result.output
     assert "Eval report:" in result.stdout
+    assert "auc_roc" in result.stdout
     assert report_path.exists()
     payload = loads(report_path.read_text(encoding="utf-8"))
-    assert payload["rows_evaluated"] == 2
+    assert "auc_roc" in payload
+    assert "average_precision" in payload
+    assert payload["pairs_evaluated"] == 2
 
 
 def test_eval_without_report_does_not_write_file(tmp_path: Path) -> None:
     """When ``--report`` is omitted no JSON file is written."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
     result = _runner.invoke(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
         ],
@@ -805,33 +869,57 @@ def test_eval_without_report_does_not_write_file(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
-def test_eval_rejects_missing_ground_truth(tmp_path: Path) -> None:
-    """``eval`` exits 1 when ``--ground-truth`` does not exist."""
+def test_eval_rejects_missing_vault(tmp_path: Path) -> None:
+    """``eval`` exits 1 when ``--vault`` does not exist."""
     index_path = _build_index(tmp_path)
+    _, pool_path = _prepare_vault_and_pool(tmp_path)
     result = _runner.invoke(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(tmp_path / "nope.csv"),
+            "--vault",
+            str(tmp_path / "missing.jsonl"),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
         ],
     )
     assert result.exit_code == 1
-    assert "--ground-truth" in result.output
+    assert "--vault" in result.output
 
 
-def test_eval_rejects_missing_index(tmp_path: Path) -> None:
-    """``eval`` exits 1 when ``--index`` does not exist."""
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+def test_eval_rejects_missing_pool(tmp_path: Path) -> None:
+    """``eval`` exits 1 when ``--pool`` is not a directory."""
+    index_path = _build_index(tmp_path)
+    vault_path, _ = _prepare_vault_and_pool(tmp_path)
     result = _runner.invoke(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(tmp_path / "missing-pool"),
+            "--index",
+            str(index_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--pool" in result.output
+
+
+def test_eval_rejects_missing_index(tmp_path: Path) -> None:
+    """``eval`` exits 1 when ``--index`` does not exist."""
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(tmp_path / "missing.lmdb"),
         ],
@@ -846,8 +934,7 @@ def test_eval_surfaces_matching_config_error(
 ) -> None:
     """A ConfigError during matching-defaults load surfaces as exit 1."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
     from pd_matcher.config.loader import ConfigError
 
     def _raise() -> object:
@@ -858,8 +945,10 @@ def test_eval_surfaces_matching_config_error(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
         ],
@@ -874,8 +963,7 @@ def test_eval_surfaces_pairing_config_error(
 ) -> None:
     """A ConfigError during pairing-defaults load surfaces as exit 1."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
     from pd_matcher.config.loader import ConfigError
 
     def _raise() -> object:
@@ -886,8 +974,10 @@ def test_eval_surfaces_pairing_config_error(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
         ],
@@ -902,8 +992,7 @@ def test_eval_surfaces_run_eval_oserror(
 ) -> None:
     """An OSError from ``run_eval`` surfaces as exit 1."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
 
     def _raise(**_kwargs: object) -> object:
         raise OSError("io error")
@@ -913,8 +1002,10 @@ def test_eval_surfaces_run_eval_oserror(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
         ],
@@ -927,16 +1018,11 @@ def test_eval_year_window_override_threads_through(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """``--year-window`` rebuilds the MatchingConfig before invoking ``run_eval``.
-
-    We capture the ``matching_config`` that the CLI passes to ``run_eval`` and
-    assert its ``year_window`` reflects the override (not the default).
-    """
+    """``--year-window`` rebuilds the MatchingConfig before invoking ``run_eval``."""
     from pd_matcher.eval.ground_truth import EvalReport
 
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
     captured: dict[str, int] = {}
 
     def _fake_run_eval(**kwargs: object) -> EvalReport:
@@ -944,13 +1030,19 @@ def test_eval_year_window_override_threads_through(
         assert isinstance(config, MatchingConfig)
         captured["year_window"] = config.year_window
         return EvalReport(
-            rows_evaluated=0,
-            rows_with_predicted_match=0,
-            rows_with_ground_truth_match=0,
-            rows_agreeing=0,
+            pairs_evaluated=0,
+            pairs_positive=0,
+            pairs_negative=0,
+            pairs_unsure_excluded=0,
+            marcs_evaluated=0,
+            marcs_with_matcher_top=0,
+            marcs_with_correct_top=0,
             precision=0.0,
             recall=0.0,
             f1=0.0,
+            auc_roc=0.0,
+            average_precision=0.0,
+            threshold_sweep=(),
             elapsed_seconds=0.0,
         )
 
@@ -959,8 +1051,10 @@ def test_eval_year_window_override_threads_through(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
             "--year-window",
@@ -974,14 +1068,15 @@ def test_eval_year_window_override_threads_through(
 def test_eval_accepts_year_window_zero(tmp_path: Path) -> None:
     """``eval --year-window 0`` is the lower bound and is accepted."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
     result = _runner.invoke(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
             "--year-window",
@@ -991,37 +1086,18 @@ def test_eval_accepts_year_window_zero(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
-def test_eval_accepts_year_window_five(tmp_path: Path) -> None:
-    """``eval --year-window 5`` (typical override) is accepted."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--year-window",
-            "5",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-
-
 def test_eval_accepts_year_window_upper_bound(tmp_path: Path) -> None:
     """``eval --year-window 100`` is the upper bound and is accepted."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
     result = _runner.invoke(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
             "--year-window",
@@ -1034,14 +1110,15 @@ def test_eval_accepts_year_window_upper_bound(tmp_path: Path) -> None:
 def test_eval_rejects_year_window_below_zero(tmp_path: Path) -> None:
     """``eval --year-window -1`` is rejected with exit 2."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
     result = _runner.invoke(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
             "--year-window",
@@ -1055,14 +1132,15 @@ def test_eval_rejects_year_window_below_zero(tmp_path: Path) -> None:
 def test_eval_rejects_year_window_above_upper_bound(tmp_path: Path) -> None:
     """``eval --year-window 101`` is rejected with exit 2."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
     result = _runner.invoke(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
             "--year-window",
@@ -1076,14 +1154,15 @@ def test_eval_rejects_year_window_above_upper_bound(tmp_path: Path) -> None:
 def test_eval_rejects_year_window_non_integer(tmp_path: Path) -> None:
     """``eval --year-window abc`` is rejected by typer's parser with exit 2."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
     result = _runner.invoke(
         app,
         [
             "eval",
-            "--ground-truth",
-            str(gt_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
             "--index",
             str(index_path),
             "--year-window",
@@ -1093,386 +1172,50 @@ def test_eval_rejects_year_window_non_integer(tmp_path: Path) -> None:
     assert result.exit_code == 2
 
 
-def test_eval_accepts_sample(tmp_path: Path) -> None:
-    """``eval --sample 100`` is accepted and runs to completion."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--sample",
-            "100",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-
-
-def test_eval_rejects_sample_zero(tmp_path: Path) -> None:
-    """``eval --sample 0`` is rejected with exit 2."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--sample",
-            "0",
-        ],
-    )
-    assert result.exit_code == 2
-    assert "sample" in result.output
-
-
-def test_eval_rejects_sample_negative(tmp_path: Path) -> None:
-    """``eval --sample -1`` is rejected with exit 2."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--sample",
-            "-1",
-        ],
-    )
-    assert result.exit_code == 2
-    assert "sample" in result.output
-
-
-def test_eval_rejects_sample_non_integer(tmp_path: Path) -> None:
-    """``eval --sample abc`` is rejected by typer's parser with exit 2."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--sample",
-            "abc",
-        ],
-    )
-    assert result.exit_code == 2
-
-
-def test_eval_accepts_seed(tmp_path: Path) -> None:
-    """``eval --sample 100 --seed 42`` is accepted."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--sample",
-            "100",
-            "--seed",
-            "42",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-
-
-def test_eval_accepts_default_seed(tmp_path: Path) -> None:
-    """Omitting ``--seed`` is fine; the default is used."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--sample",
-            "100",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-
-
-def test_eval_rejects_negative_seed(tmp_path: Path) -> None:
-    """``--seed -1`` is rejected with exit 2 (non-negative integers only)."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--sample",
-            "100",
-            "--seed",
-            "-1",
-        ],
-    )
-    assert result.exit_code == 2
-    assert "seed" in result.output
-
-
-def test_eval_rejects_sample_and_limit_together(tmp_path: Path) -> None:
-    """``--sample`` and ``--limit`` are mutually exclusive."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--sample",
-            "100",
-            "--limit",
-            "50",
-        ],
-    )
-    assert result.exit_code == 2
-    assert "mutually exclusive" in result.output
-
-
-def test_validate_year_window_passes_none() -> None:
-    """``_validate_year_window(None)`` returns ``None`` (flag omitted)."""
-    assert _validate_year_window(None) is None
-
-
-def test_validate_year_window_accepts_within_range() -> None:
-    """``_validate_year_window`` accepts values in ``[0, 100]``."""
-    assert _validate_year_window(0) == 0
-    assert _validate_year_window(50) == 50
-    assert _validate_year_window(100) == 100
-
-
-def test_validate_year_window_rejects_below_zero() -> None:
-    """``_validate_year_window(-1)`` raises :class:`typer.BadParameter`."""
-    with raises(BadParameter, match="year-window"):
-        _validate_year_window(-1)
-
-
-def test_validate_year_window_rejects_above_upper_bound() -> None:
-    """``_validate_year_window(101)`` raises :class:`typer.BadParameter`."""
-    with raises(BadParameter, match="year-window"):
-        _validate_year_window(101)
-
-
-def test_validate_sample_passes_none() -> None:
-    """``_validate_sample(None)`` returns ``None`` (flag omitted)."""
-    assert _validate_sample(None) is None
-
-
-def test_validate_sample_accepts_positive() -> None:
-    """``_validate_sample`` accepts any value ``>= 1``."""
-    assert _validate_sample(1) == 1
-    assert _validate_sample(10_000) == 10_000
-
-
-def test_validate_sample_rejects_zero() -> None:
-    """``_validate_sample(0)`` raises :class:`typer.BadParameter`."""
-    with raises(BadParameter, match="sample"):
-        _validate_sample(0)
-
-
-def test_validate_sample_rejects_negative() -> None:
-    """``_validate_sample(-1)`` raises :class:`typer.BadParameter`."""
-    with raises(BadParameter, match="sample"):
-        _validate_sample(-1)
-
-
-def test_validate_eval_workers_accepts_default_one() -> None:
-    """``_validate_eval_workers(1)`` is the lower bound and is accepted."""
-    assert _validate_eval_workers(1) == 1
-
-
-def test_validate_eval_workers_accepts_upper_bound() -> None:
-    """``_validate_eval_workers`` accepts ``cpu_count() * 2`` (the upper bound)."""
-    upper = _eval_workers_upper_bound()
-    assert _validate_eval_workers(upper) == upper
-
-
-def test_validate_eval_workers_rejects_zero() -> None:
-    """``_validate_eval_workers(0)`` raises :class:`typer.BadParameter`."""
-    with raises(BadParameter, match="workers"):
-        _validate_eval_workers(0)
-
-
-def test_validate_eval_workers_rejects_negative() -> None:
-    """``_validate_eval_workers(-1)`` raises :class:`typer.BadParameter`."""
-    with raises(BadParameter, match="workers"):
-        _validate_eval_workers(-1)
-
-
-def test_validate_eval_workers_rejects_above_upper_bound() -> None:
-    """``_validate_eval_workers(cpu_count*2 + 1)`` raises :class:`typer.BadParameter`."""
-    with raises(BadParameter, match="workers"):
-        _validate_eval_workers(_eval_workers_upper_bound() + 1)
-
-
-def test_eval_workers_upper_bound_falls_back_when_cpu_count_returns_none(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """When ``os.cpu_count`` returns ``None`` the upper bound falls back to ``2``."""
-    monkeypatch.setattr("pd_matcher.cli.cpu_count", lambda: None)
-    assert _eval_workers_upper_bound() == 2
-
-
-def test_eval_workers_flag_threads_through(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """``--workers N`` is forwarded to ``run_eval`` unchanged."""
+def test_format_eval_report_empty_sweep_says_no_pairs() -> None:
+    """``_format_eval_report`` includes a 'no scored pairs' marker on empty sweeps."""
+    from pd_matcher.cli import _format_eval_report
     from pd_matcher.eval.ground_truth import EvalReport
 
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    captured: dict[str, int] = {}
+    report = EvalReport(
+        pairs_evaluated=0,
+        pairs_positive=0,
+        pairs_negative=0,
+        pairs_unsure_excluded=0,
+        marcs_evaluated=0,
+        marcs_with_matcher_top=0,
+        marcs_with_correct_top=0,
+        precision=0.0,
+        recall=0.0,
+        f1=0.0,
+        auc_roc=0.0,
+        average_precision=0.0,
+        threshold_sweep=(),
+        elapsed_seconds=0.0,
+    )
+    rendered = _format_eval_report(report)
+    assert "no scored pairs" in rendered
 
-    def _fake_run_eval(**kwargs: object) -> EvalReport:
-        workers = kwargs["workers"]
-        assert isinstance(workers, int)
-        captured["workers"] = workers
-        return EvalReport(
-            rows_evaluated=0,
-            rows_with_predicted_match=0,
-            rows_with_ground_truth_match=0,
-            rows_agreeing=0,
+
+def test_format_sweep_appends_tail_when_grid_does_not_align() -> None:
+    """When the previewed slice misses the last grid point, the tail is appended."""
+    from pd_matcher.cli import _format_sweep
+    from pd_matcher.eval.metrics import ThresholdPoint
+
+    sweep = tuple(
+        ThresholdPoint(
+            threshold=index * 0.1,
             precision=0.0,
             recall=0.0,
             f1=0.0,
-            elapsed_seconds=0.0,
+            true_positives=0,
+            false_positives=0,
+            false_negatives=0,
         )
-
-    monkeypatch.setattr("pd_matcher.cli.run_eval", _fake_run_eval)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--workers",
-            "2",
-        ],
+        for index in range(11)
     )
-    assert result.exit_code == 0, result.output
-    assert captured["workers"] == 2
-
-
-def test_eval_default_workers_is_one(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Omitting ``--workers`` defaults to ``1`` (single-process)."""
-    from pd_matcher.eval.ground_truth import EvalReport
-
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    captured: dict[str, int] = {}
-
-    def _fake_run_eval(**kwargs: object) -> EvalReport:
-        workers = kwargs["workers"]
-        assert isinstance(workers, int)
-        captured["workers"] = workers
-        return EvalReport(
-            rows_evaluated=0,
-            rows_with_predicted_match=0,
-            rows_with_ground_truth_match=0,
-            rows_agreeing=0,
-            precision=0.0,
-            recall=0.0,
-            f1=0.0,
-            elapsed_seconds=0.0,
-        )
-
-    monkeypatch.setattr("pd_matcher.cli.run_eval", _fake_run_eval)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert captured["workers"] == 1
-
-
-def test_eval_rejects_workers_zero(tmp_path: Path) -> None:
-    """``eval --workers 0`` is rejected with exit 2."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--workers",
-            "0",
-        ],
-    )
-    assert result.exit_code == 2
-    assert "workers" in result.output
-
-
-def test_eval_rejects_workers_above_upper_bound(tmp_path: Path) -> None:
-    """``eval --workers <cpu_count*2 + 1>`` is rejected with exit 2."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--workers",
-            str(_eval_workers_upper_bound() + 1),
-        ],
-    )
-    assert result.exit_code == 2
-    assert "workers" in result.output
+    rendered = _format_sweep(sweep)
+    assert "t=1.00" in rendered
 
 
 def test_train_scorer_returns_phase_9_stub() -> None:

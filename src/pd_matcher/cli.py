@@ -16,7 +16,6 @@ from importlib.resources import as_file
 from importlib.resources import files
 from json import dumps
 from logging import WARNING
-from os import cpu_count
 from pathlib import Path
 from typing import Annotated
 
@@ -35,6 +34,7 @@ from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.eval.ground_truth import EvalReport
 from pd_matcher.eval.ground_truth import run_eval
+from pd_matcher.eval.metrics import ThresholdPoint
 from pd_matcher.index.builder import BuildReport
 from pd_matcher.index.builder import build_index
 from pd_matcher.index.lookup import IndexStats
@@ -59,7 +59,9 @@ _CALIBRATOR_NAME: str = "calibrator.msgpack"
 _YEAR_WINDOW_MIN: int = 0
 _YEAR_WINDOW_MAX: int = 100
 
-_EVAL_WORKERS_MIN: int = 1
+_DEFAULT_VAULT_PATH: Path = Path("data/label_vault.jsonl")
+_DEFAULT_POOL_PATH: Path = Path("data/candidates")
+_SWEEP_PREVIEW_STEP: int = 4
 
 
 class _LogSettings:
@@ -185,38 +187,6 @@ def _validate_year_window(value: int | None) -> int | None:
     return value
 
 
-def _validate_sample(value: int | None) -> int | None:
-    """Return ``value`` unchanged when it is ``None`` or ``>= 1``; raise otherwise."""
-    if value is None:
-        return None
-    if value < 1:
-        raise BadParameter(
-            f"--sample: must be a positive integer (got {value})",
-        )
-    return value
-
-
-def _eval_workers_upper_bound() -> int:
-    """Return the inclusive upper bound for ``--workers`` on ``eval``.
-
-    Capped at ``cpu_count() * 2`` so over-subscription stays modest even
-    on hosts where ``cpu_count`` underreports (containers, hyperthreaded
-    CI runners). Defaults to ``2`` when ``cpu_count`` returns ``None``.
-    """
-    cpus = cpu_count() or 1
-    return max(_EVAL_WORKERS_MIN, cpus * 2)
-
-
-def _validate_eval_workers(value: int) -> int:
-    """Return ``value`` unchanged when it lies in ``[1, cpu_count*2]``; raise otherwise."""
-    upper = _eval_workers_upper_bound()
-    if value < _EVAL_WORKERS_MIN or value > upper:
-        raise BadParameter(
-            f"--workers: must be between {_EVAL_WORKERS_MIN} and {upper} (got {value})",
-        )
-    return value
-
-
 def _load_default_matching_config() -> MatchingConfig:
     """Load the shipped ``matching.yaml`` defaults."""
     resource = files("pd_matcher.config.defaults") / "matching.yaml"
@@ -282,16 +252,42 @@ def _format_prepare_report(report: PrepareReport) -> str:
     )
 
 
+def _format_sweep_row(point: ThresholdPoint) -> str:
+    """Render one :class:`ThresholdPoint` as a compact table row."""
+    return (
+        f"    t={point.threshold:.2f}  "
+        f"P={point.precision:.3f}  R={point.recall:.3f}  F1={point.f1:.3f}  "
+        f"TP={point.true_positives}  FP={point.false_positives}  "
+        f"FN={point.false_negatives}"
+    )
+
+
+def _format_sweep(sweep: tuple[ThresholdPoint, ...]) -> str:
+    """Render a subset of the sweep grid (every Nth point) as a small table."""
+    if not sweep:
+        return "    (no scored pairs)"
+    preview = sweep[::_SWEEP_PREVIEW_STEP]
+    if preview[-1].threshold != sweep[-1].threshold:
+        preview = (*preview, sweep[-1])
+    return "\n".join(_format_sweep_row(point) for point in preview)
+
+
 def _format_eval_report(report: EvalReport) -> str:
     """Render an :class:`EvalReport` as a small human-readable summary."""
     return (
-        f"  rows evaluated: {report.rows_evaluated}\n"
-        f"  predicted match: {report.rows_with_predicted_match}\n"
-        f"  ground-truth match: {report.rows_with_ground_truth_match}\n"
-        f"  agreeing: {report.rows_agreeing}\n"
+        f"  pairs evaluated: {report.pairs_evaluated} "
+        f"(positive={report.pairs_positive} negative={report.pairs_negative} "
+        f"unsure_excluded={report.pairs_unsure_excluded})\n"
+        f"  marcs evaluated: {report.marcs_evaluated} "
+        f"(with top={report.marcs_with_matcher_top} "
+        f"correct top={report.marcs_with_correct_top})\n"
         f"  precision: {report.precision:.3f}\n"
         f"  recall: {report.recall:.3f}\n"
         f"  f1: {report.f1:.3f}\n"
+        f"  auc_roc: {report.auc_roc:.3f}\n"
+        f"  average_precision: {report.average_precision:.3f}\n"
+        f"  threshold sweep:\n"
+        f"{_format_sweep(report.threshold_sweep)}\n"
         f"  elapsed: {report.elapsed_seconds:.2f}s"
     )
 
@@ -545,35 +541,19 @@ def match(
 
 @app.command("eval")
 def eval_(
-    ground_truth: Annotated[
-        Path,
-        Option("--ground-truth", help="Ground-truth CSV (combined_ground_truth.csv shape)."),
-    ],
     index: Annotated[Path, Option("--index", help="LMDB index directory.")],
+    vault: Annotated[
+        Path,
+        Option("--vault", help="Label vault JSONL path."),
+    ] = _DEFAULT_VAULT_PATH,
+    pool: Annotated[
+        Path,
+        Option("--pool", help="MARC candidate pool root directory (<pool>/<lang>/*.xml)."),
+    ] = _DEFAULT_POOL_PATH,
     report: Annotated[
         Path | None,
         Option("--report", help="Optional path for a JSON copy of the eval report."),
     ] = None,
-    limit: Annotated[
-        int | None,
-        Option("--limit", help="Evaluate at most this many rows."),
-    ] = None,
-    sample: Annotated[
-        int | None,
-        Option(
-            "--sample",
-            help=(
-                "Randomly sample N rows from the ground-truth CSV. Mutually exclusive with --limit."
-            ),
-        ),
-    ] = None,
-    seed: Annotated[
-        int,
-        Option(
-            "--seed",
-            help="Seed for --sample's random selection (default: 0).",
-        ),
-    ] = 0,
     year_window: Annotated[
         int | None,
         Option(
@@ -581,41 +561,26 @@ def eval_(
             help="Override the matching config's year_window for this eval run.",
         ),
     ] = None,
-    workers: Annotated[
-        int,
-        Option(
-            "--workers",
-            help=(
-                "Number of worker processes (default: 1, single-process)."
-                " Use --workers N to fan out across a spawn pool; N is"
-                " capped at cpu_count() * 2."
-            ),
-        ),
-    ] = 1,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
     ] = None,
 ) -> None:
-    """Evaluate the matcher's linkage against the ground-truth pairs.
+    """Evaluate the matcher's linkage against the label vault.
 
     Examples:
         pd-matcher eval \\
-            --ground-truth data/combined_ground_truth.csv \\
+            --vault data/label_vault.jsonl \\
+            --pool data/candidates \\
             --index caches/nypl.lmdb \\
-            --report /tmp/eval.json \\
-            --workers 8
+            --report /tmp/eval.json
     """
     _enable_log_file("eval", log_file)
     year_window = _validate_year_window(year_window)
-    sample = _validate_sample(sample)
-    workers = _validate_eval_workers(workers)
-    if seed < 0:
-        raise BadParameter(f"--seed: must be a non-negative integer (got {seed})")
-    if sample is not None and limit is not None:
-        raise BadParameter("--sample and --limit are mutually exclusive")
-    if not ground_truth.is_file():
-        raise _fail(f"--ground-truth does not exist or is not a file: {ground_truth}")
+    if not vault.is_file():
+        raise _fail(f"--vault does not exist or is not a file: {vault}")
+    if not pool.is_dir():
+        raise _fail(f"--pool does not exist or is not a directory: {pool}")
     if not index.exists():
         raise _fail(f"--index does not exist: {index}")
     try:
@@ -641,14 +606,11 @@ def eval_(
         raise _fail(f"failed to load pairing defaults: {exc}") from exc
     try:
         eval_report = run_eval(
-            ground_truth_path=ground_truth,
+            vault_path=vault,
+            pool_path=pool,
             index_path=index,
             matching_config=matching_config,
             pairing_config=pairing_config,
-            limit=limit,
-            sample=sample,
-            seed=seed,
-            workers=workers,
         )
     except OSError as exc:
         raise _fail(f"eval run failed: {exc}") from exc
