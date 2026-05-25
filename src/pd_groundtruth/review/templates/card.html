@@ -59,6 +59,7 @@
       {% if card.marc_isbns %}<div class="field"><div class="k">isbns</div><div class="v">{{ card.marc_isbns | join("; ") }}</div></div>{% endif %}
       {% if card.marc_oclc %}<div class="field"><div class="k">oclc</div><div class="v"><a href="{{ card.marc_oclc_url }}" target="_blank" rel="noopener noreferrer">{{ card.marc_oclc }}</a></div></div>{% endif %}
       <div class="field"><div class="k">Princeton</div><div class="v"><a href="https://catalog.princeton.edu/catalog/{{ card.marc_control_id }}" target="_blank" rel="noopener noreferrer">{{ card.marc_control_id }}</a></div></div>
+      {% if card.marc_hathitrust_url %}<div class="field"><div class="k">HathiTrust</div><div class="v"><a href="{{ card.marc_hathitrust_url }}" target="_blank" rel="noopener noreferrer">view</a></div></div>{% endif %}
       <div class="field"><div class="k">lang / country</div><div class="v">{{ card.marc_language_code or "?" }} / {{ card.marc_country_code or "?" }}</div></div>
     </section>
 

@@ -11,6 +11,7 @@ from pd_groundtruth.review.view import CLAIMANT_LABEL
 from pd_groundtruth.review.view import RENEWAL_NOT_RENEWED
 from pd_groundtruth.review.view import RENEWAL_RENEWED
 from pd_groundtruth.review.view import RENEWAL_UNKNOWN
+from pd_groundtruth.review.view import _hathitrust_url
 from pd_groundtruth.review.view import _publication_date_raw_if_distinct
 from pd_groundtruth.review.view import author_is_claimant_label
 from pd_groundtruth.review.view import build_card
@@ -33,6 +34,7 @@ def _marc(
     publication_year: int | None = 1953,
     isbns: tuple[str, ...] = (),
     oclc: str | None = None,
+    lccn: str | None = "53001234",
     title_part_number: str | None = None,
     title_part_name: str | None = None,
 ) -> MarcRecord:
@@ -40,7 +42,7 @@ def _marc(
         control_id="ctrl-1",
         title=title,
         title_main=title_main,
-        lccn="53001234",
+        lccn=lccn,
         oclc=oclc,
         isbns=isbns,
         title_part_number=title_part_number,
@@ -435,6 +437,99 @@ def test_build_card_oclc_url_strips_number_class_prefixes() -> None:
         build_card(_row(marc_on, evidence_json="{}")).marc_oclc_url
         == "https://www.worldcat.org/oclc/1234567890"
     )
+
+
+def test_hathitrust_url_none_when_all_identifiers_absent() -> None:
+    assert _hathitrust_url(None, None, ()) is None
+
+
+def test_hathitrust_url_uses_oclc_when_only_oclc_present() -> None:
+    assert (
+        _hathitrust_url("123456", None, ())
+        == "https://catalog.hathitrust.org/api/volumes/oclc/123456.html"
+    )
+
+
+def test_hathitrust_url_uses_lccn_when_only_lccn_present() -> None:
+    assert (
+        _hathitrust_url(None, "53001234", ())
+        == "https://catalog.hathitrust.org/api/volumes/lccn/53001234.html"
+    )
+
+
+def test_hathitrust_url_uses_first_isbn_when_only_isbns_present() -> None:
+    assert (
+        _hathitrust_url(None, None, ("9780000000000", "9781111111111"))
+        == "https://catalog.hathitrust.org/api/volumes/isbn/9780000000000.html"
+    )
+
+
+def test_hathitrust_url_oclc_wins_over_lccn_and_isbn() -> None:
+    assert (
+        _hathitrust_url("123456", "53001234", ("9780000000000",))
+        == "https://catalog.hathitrust.org/api/volumes/oclc/123456.html"
+    )
+
+
+def test_hathitrust_url_oclc_wins_when_lccn_also_present() -> None:
+    assert (
+        _hathitrust_url("123456", "53001234", ())
+        == "https://catalog.hathitrust.org/api/volumes/oclc/123456.html"
+    )
+
+
+def test_hathitrust_url_lccn_wins_over_isbn_when_no_oclc() -> None:
+    assert (
+        _hathitrust_url(None, "53001234", ("9780000000000",))
+        == "https://catalog.hathitrust.org/api/volumes/lccn/53001234.html"
+    )
+
+
+def test_hathitrust_url_strips_oclc_number_class_prefix() -> None:
+    assert (
+        _hathitrust_url("ocm01637690", None, ())
+        == "https://catalog.hathitrust.org/api/volumes/oclc/01637690.html"
+    )
+
+
+def test_hathitrust_url_encodes_lccn_space_and_slash() -> None:
+    assert (
+        _hathitrust_url(None, "n 79/12345", ())
+        == "https://catalog.hathitrust.org/api/volumes/lccn/n%2079%2F12345.html"
+    )
+
+
+def test_hathitrust_url_empty_isbn_tuple_is_treated_as_absent() -> None:
+    assert _hathitrust_url(None, None, ()) is None
+
+
+def test_build_card_projects_hathitrust_url_from_oclc() -> None:
+    marc = _marc(oclc="123456", lccn=None, isbns=())
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_hathitrust_url == "https://catalog.hathitrust.org/api/volumes/oclc/123456.html"
+
+
+def test_build_card_projects_hathitrust_url_from_lccn_when_no_oclc() -> None:
+    marc = _marc(oclc=None, lccn="53001234", isbns=())
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert (
+        card.marc_hathitrust_url == "https://catalog.hathitrust.org/api/volumes/lccn/53001234.html"
+    )
+
+
+def test_build_card_projects_hathitrust_url_from_isbn_when_no_oclc_or_lccn() -> None:
+    marc = _marc(oclc=None, lccn=None, isbns=("9780000000000",))
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert (
+        card.marc_hathitrust_url
+        == "https://catalog.hathitrust.org/api/volumes/isbn/9780000000000.html"
+    )
+
+
+def test_build_card_hathitrust_url_none_when_no_identifiers() -> None:
+    marc = _marc(oclc=None, lccn=None, isbns=())
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_hathitrust_url is None
 
 
 def test_build_card_projects_title_part_number_when_present() -> None:

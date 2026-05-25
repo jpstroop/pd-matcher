@@ -38,14 +38,17 @@ def _pair(
     renewal_claimants: str | None = "Estate of Jane Doe|PWH",
     renewal_new_matter: str | None = "added chapter 7",
     evidence_sources_json: str = "{}",
+    lccn: str | None = "40012345",
+    oclc: str | None = "0001",
+    isbns: tuple[str, ...] = ("9780000000000",),
 ) -> PairInsert:
     marc = MarcRecord(
         control_id=control_id,
         title="A Studied Title",
         title_main="A Studied Title",
-        lccn="40012345",
-        oclc="0001",
-        isbns=("9780000000000",),
+        lccn=lccn,
+        oclc=oclc,
+        isbns=isbns,
         title_part_number="Pt. 2",
         title_part_name="The empire of Sebastopol",
         main_author="Doe, Jane",
@@ -164,6 +167,25 @@ def no_renewal_details_client(tmp_path: Path, vault_path: Path) -> Iterator[Test
                 renewal_title=None,
                 renewal_claimants=None,
                 renewal_new_matter=None,
+            )
+        )
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
+def no_identifiers_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="ni-1",
+                nypl_uuid="u-ni-1",
+                lccn=None,
+                oclc=None,
+                isbns=(),
             )
         )
     app = create_app(db_path, vault_path)
@@ -651,6 +673,22 @@ def test_card_omits_extended_marc_rows_when_absent(empty_client: TestClient) -> 
     assert ">isbns<" not in response.text
     assert ">oclc<" not in response.text
     assert "worldcat.org" not in response.text
+
+
+def test_card_renders_hathitrust_link_when_oclc_present(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert ">HathiTrust<" in response.text
+    assert 'href="https://catalog.hathitrust.org/api/volumes/oclc/0001.html"' in response.text
+
+
+def test_card_omits_hathitrust_link_when_no_identifiers(
+    no_identifiers_client: TestClient,
+) -> None:
+    response = no_identifiers_client.get("/")
+    assert response.status_code == 200
+    assert ">HathiTrust<" not in response.text
+    assert "catalog.hathitrust.org" not in response.text
 
 
 def test_card_renders_renewal_details_block_when_populated(client: TestClient) -> None:
