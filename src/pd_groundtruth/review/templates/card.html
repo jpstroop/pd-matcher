@@ -12,11 +12,17 @@
   {% if filters.language %}<input type="hidden" name="language" value="{{ filters.language }}">{% endif %}
   {% if filters.band %}<input type="hidden" name="band" value="{{ filters.band }}">{% endif %}
 
-  <div class="actions">
-    <button type="button" class="match" data-verdict="match">Match (y)</button>
-    <button type="button" class="no" data-verdict="no_match">No match (n)</button>
-    <button type="button" class="unsure" data-verdict="unsure">Unsure (u)</button>
-    <button type="button" class="skip" data-verdict="">Skip (s / space)</button>
+  <div class="action-bar">
+    <div class="actions">
+      <button type="button" class="match" data-verdict="match">Match (y)</button>
+      <button type="button" class="no" data-verdict="no_match">No match (n)</button>
+      <button type="button" class="unsure" data-verdict="unsure">Unsure (u)</button>
+      <button type="button" class="skip" data-verdict="">Skip (s / space)</button>
+    </div>
+    <div class="note-block">
+      <textarea name="note" id="note-field" rows="2" autocomplete="off"
+                placeholder="Note (optional) — capture anything notable about this pair"></textarea>
+    </div>
   </div>
 
   <div class="meta">
@@ -111,10 +117,6 @@
     {% endif %}
   </section>
 
-  <div class="note-block">
-    <textarea name="note" id="note-field" rows="3" autocomplete="off"
-              placeholder="Note (optional) — capture anything notable about this pair"></textarea>
-  </div>
 </form>
 <p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}. The note field captures whatever you think is worth flagging about the pair; accumulated notes will be analyzed later to surface patterns.</p>
 

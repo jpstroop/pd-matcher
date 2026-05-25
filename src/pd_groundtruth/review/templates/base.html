@@ -66,18 +66,18 @@
     .ev-fill { display: block; background: var(--accent); height: 100%; min-width: 1px; }
     .ev-score { white-space: nowrap; }
     .ev-source { color: var(--muted); font-style: italic; margin-left: .35rem; }
-    .actions { display: flex; gap: .6rem;
-               position: sticky; top: var(--header-h); z-index: 10;
-               background: var(--bg); padding: .8rem 1.2rem;
-               border-bottom: 1px solid var(--line);
-               margin: 0 -1.2rem 1.2rem; }
+    .action-bar { position: sticky; top: var(--header-h); z-index: 10;
+                  background: var(--bg); padding: .8rem 1.2rem;
+                  border-bottom: 1px solid var(--line);
+                  margin: 0 -1.2rem 1.2rem; }
+    .actions { display: flex; gap: .6rem; }
     .actions button { flex: 1; padding: .8rem; font-size: 1rem; font-weight: 600;
                       border: 1px solid var(--line); border-radius: 10px; cursor: pointer; background: #fff; }
     .actions button.match { color: var(--match); }
     .actions button.no { color: var(--no); }
     .actions button.unsure { color: var(--unsure); }
     .actions button.skip { color: var(--muted); }
-    .note-block { margin-top: 1rem; }
+    .note-block { margin-top: .6rem; }
     .note-block textarea { width: 100%; padding: .65rem .8rem; font-size: .95rem;
                             border: 1px solid var(--line); border-radius: 10px;
                             background: #fff; font-family: inherit; resize: vertical;
