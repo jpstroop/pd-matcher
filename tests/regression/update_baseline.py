@@ -1,9 +1,9 @@
 """Refresh the checked-in regression baseline.
 
-Runs the canonical 1000-row eval against the local LMDB index and writes
+Runs the vault-driven eval against the local LMDB index and writes
 ``tests/regression/baseline.json`` from the resulting metrics. Use this
-after an intentional change to the matching pipeline, then commit the new
-JSON.
+after an intentional change to the matching pipeline, then commit the
+new JSON.
 
 Invoke via ``pdm run regression-baseline``. This is a script, not a
 pytest test; it is outside the coverage source.
@@ -23,29 +23,29 @@ from pd_matcher.eval.regression import baseline_from_report
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _INDEX_PATH = _REPO_ROOT / "caches" / "nypl.lmdb"
-_DATA_DIR = _REPO_ROOT / "data"
 _BASELINE_PATH = Path(__file__).resolve().parent / "baseline.json"
 
-_SAMPLE = 1000
-_SEED = 42
+_VAULT = "data/label_vault.jsonl"
+_POOL = "data/candidates"
 _YEAR_WINDOW = 0
-_GROUND_TRUTH = "combined_ground_truth.csv"
 _TOLERANCE = 0.02
-_WORKERS = 8
 _NOTES = (
-    "Thin-record eval (records reconstructed from GT CSV columns). Gate is "
-    "precision/recall only on linkage agreement (match_source_id). Generated: "
-    f"sample={_SAMPLE} seed={_SEED} year_window={_YEAR_WINDOW}."
+    "Vault-driven eval. Pair-level AUC/AP plus per-MARC P/R; gate is "
+    "precision/recall only on linkage agreement (latest 'match' verdict "
+    f"wins). Generated: vault={_VAULT} pool={_POOL} year_window={_YEAR_WINDOW}."
 )
 
 
 def main() -> None:
-    """Run the canonical eval and rewrite ``baseline.json``."""
-    ground_truth_path = _DATA_DIR / _GROUND_TRUTH
+    """Run the vault-driven eval and rewrite ``baseline.json``."""
+    vault_path = _REPO_ROOT / _VAULT
+    pool_path = _REPO_ROOT / _POOL
     if not _INDEX_PATH.exists():
         raise SystemExit(f"index not found: {_INDEX_PATH}")
-    if not ground_truth_path.is_file():
-        raise SystemExit(f"ground truth not found: {ground_truth_path}")
+    if not vault_path.is_file():
+        raise SystemExit(f"vault not found: {vault_path}")
+    if not pool_path.is_dir():
+        raise SystemExit(f"pool not found: {pool_path}")
     base_matching = _load_default_matching_config()
     matching_config = MatchingConfig(
         title_weight=base_matching.title_weight,
@@ -61,19 +61,16 @@ def main() -> None:
     )
     pairing_config = _load_default_pairing_config()
     report = run_eval(
-        ground_truth_path=ground_truth_path,
+        vault_path=vault_path,
+        pool_path=pool_path,
         index_path=_INDEX_PATH,
         matching_config=matching_config,
         pairing_config=pairing_config,
-        sample=_SAMPLE,
-        seed=_SEED,
-        workers=_WORKERS,
     )
     params = BaselineParams(
-        sample=_SAMPLE,
-        seed=_SEED,
+        vault=_VAULT,
+        pool=_POOL,
         year_window=_YEAR_WINDOW,
-        ground_truth=_GROUND_TRUTH,
     )
     baseline = baseline_from_report(
         report,
@@ -86,11 +83,17 @@ def main() -> None:
     print(f"  precision: {report.precision}")
     print(f"  recall:    {report.recall}")
     print(f"  f1:        {report.f1}")
+    print(f"  auc_roc:   {report.auc_roc}")
+    print(f"  average_precision: {report.average_precision}")
     print(
-        f"  rows_evaluated={report.rows_evaluated} "
-        f"predicted={report.rows_with_predicted_match} "
-        f"gt={report.rows_with_ground_truth_match} "
-        f"agreeing={report.rows_agreeing}"
+        f"  pairs_evaluated={report.pairs_evaluated} "
+        f"pos={report.pairs_positive} neg={report.pairs_negative} "
+        f"unsure={report.pairs_unsure_excluded}"
+    )
+    print(
+        f"  marcs_evaluated={report.marcs_evaluated} "
+        f"with_top={report.marcs_with_matcher_top} "
+        f"correct={report.marcs_with_correct_top}"
     )
 
 

@@ -1,139 +1,90 @@
-"""Lightweight precision/recall evaluator for linkage accuracy.
+"""Vault-driven matcher evaluator producing P/R, AUC, AP, and a sweep.
 
-Drives a curated ground-truth CSV (the shape of
-``data/combined_ground_truth.csv``) through the matcher and returns an
-:class:`EvalReport` summarising how the predicted linkage compares
-against the recorded labels. The matcher's job is now linkage between
-MARC and CCE; this driver measures only "did the matcher pick the same
-CCE record that the human labeler did", scored as precision and recall
-on ``match_source_id``.
+Replaces the prior CSV-driven driver. The ground truth is now the
+project's append-only ``label_vault.jsonl``: every line is a human
+verdict on one ``(marc_control_id, nypl_uuid)`` pair, and the latest
+entry for a pair wins (the same "current_entries" semantics that
+``build-queue`` already honors). The vault is the only source of
+*labeled negatives* the project has, which is what makes
+threshold-independent metrics (AUC, average precision) actually
+computable; the prior ground-truth CSV held only confirmed matches.
 
-The driver supports two execution modes:
+Two passes share the same opened LMDB lookup and IDF table:
 
-* ``workers=1`` (default): a single in-process loop. Fast to start, fully
-  deterministic, and the path the unit tests exercise by default.
-* ``workers>=2``: a ``spawn``-based multiprocessing pool. Each worker
-  opens the LMDB index read-only once at init (mmap-shared across
-  workers via the OS page cache), builds the IDF table once, and then
-  scores rows handed to it through ``imap_unordered``. The main process
-  aggregates the small per-row result structs into the same
-  :class:`EvalReport` shape the sequential path produces.
+* **Pass A** — pair-level scoring. For every non-``unsure`` vault entry
+  the (MARC, CCE) pair is materialized and scored via
+  :func:`pd_groundtruth.vault_pair_resolver.make_pair_scorer`. The
+  ``(calibrated_score, label)`` list feeds :func:`roc_auc`,
+  :func:`average_precision`, and :func:`threshold_sweep` in the metrics
+  module. ``label`` is ``1`` for ``match`` and ``0`` for ``no_match``.
+* **Pass B** — per-MARC linkage P/R. For every MARC that has at least
+  one current ``match`` verdict in the vault, the matcher's top
+  prediction is compared against that verdict's ``nypl_uuid``. Counts
+  collapse into precision (correct top / had a top) and recall
+  (correct top / had ground truth).
 
-Spawn is mandatory: every other parallel entry point in this project
-uses spawn so behaviour is identical across macOS and Linux, and so we
-never depend on POSIX fork semantics with LMDB handles or stemmer state.
+The vault is small (~300 entries today), so the eval runs single-
+process. The prior spawn-pool plumbing was dropped: it added pickle and
+lifecycle complexity in service of an optimization the corpus does not
+need. If the vault ever grows past the point where a sequential scan is
+painful, parallelism can be reintroduced — but that is a separate
+ticket, not a permanent shape requirement.
 """
 
-from collections.abc import Iterable
-from collections.abc import Iterator
-from csv import DictReader
-from multiprocessing import get_context
+from logging import getLogger
 from pathlib import Path
-from random import Random
 from time import perf_counter
 
 from msgspec import Struct
 
+from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.label_vault import current_entries
+from pd_groundtruth.vault_pair_resolver import build_marc_index
+from pd_groundtruth.vault_pair_resolver import make_pair_scorer
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
+from pd_matcher.eval.metrics import ThresholdPoint
+from pd_matcher.eval.metrics import average_precision
+from pd_matcher.eval.metrics import roc_auc
+from pd_matcher.eval.metrics import threshold_sweep
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import match_record
 from pd_matcher.models import MarcRecord
 
-_CHUNK_DIVISOR: int = 8
+_LOGGER = getLogger(__name__)
+
+_VERDICT_MATCH: str = "match"
+_VERDICT_UNSURE: str = "unsure"
 
 
 class EvalReport(Struct, frozen=True, forbid_unknown_fields=True):
-    """Summary of one :func:`run_eval` invocation."""
+    """Summary of one :func:`run_eval` invocation.
 
-    rows_evaluated: int
-    rows_with_predicted_match: int
-    rows_with_ground_truth_match: int
-    rows_agreeing: int
+    Vault entry counts (``pairs_*``) drive AUC/AP/sweep; per-MARC
+    counts (``marcs_*``) drive precision and recall the same way today's
+    gate already reads them. ``threshold_sweep`` is reported but never
+    gated — it exists for plotting and for picking a future threshold.
+    """
+
+    pairs_evaluated: int
+    pairs_positive: int
+    pairs_negative: int
+    pairs_unsure_excluded: int
+    marcs_evaluated: int
+    marcs_with_matcher_top: int
+    marcs_with_correct_top: int
     precision: float
     recall: float
     f1: float
+    auc_roc: float
+    average_precision: float
+    threshold_sweep: tuple[ThresholdPoint, ...]
     elapsed_seconds: float
-
-
-class _RowOutcome(Struct, frozen=True, forbid_unknown_fields=True):
-    """One row's contribution to the aggregate :class:`EvalReport`.
-
-    Workers return these instead of touching shared aggregation state.
-    """
-
-    has_predicted_match: bool
-    has_ground_truth_match: bool
-    agrees: bool
-
-
-class _WorkerState:
-    """Per-process resources opened once in the pool initializer.
-
-    Holds the LMDB lookup, IDF table, combiner, and configs so each
-    worker only pays the open/build cost a single time, then reuses
-    them across every row it processes.
-    """
-
-    __slots__ = (
-        "combiner",
-        "idf",
-        "lookup",
-        "matching_config",
-        "pairings",
-    )
-
-    def __init__(
-        self,
-        *,
-        index_path: Path,
-        matching_config: MatchingConfig,
-        pairing_config: PairingConfig,
-    ) -> None:
-        self.lookup = NyplIndexLookup(index_path)
-        self.idf: IdfTable = build_idf_table(self.lookup)
-        self.combiner = WeightedMeanCombiner(config=matching_config)
-        self.matching_config = matching_config
-        self.pairings = compile_pairings(pairing_config)
-
-
-_WORKER_STATE: _WorkerState | None = None
-
-
-def _parse_int(value: str) -> int | None:
-    """Return ``int(value)`` when non-empty and parseable; ``None`` otherwise."""
-    if not value:
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        return None
-
-
-def _maybe(value: str) -> str | None:
-    """Map empty strings to ``None`` (msgspec field semantics)."""
-    return value if value else None
-
-
-def _marc_from_row(row: dict[str, str]) -> MarcRecord:
-    """Reconstruct a minimal :class:`MarcRecord` from a ground-truth CSV row."""
-    title = row.get("marc_title_original", "")
-    return MarcRecord(
-        control_id=row.get("marc_id", ""),
-        title=title,
-        title_main=title,
-        lccn=_maybe(row.get("marc_lccn", "")),
-        main_author=_maybe(row.get("marc_main_author_original", "")),
-        statement_of_responsibility=_maybe(row.get("marc_author_original", "")),
-        publisher=_maybe(row.get("marc_publisher_original", "")),
-        publication_year=_parse_int(row.get("marc_year", "")),
-        language_code=_maybe(row.get("marc_language_code", "")),
-        country_code=_maybe(row.get("marc_country_code", "")),
-    )
 
 
 def _safe_division(numerator: int, denominator: int) -> float:
@@ -151,226 +102,224 @@ def _f1(precision: float, recall: float) -> float:
     return 2.0 * precision * recall / total
 
 
-def _load_rows(
-    ground_truth_path: Path,
-    *,
-    sample: int | None,
-    seed: int,
-) -> list[dict[str, str]]:
-    """Load CSV rows, optionally drawing a deterministic random sample.
+def _partition_entries(
+    entries: dict[tuple[str, str], VaultEntry],
+) -> tuple[list[VaultEntry], int]:
+    """Drop ``unsure`` entries; return the rest plus the dropped count."""
+    keep: list[VaultEntry] = []
+    unsure = 0
+    for entry in entries.values():
+        if entry.verdict == _VERDICT_UNSURE:
+            unsure += 1
+            continue
+        keep.append(entry)
+    return keep, unsure
 
-    When ``sample`` is ``None`` the full row sequence is returned in file
-    order. When ``sample`` is set, ``Random(seed).sample`` selects
-    ``min(sample, len(rows))`` rows — passing a sample size larger than
-    the file is a no-op (every row is returned).
+
+def _ground_truth_by_marc(
+    entries: dict[tuple[str, str], VaultEntry],
+) -> dict[str, str]:
+    """Return a ``marc_control_id -> nypl_uuid`` map for current ``match`` verdicts.
+
+    ``current_entries`` already collapses the append-only log to one
+    entry per ``(marc, uuid)`` pair (latest verdict wins). A MARC may
+    still have several entries — one per distinct UUID it has been
+    paired with — so this helper keeps only the ``match`` rows. Two
+    distinct UUIDs both currently labeled ``match`` for the same MARC
+    is a labeling anomaly; the last one encountered while iterating the
+    insertion-ordered dict wins. The vault itself is unchanged either
+    way.
     """
-    with ground_truth_path.open(encoding="utf-8", newline="") as fp:
-        rows = list(DictReader(fp))
-    if sample is None:
-        return rows
-    k = min(sample, len(rows))
-    return Random(seed).sample(rows, k=k)
+    gt: dict[str, str] = {}
+    for entry in entries.values():
+        if entry.verdict != _VERDICT_MATCH:
+            continue
+        gt[entry.marc_control_id] = entry.nypl_uuid
+    return gt
 
 
-def _eval_one_row(
-    row: dict[str, str],
+def _run_pass_a(
+    entries: list[VaultEntry],
     *,
-    state: _WorkerState,
-) -> _RowOutcome:
-    """Score one ground-truth row and return its contribution to the report.
+    marc_by_id: dict[str, MarcRecord],
+    lookup: NyplIndexLookup,
+    idf: IdfTable,
+    pairings: CompiledPairings,
+    matching_config: MatchingConfig,
+) -> tuple[list[tuple[float, int]], int, int, int, int]:
+    """Score every kept vault entry; return scored pairs plus skip totals.
 
-    Pure function: takes the row and shared state, returns a small struct.
-    Used both by the sequential path and by the spawn pool's worker
-    function so the per-row logic lives in exactly one place.
+    Returns ``(scored_labels, positives, negatives, missing_in_pool,
+    missing_in_index)``. ``positives + negatives == len(scored_labels)``;
+    the skip totals account for the rest of ``entries`` whose MARC or
+    CCE no longer resolve.
     """
-    marc = _marc_from_row(row)
-    match = match_record(
-        marc,
-        lookup=state.lookup,
-        config=state.matching_config,
-        idf=state.idf,
+    score_pair = make_pair_scorer(
+        matching_config=matching_config,
+        pairings=pairings,
+        idf=idf,
         calibrator=None,
-        combiner=state.combiner,
-        pairings=state.pairings,
     )
-    predicted_id: str | None = None
-    if match.best is not None:
-        predicted_id = match.best.nypl_uuid
-    gt_id = _maybe(row.get("match_source_id", ""))
-    agrees = predicted_id is not None and gt_id is not None and predicted_id == gt_id
-    return _RowOutcome(
-        has_predicted_match=predicted_id is not None,
-        has_ground_truth_match=gt_id is not None,
-        agrees=agrees,
-    )
+    scored: list[tuple[float, int]] = []
+    positives = 0
+    negatives = 0
+    missing_in_pool = 0
+    missing_in_index = 0
+    for entry in entries:
+        marc = marc_by_id.get(entry.marc_control_id)
+        if marc is None:
+            missing_in_pool += 1
+            _LOGGER.warning(
+                "eval.vault.marc_not_in_pool marc_control_id=%s nypl_uuid=%s",
+                entry.marc_control_id,
+                entry.nypl_uuid,
+            )
+            continue
+        cce = lookup.get_registration(entry.nypl_uuid)
+        if cce is None:
+            missing_in_index += 1
+            _LOGGER.warning(
+                "eval.vault.cce_not_in_index marc_control_id=%s nypl_uuid=%s",
+                entry.marc_control_id,
+                entry.nypl_uuid,
+            )
+            continue
+        candidate = score_pair(marc, cce)
+        score = candidate.combined.calibrated
+        label = 1 if entry.verdict == _VERDICT_MATCH else 0
+        if label == 1:
+            positives += 1
+        else:
+            negatives += 1
+        scored.append((score, label))
+    return scored, positives, negatives, missing_in_pool, missing_in_index
 
 
-def _pool_initializer(
-    index_path: Path,
-    matching_config: MatchingConfig,
-    pairing_config: PairingConfig,
-) -> None:
-    """Spawn-pool initializer: build the per-worker :class:`_WorkerState`.
-
-    ``multiprocessing.Pool`` only forwards positional ``initargs`` to the
-    initializer, so this signature deliberately uses positional
-    parameters even though the rest of the module favours keyword-only
-    arguments.
-    """
-    global _WORKER_STATE
-    _WORKER_STATE = _WorkerState(
-        index_path=index_path,
-        matching_config=matching_config,
-        pairing_config=pairing_config,
-    )
-
-
-def _pool_eval_row(row: dict[str, str]) -> _RowOutcome:
-    """Spawn-pool worker function: scores one row using process-local state."""
-    state = _WORKER_STATE
-    if state is None:
-        raise RuntimeError("_pool_eval_row called before _pool_initializer ran")
-    return _eval_one_row(row, state=state)
-
-
-def _iter_outcomes_sequential(
-    rows: list[dict[str, str]],
+def _run_pass_b(
+    ground_truth: dict[str, str],
     *,
-    index_path: Path,
+    marc_by_id: dict[str, MarcRecord],
+    lookup: NyplIndexLookup,
+    idf: IdfTable,
+    pairings: CompiledPairings,
     matching_config: MatchingConfig,
-    pairing_config: PairingConfig,
-    limit: int | None,
-) -> Iterator[_RowOutcome]:
-    """Yield :class:`_RowOutcome` values by scoring every row in-process."""
-    state = _WorkerState(
-        index_path=index_path,
-        matching_config=matching_config,
-        pairing_config=pairing_config,
-    )
-    try:
-        for index, row in enumerate(rows):
-            if limit is not None and index >= limit:
-                break
-            yield _eval_one_row(row, state=state)
-    finally:
-        state.lookup.close()
-
-
-def _iter_outcomes_parallel(
-    rows: list[dict[str, str]],
-    *,
-    index_path: Path,
-    matching_config: MatchingConfig,
-    pairing_config: PairingConfig,
-    limit: int | None,
-    workers: int,
-) -> Iterator[_RowOutcome]:
-    """Yield :class:`_RowOutcome` values by fanning out across a spawn pool."""
-    target_rows = rows if limit is None else rows[:limit]
-    if not target_rows:
-        return
-    chunksize = max(1, len(target_rows) // (workers * _CHUNK_DIVISOR))
-    ctx = get_context("spawn")
-    init_args = (index_path, matching_config, pairing_config)
-    with ctx.Pool(
-        processes=workers,
-        initializer=_pool_initializer,
-        initargs=init_args,
-    ) as pool:
-        yield from pool.imap_unordered(_pool_eval_row, target_rows, chunksize=chunksize)
-
-
-def _aggregate(
-    outcomes: Iterable[_RowOutcome],
-    *,
-    started: float,
-) -> EvalReport:
-    """Fold a stream of :class:`_RowOutcome` values into an :class:`EvalReport`."""
-    rows_evaluated = 0
-    rows_with_predicted_match = 0
-    rows_with_ground_truth_match = 0
-    rows_agreeing = 0
-    for outcome in outcomes:
-        rows_evaluated += 1
-        if outcome.has_predicted_match:
-            rows_with_predicted_match += 1
-        if outcome.has_ground_truth_match:
-            rows_with_ground_truth_match += 1
-        if outcome.agrees:
-            rows_agreeing += 1
-    precision = _safe_division(rows_agreeing, rows_with_predicted_match)
-    recall = _safe_division(rows_agreeing, rows_with_ground_truth_match)
-    f1 = _f1(precision, recall)
-    elapsed = perf_counter() - started
-    return EvalReport(
-        rows_evaluated=rows_evaluated,
-        rows_with_predicted_match=rows_with_predicted_match,
-        rows_with_ground_truth_match=rows_with_ground_truth_match,
-        rows_agreeing=rows_agreeing,
-        precision=precision,
-        recall=recall,
-        f1=f1,
-        elapsed_seconds=elapsed,
-    )
+) -> tuple[int, int, int]:
+    """Run per-MARC linkage; return ``(evaluated, with_top, correct_top)``."""
+    combiner = WeightedMeanCombiner(config=matching_config)
+    marcs_evaluated = 0
+    marcs_with_matcher_top = 0
+    marcs_with_correct_top = 0
+    for marc_id, gt_uuid in ground_truth.items():
+        marc = marc_by_id.get(marc_id)
+        if marc is None:
+            _LOGGER.warning(
+                "eval.vault.gt_marc_not_in_pool marc_control_id=%s nypl_uuid=%s",
+                marc_id,
+                gt_uuid,
+            )
+            continue
+        marcs_evaluated += 1
+        result = match_record(
+            marc,
+            lookup=lookup,
+            config=matching_config,
+            idf=idf,
+            calibrator=None,
+            combiner=combiner,
+            pairings=pairings,
+        )
+        if result.best is None:
+            continue
+        marcs_with_matcher_top += 1
+        if result.best.nypl_uuid == gt_uuid:
+            marcs_with_correct_top += 1
+    return marcs_evaluated, marcs_with_matcher_top, marcs_with_correct_top
 
 
 def run_eval(
     *,
-    ground_truth_path: Path,
+    vault_path: Path,
+    pool_path: Path,
     index_path: Path,
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
-    limit: int | None = None,
-    sample: int | None = None,
-    seed: int = 0,
-    workers: int = 1,
 ) -> EvalReport:
-    """Evaluate the matcher pipeline against ``ground_truth_path``.
+    """Evaluate the matcher pipeline against the vault.
 
     Args:
-        ground_truth_path: CSV with the
-            ``data/combined_ground_truth.csv`` schema.
+        vault_path: Append-only JSONL label vault
+            (``data/label_vault.jsonl``).
+        pool_path: Root of the gitignored MARC candidate pool
+            (``data/candidates``); shards live under
+            ``<pool>/<lang>/*.xml``.
         index_path: LMDB env produced by ``pd-matcher index build``.
-        matching_config: Active :class:`MatchingConfig`.
-        pairing_config: Active :class:`PairingConfig`; compiled once per
-            worker into :class:`CompiledPairings`.
-        limit: Optional maximum number of rows to evaluate. ``None``
-            evaluates every row. Mutually exclusive with ``sample`` at
-            the CLI layer.
-        sample: Optional random sample size. When set, exactly
-            ``min(sample, len(rows))`` rows are drawn using
-            ``Random(seed)`` and evaluated.
-        seed: Seed for the random sampler. Only meaningful when
-            ``sample`` is set; ignored otherwise.
-        workers: Number of worker processes. ``1`` (the default) runs a
-            single in-process loop; ``>= 2`` fans the per-row work out
-            to a ``spawn`` pool.
+        matching_config: Active :class:`MatchingConfig`. The
+            ``min_combined_score`` floor is applied during Pass B exactly
+            as the production matcher applies it.
+        pairing_config: Active :class:`PairingConfig`; compiled once
+            and reused across both passes.
 
     Returns:
         A populated :class:`EvalReport`.
     """
-    if workers < 1:
-        raise ValueError(f"workers must be >= 1 (got {workers!r})")
     started = perf_counter()
-    rows = _load_rows(ground_truth_path, sample=sample, seed=seed)
-    if workers == 1:
-        outcomes_iter: Iterator[_RowOutcome] = _iter_outcomes_sequential(
-            rows,
-            index_path=index_path,
+    raw = current_entries(vault_path)
+    kept_entries, unsure = _partition_entries(raw)
+    ground_truth = _ground_truth_by_marc(raw)
+    needed_marc_ids = {entry.marc_control_id for entry in kept_entries} | set(ground_truth)
+    marc_by_id = build_marc_index(pool_path, needed_marc_ids)
+    pairings = compile_pairings(pairing_config)
+    with NyplIndexLookup(index_path) as lookup:
+        idf = build_idf_table(lookup)
+        scored, positives, negatives, missing_pool, missing_index = _run_pass_a(
+            kept_entries,
+            marc_by_id=marc_by_id,
+            lookup=lookup,
+            idf=idf,
+            pairings=pairings,
             matching_config=matching_config,
-            pairing_config=pairing_config,
-            limit=limit,
         )
+        marcs_evaluated, marcs_with_top, marcs_correct = _run_pass_b(
+            ground_truth,
+            marc_by_id=marc_by_id,
+            lookup=lookup,
+            idf=idf,
+            pairings=pairings,
+            matching_config=matching_config,
+        )
+    pairs_evaluated = positives + negatives
+    if scored:
+        auc = roc_auc(scored)
+        ap = average_precision(scored)
+        sweep = threshold_sweep(scored)
     else:
-        outcomes_iter = _iter_outcomes_parallel(
-            rows,
-            index_path=index_path,
-            matching_config=matching_config,
-            pairing_config=pairing_config,
-            limit=limit,
-            workers=workers,
+        auc = 0.0
+        ap = 0.0
+        sweep = ()
+    precision = _safe_division(marcs_correct, marcs_with_top)
+    recall = _safe_division(marcs_correct, marcs_evaluated)
+    if missing_pool or missing_index:
+        _LOGGER.info(
+            "eval.vault.skipped missing_in_pool=%d missing_in_index=%d",
+            missing_pool,
+            missing_index,
         )
-    return _aggregate(outcomes_iter, started=started)
+    return EvalReport(
+        pairs_evaluated=pairs_evaluated,
+        pairs_positive=positives,
+        pairs_negative=negatives,
+        pairs_unsure_excluded=unsure,
+        marcs_evaluated=marcs_evaluated,
+        marcs_with_matcher_top=marcs_with_top,
+        marcs_with_correct_top=marcs_correct,
+        precision=precision,
+        recall=recall,
+        f1=_f1(precision, recall),
+        auc_roc=auc,
+        average_precision=ap,
+        threshold_sweep=sweep,
+        elapsed_seconds=perf_counter() - started,
+    )
 
 
 __all__ = [

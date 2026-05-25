@@ -1,9 +1,14 @@
 """Tests for :mod:`pd_matcher.eval.ground_truth`."""
 
+from logging import WARNING
 from pathlib import Path
 
-from pytest import raises
+from pytest import LogCaptureFixture
 
+from pd_groundtruth.label_vault import SCHEMA_VERSION
+from pd_groundtruth.label_vault import MarcIdentifiers
+from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.label_vault import append_entry
 from pd_matcher.config.loader import load_pairing_config
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
@@ -20,6 +25,11 @@ _PAIRINGS = (
     / "defaults"
     / "field_pairings.yaml"
 )
+
+_MARCXML_PROLOG = (
+    "<?xml version='1.0' encoding='UTF-8'?>\n<collection xmlns='http://www.loc.gov/MARC21/slim'>\n"
+)
+_MARCXML_EPILOG = "</collection>\n"
 
 
 def _pairing_config() -> PairingConfig:
@@ -56,273 +66,322 @@ def _matching_config() -> MatchingConfig:
     )
 
 
-_HEADER_FIELDS: tuple[str, ...] = (
-    "marc_id",
-    "marc_title_original",
-    "marc_main_author_original",
-    "marc_publisher_original",
-    "marc_year",
-    "marc_country_code",
-    "marc_language_code",
-    "match_source_id",
-)
-
-
-def _row(overrides: dict[str, str]) -> str:
-    """Emit a CSV row with ``overrides`` filling the named columns."""
-    values = [overrides.get(field, "") for field in _HEADER_FIELDS]
-    return ",".join(values) + "\n"
-
-
-def _write_ground_truth(path: Path) -> None:
-    """Emit a 3-row CSV: agreement, disagreement, no-prediction."""
-    header = ",".join(_HEADER_FIELDS) + "\n"
-    agree = _row(
-        {
-            "marc_id": "marc-aaa",
-            "marc_title_original": "A study of widgets",
-            "marc_main_author_original": "Smith John",
-            "marc_publisher_original": "Acme Press",
-            "marc_year": "1940",
-            "marc_country_code": "xxu",
-            "marc_language_code": "eng",
-            "match_source_id": "UUID-0001",
-        }
+def _marc_record_xml(
+    control_id: str,
+    title: str,
+    author: str,
+    publisher: str,
+    year: str,
+    *,
+    language: str = "eng",
+) -> str:
+    """Return one MARCXML <record> for the test pool."""
+    return (
+        "  <record>\n"
+        f"    <controlfield tag='001'>{control_id}</controlfield>\n"
+        f"    <controlfield tag='008'>200718s{year}    xxu           000 0 {language}  </controlfield>\n"  # noqa: E501
+        f"    <datafield ind1='1' ind2=' ' tag='100'><subfield code='a'>{author}</subfield></datafield>\n"  # noqa: E501
+        f"    <datafield ind1='0' ind2='0' tag='245'><subfield code='a'>{title}</subfield></datafield>\n"  # noqa: E501
+        f"    <datafield ind1=' ' ind2=' ' tag='260'><subfield code='a'>New York :</subfield><subfield code='b'>{publisher},</subfield><subfield code='c'>{year}.</subfield></datafield>\n"  # noqa: E501
+        "  </record>\n"
     )
-    disagree = _row(
-        {
-            "marc_id": "marc-bbb",
-            "marc_title_original": "Le petit livre",
-            "marc_main_author_original": "Dubois David",
-            "marc_publisher_original": "Editions Beta",
-            "marc_year": "1955",
-            "marc_country_code": "fr",
-            "marc_language_code": "fre",
-            "match_source_id": "UUID-0999",
-        }
-    )
-    no_match = _row(
-        {
-            "marc_id": "marc-ccc",
-            "marc_title_original": "Unrelated Title",
-            "marc_year": "1700",
-            "marc_country_code": "xxu",
-            "marc_language_code": "eng",
-        }
-    )
-    path.write_text(header + agree + disagree + no_match, encoding="utf-8")
 
 
-def test_run_eval_returns_expected_aggregates(tmp_path: Path) -> None:
-    """Three rows: 1 agreeing prediction, 1 disagreeing, 1 unmatched."""
+def _write_pool(pool_root: Path, records: tuple[str, ...]) -> None:
+    """Write ``records`` into ``<pool>/eng/shard.xml``."""
+    eng = pool_root / "eng"
+    eng.mkdir(parents=True)
+    body = "".join(records)
+    (eng / "shard.xml").write_text(
+        _MARCXML_PROLOG + body + _MARCXML_EPILOG,
+        encoding="utf-8",
+    )
+
+
+def _vault_entry(
+    *,
+    marc_control_id: str,
+    nypl_uuid: str,
+    verdict: str,
+    timestamp: str = "2026-05-22T10:00:00+00:00",
+) -> VaultEntry:
+    """Return a minimal :class:`VaultEntry` for the synthetic vault."""
+    return VaultEntry(
+        schema=SCHEMA_VERSION,
+        marc_control_id=marc_control_id,
+        nypl_uuid=nypl_uuid,
+        verdict=verdict,
+        note=None,
+        labeled_at=timestamp,
+        labeler="test",
+        marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+    )
+
+
+def _seed_vault(vault_path: Path, entries: tuple[VaultEntry, ...]) -> None:
+    for entry in entries:
+        append_entry(vault_path, entry)
+
+
+def _standard_marc_records() -> tuple[str, ...]:
+    """Return MARCXML for one record matching UUID-0001 in the tiny index."""
+    return (
+        _marc_record_xml(
+            control_id="marc-aaa",
+            title="A study of widgets",
+            author="Smith, John",
+            publisher="Acme Press",
+            year="1940",
+        ),
+    )
+
+
+def _standard_vault(path: Path) -> None:
+    """Seed ``path`` with a match against UUID-0001 and a no_match vs UUID-0002."""
+    _seed_vault(
+        path,
+        (
+            _vault_entry(
+                marc_control_id="marc-aaa",
+                nypl_uuid="UUID-0001",
+                verdict="match",
+            ),
+            _vault_entry(
+                marc_control_id="marc-aaa",
+                nypl_uuid="UUID-0002",
+                verdict="no_match",
+            ),
+        ),
+    )
+
+
+def test_run_eval_returns_populated_report(tmp_path: Path) -> None:
+    """Vault has one match + one no_match -> aggregate counts populate correctly."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, _standard_marc_records())
+    vault_path = tmp_path / "vault.jsonl"
+    _standard_vault(vault_path)
     report = run_eval(
-        ground_truth_path=gt_path,
+        vault_path=vault_path,
+        pool_path=pool_path,
         index_path=index_path,
         matching_config=_matching_config(),
         pairing_config=_pairing_config(),
     )
     assert isinstance(report, EvalReport)
-    assert report.rows_evaluated == 3
-    assert report.rows_with_ground_truth_match == 2
-    assert report.rows_with_predicted_match >= 1
-    assert report.rows_agreeing >= 1
+    assert report.pairs_evaluated == 2
+    assert report.pairs_positive == 1
+    assert report.pairs_negative == 1
+    assert report.pairs_unsure_excluded == 0
+    assert report.marcs_evaluated == 1
     assert 0.0 <= report.precision <= 1.0
     assert 0.0 <= report.recall <= 1.0
     assert 0.0 <= report.f1 <= 1.0
+    assert 0.0 <= report.auc_roc <= 1.0
+    assert 0.0 <= report.average_precision <= 1.0
+    assert len(report.threshold_sweep) == 21
     assert report.elapsed_seconds >= 0.0
 
 
-def test_run_eval_respects_limit(tmp_path: Path) -> None:
-    """``limit`` caps the row count regardless of CSV size."""
+def test_run_eval_correct_top_drives_precision_and_recall(tmp_path: Path) -> None:
+    """A correctly-matched top prediction gives precision=recall=1.0."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, _standard_marc_records())
+    vault_path = tmp_path / "vault.jsonl"
+    _standard_vault(vault_path)
     report = run_eval(
-        ground_truth_path=gt_path,
-        index_path=index_path,
-        matching_config=_matching_config(),
-        pairing_config=_pairing_config(),
-        limit=1,
-    )
-    assert report.rows_evaluated == 1
-
-
-def test_run_eval_zero_rows_yields_zero_metrics(tmp_path: Path) -> None:
-    """An empty CSV (header only) yields zero metrics, not a divide-by-zero."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    gt_path.write_text("marc_id,marc_year,match_source_id\n", encoding="utf-8")
-    report = run_eval(
-        ground_truth_path=gt_path,
+        vault_path=vault_path,
+        pool_path=pool_path,
         index_path=index_path,
         matching_config=_matching_config(),
         pairing_config=_pairing_config(),
     )
-    assert report.rows_evaluated == 0
+    assert report.marcs_with_matcher_top == 1
+    assert report.marcs_with_correct_top == 1
+    assert report.precision == 1.0
+    assert report.recall == 1.0
+    assert report.f1 == 1.0
+
+
+def test_run_eval_excludes_unsure_entries(tmp_path: Path) -> None:
+    """``unsure`` verdicts increment the excluded count but never scored."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, _standard_marc_records())
+    vault_path = tmp_path / "vault.jsonl"
+    _seed_vault(
+        vault_path,
+        (
+            _vault_entry(
+                marc_control_id="marc-aaa",
+                nypl_uuid="UUID-0001",
+                verdict="match",
+            ),
+            _vault_entry(
+                marc_control_id="marc-aaa",
+                nypl_uuid="UUID-0002",
+                verdict="unsure",
+            ),
+        ),
+    )
+    report = run_eval(
+        vault_path=vault_path,
+        pool_path=pool_path,
+        index_path=index_path,
+        matching_config=_matching_config(),
+        pairing_config=_pairing_config(),
+    )
+    assert report.pairs_evaluated == 1
+    assert report.pairs_positive == 1
+    assert report.pairs_negative == 0
+    assert report.pairs_unsure_excluded == 1
+
+
+def test_run_eval_logs_warning_when_marc_missing_from_pool(
+    tmp_path: Path,
+    caplog: LogCaptureFixture,
+) -> None:
+    """A vault MARC missing from the pool is skipped + logged at WARNING."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, ())
+    vault_path = tmp_path / "vault.jsonl"
+    _seed_vault(
+        vault_path,
+        (
+            _vault_entry(
+                marc_control_id="marc-aaa",
+                nypl_uuid="UUID-0001",
+                verdict="match",
+            ),
+        ),
+    )
+    with caplog.at_level(WARNING, logger="pd_matcher.eval.ground_truth"):
+        report = run_eval(
+            vault_path=vault_path,
+            pool_path=pool_path,
+            index_path=index_path,
+            matching_config=_matching_config(),
+            pairing_config=_pairing_config(),
+        )
+    assert report.pairs_evaluated == 0
+    assert any("marc_not_in_pool" in record.message for record in caplog.records)
+
+
+def test_run_eval_logs_warning_when_cce_missing_from_index(
+    tmp_path: Path,
+    caplog: LogCaptureFixture,
+) -> None:
+    """A vault CCE UUID missing from the index is skipped + logged at WARNING."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, _standard_marc_records())
+    vault_path = tmp_path / "vault.jsonl"
+    _seed_vault(
+        vault_path,
+        (
+            _vault_entry(
+                marc_control_id="marc-aaa",
+                nypl_uuid="UUID-NOPE",
+                verdict="no_match",
+            ),
+        ),
+    )
+    with caplog.at_level(WARNING, logger="pd_matcher.eval.ground_truth"):
+        report = run_eval(
+            vault_path=vault_path,
+            pool_path=pool_path,
+            index_path=index_path,
+            matching_config=_matching_config(),
+            pairing_config=_pairing_config(),
+        )
+    assert report.pairs_evaluated == 0
+    assert any("cce_not_in_index" in record.message for record in caplog.records)
+
+
+def test_run_eval_logs_warning_when_gt_marc_missing(
+    tmp_path: Path,
+    caplog: LogCaptureFixture,
+) -> None:
+    """A ground-truth MARC missing from the pool is logged in Pass B."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, ())
+    vault_path = tmp_path / "vault.jsonl"
+    _seed_vault(
+        vault_path,
+        (
+            _vault_entry(
+                marc_control_id="marc-missing",
+                nypl_uuid="UUID-0001",
+                verdict="match",
+            ),
+        ),
+    )
+    with caplog.at_level(WARNING, logger="pd_matcher.eval.ground_truth"):
+        report = run_eval(
+            vault_path=vault_path,
+            pool_path=pool_path,
+            index_path=index_path,
+            matching_config=_matching_config(),
+            pairing_config=_pairing_config(),
+        )
+    assert report.marcs_evaluated == 0
+    assert any("gt_marc_not_in_pool" in record.message for record in caplog.records)
+
+
+def test_run_eval_handles_empty_vault(tmp_path: Path) -> None:
+    """An empty vault yields zero metrics, not a divide-by-zero."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, ())
+    vault_path = tmp_path / "vault.jsonl"
+    vault_path.write_text("", encoding="utf-8")
+    report = run_eval(
+        vault_path=vault_path,
+        pool_path=pool_path,
+        index_path=index_path,
+        matching_config=_matching_config(),
+        pairing_config=_pairing_config(),
+    )
+    assert report.pairs_evaluated == 0
     assert report.precision == 0.0
     assert report.recall == 0.0
     assert report.f1 == 0.0
+    assert report.auc_roc == 0.0
+    assert report.average_precision == 0.0
+    assert report.threshold_sweep == ()
 
 
-def test_run_eval_handles_unparseable_year(tmp_path: Path) -> None:
-    """Rows with malformed ``marc_year`` still evaluate (no match possible)."""
+def test_run_eval_year_window_zero_blocks_year_drift(tmp_path: Path) -> None:
+    """``year_window=0`` blocks a MARC labeled at a drifted year from matching."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    gt_path.write_text(
-        "marc_id,marc_year,match_source_id\nmarc-zzz,not-a-year,UUID-0001\n",
-        encoding="utf-8",
+    pool_path = tmp_path / "pool"
+    _write_pool(
+        pool_path,
+        (
+            _marc_record_xml(
+                control_id="marc-drift",
+                title="A study of widgets",
+                author="Smith, John",
+                publisher="Acme Press",
+                year="1945",
+            ),
+        ),
     )
-    report = run_eval(
-        ground_truth_path=gt_path,
-        index_path=index_path,
-        matching_config=_matching_config(),
-        pairing_config=_pairing_config(),
+    vault_path = tmp_path / "vault.jsonl"
+    _seed_vault(
+        vault_path,
+        (
+            _vault_entry(
+                marc_control_id="marc-drift",
+                nypl_uuid="UUID-0001",
+                verdict="match",
+            ),
+        ),
     )
-    assert report.rows_evaluated == 1
-    assert report.rows_with_predicted_match == 0
-
-
-def test_run_eval_handles_empty_year(tmp_path: Path) -> None:
-    """Rows with an empty ``marc_year`` evaluate (no match possible)."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    gt_path.write_text(
-        "marc_id,marc_year,match_source_id\nmarc-yyy,,UUID-0001\n",
-        encoding="utf-8",
-    )
-    report = run_eval(
-        ground_truth_path=gt_path,
-        index_path=index_path,
-        matching_config=_matching_config(),
-        pairing_config=_pairing_config(),
-    )
-    assert report.rows_evaluated == 1
-    assert report.rows_with_predicted_match == 0
-
-
-def _write_many_distinct_rows(path: Path, count: int) -> None:
-    """Emit ``count`` distinct rows so a random sampler can shuffle them."""
-    header = ",".join(_HEADER_FIELDS) + "\n"
-    rows = "".join(
-        _row(
-            {
-                "marc_id": f"marc-{i:04d}",
-                "marc_title_original": f"Title {i}",
-                "marc_year": "1940",
-                "marc_country_code": "xxu",
-                "marc_language_code": "eng",
-            }
-        )
-        for i in range(count)
-    )
-    path.write_text(header + rows, encoding="utf-8")
-
-
-def test_run_eval_sample_caps_row_count(tmp_path: Path) -> None:
-    """``sample=5`` reduces the evaluated row count to 5."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_many_distinct_rows(gt_path, 20)
-    report = run_eval(
-        ground_truth_path=gt_path,
-        index_path=index_path,
-        matching_config=_matching_config(),
-        pairing_config=_pairing_config(),
-        sample=5,
-        seed=42,
-    )
-    assert report.rows_evaluated == 5
-
-
-def test_run_eval_sample_larger_than_corpus_evaluates_all(tmp_path: Path) -> None:
-    """``sample > len(rows)`` evaluates every row, no error raised."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_many_distinct_rows(gt_path, 4)
-    report = run_eval(
-        ground_truth_path=gt_path,
-        index_path=index_path,
-        matching_config=_matching_config(),
-        pairing_config=_pairing_config(),
-        sample=100,
-        seed=0,
-    )
-    assert report.rows_evaluated == 4
-
-
-def test_run_eval_same_seed_picks_same_rows(tmp_path: Path) -> None:
-    """Two runs with the same seed select identical rows (deterministic)."""
-    from pd_matcher.eval.ground_truth import _load_rows
-
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_many_distinct_rows(gt_path, 50)
-    first = _load_rows(gt_path, sample=10, seed=7)
-    second = _load_rows(gt_path, sample=10, seed=7)
-    assert [row["marc_id"] for row in first] == [row["marc_id"] for row in second]
-    report = run_eval(
-        ground_truth_path=gt_path,
-        index_path=index_path,
-        matching_config=_matching_config(),
-        pairing_config=_pairing_config(),
-        sample=10,
-        seed=7,
-    )
-    assert report.rows_evaluated == 10
-
-
-def test_run_eval_different_seeds_pick_different_rows(tmp_path: Path) -> None:
-    """Different seeds yield different selections on a 50-row corpus."""
-    from pd_matcher.eval.ground_truth import _load_rows
-
-    gt_path = tmp_path / "gt.csv"
-    _write_many_distinct_rows(gt_path, 50)
-    first = _load_rows(gt_path, sample=25, seed=1)
-    second = _load_rows(gt_path, sample=25, seed=2)
-    assert [row["marc_id"] for row in first] != [row["marc_id"] for row in second]
-
-
-def test_load_rows_without_sample_preserves_file_order(tmp_path: Path) -> None:
-    """``sample=None`` returns rows in file order — no shuffling, no surprises."""
-    from pd_matcher.eval.ground_truth import _load_rows
-
-    gt_path = tmp_path / "gt.csv"
-    _write_many_distinct_rows(gt_path, 5)
-    rows = _load_rows(gt_path, sample=None, seed=99)
-    assert [row["marc_id"] for row in rows] == [f"marc-{i:04d}" for i in range(5)]
-
-
-def _write_year_drift_row(path: Path) -> None:
-    """Emit a single GT row whose MARC year is ``5`` off from the indexed reg year.
-
-    The tiny fixtures register UUID-0001 in 1940; this row claims 1945.
-    With ``year_window=0`` no candidate is returned (year_diff exceeds the
-    window); with ``year_window=5`` the registration is in-bucket.
-    """
-    header = ",".join(_HEADER_FIELDS) + "\n"
-    body = _row(
-        {
-            "marc_id": "marc-drift",
-            "marc_title_original": "A study of widgets",
-            "marc_main_author_original": "Smith John",
-            "marc_publisher_original": "Acme Press",
-            "marc_year": "1945",
-            "marc_country_code": "xxu",
-            "marc_language_code": "eng",
-            "match_source_id": "UUID-0001",
-        }
-    )
-    path.write_text(header + body, encoding="utf-8")
-
-
-def test_run_eval_year_window_zero_yields_no_predicted_match(tmp_path: Path) -> None:
-    """``year_window=0`` blocks the year-drifted candidate from matching."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_year_drift_row(gt_path)
     narrow = MatchingConfig(
         title_weight=0.40,
         author_weight=0.20,
@@ -336,19 +395,44 @@ def test_run_eval_year_window_zero_yields_no_predicted_match(tmp_path: Path) -> 
         scorer="weighted_mean",
     )
     report = run_eval(
-        ground_truth_path=gt_path,
+        vault_path=vault_path,
+        pool_path=pool_path,
         index_path=index_path,
         matching_config=narrow,
         pairing_config=_pairing_config(),
     )
-    assert report.rows_with_predicted_match == 0
+    assert report.marcs_with_matcher_top == 0
+    assert report.marcs_with_correct_top == 0
+    assert report.precision == 0.0
 
 
-def test_run_eval_year_window_five_admits_year_drifted_match(tmp_path: Path) -> None:
+def test_run_eval_year_window_five_admits_drifted_match(tmp_path: Path) -> None:
     """``year_window=5`` admits the same drifted candidate as a match."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_year_drift_row(gt_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(
+        pool_path,
+        (
+            _marc_record_xml(
+                control_id="marc-drift",
+                title="A study of widgets",
+                author="Smith, John",
+                publisher="Acme Press",
+                year="1945",
+            ),
+        ),
+    )
+    vault_path = tmp_path / "vault.jsonl"
+    _seed_vault(
+        vault_path,
+        (
+            _vault_entry(
+                marc_control_id="marc-drift",
+                nypl_uuid="UUID-0001",
+                verdict="match",
+            ),
+        ),
+    )
     wide = MatchingConfig(
         title_weight=0.40,
         author_weight=0.20,
@@ -362,121 +446,75 @@ def test_run_eval_year_window_five_admits_year_drifted_match(tmp_path: Path) -> 
         scorer="weighted_mean",
     )
     report = run_eval(
-        ground_truth_path=gt_path,
+        vault_path=vault_path,
+        pool_path=pool_path,
         index_path=index_path,
         matching_config=wide,
         pairing_config=_pairing_config(),
     )
-    assert report.rows_with_predicted_match == 1
+    assert report.marcs_with_matcher_top == 1
+    assert report.marcs_with_correct_top == 1
 
 
-def test_run_eval_rejects_workers_below_one(tmp_path: Path) -> None:
-    """``workers=0`` is rejected by the public API with :class:`ValueError`."""
+def test_run_eval_top_disagrees_with_ground_truth(tmp_path: Path) -> None:
+    """A matched top whose UUID differs from the vault GT increments with_top only."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    with raises(ValueError, match="workers must be >= 1"):
-        run_eval(
-            ground_truth_path=gt_path,
-            index_path=index_path,
-            matching_config=_matching_config(),
-            pairing_config=_pairing_config(),
-            workers=0,
-        )
-
-
-def test_run_eval_workers_one_matches_default_path(tmp_path: Path) -> None:
-    """``workers=1`` produces the same report as the default invocation."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    default_report = run_eval(
-        ground_truth_path=gt_path,
-        index_path=index_path,
-        matching_config=_matching_config(),
-        pairing_config=_pairing_config(),
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, _standard_marc_records())
+    vault_path = tmp_path / "vault.jsonl"
+    _seed_vault(
+        vault_path,
+        (
+            _vault_entry(
+                marc_control_id="marc-aaa",
+                nypl_uuid="UUID-0002",
+                verdict="match",
+            ),
+        ),
     )
-    explicit_report = run_eval(
-        ground_truth_path=gt_path,
-        index_path=index_path,
-        matching_config=_matching_config(),
-        pairing_config=_pairing_config(),
-        workers=1,
-    )
-    assert default_report.rows_evaluated == explicit_report.rows_evaluated
-    assert default_report.rows_with_predicted_match == explicit_report.rows_with_predicted_match
-    assert (
-        default_report.rows_with_ground_truth_match == explicit_report.rows_with_ground_truth_match
-    )
-    assert default_report.rows_agreeing == explicit_report.rows_agreeing
-
-
-def test_run_eval_workers_two_matches_workers_one(tmp_path: Path) -> None:
-    """``workers=2`` (spawn pool) yields the identical aggregate as ``workers=1``."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    serial_report = run_eval(
-        ground_truth_path=gt_path,
-        index_path=index_path,
-        matching_config=_matching_config(),
-        pairing_config=_pairing_config(),
-        workers=1,
-    )
-    parallel_report = run_eval(
-        ground_truth_path=gt_path,
-        index_path=index_path,
-        matching_config=_matching_config(),
-        pairing_config=_pairing_config(),
-        workers=2,
-    )
-    assert parallel_report.rows_evaluated == serial_report.rows_evaluated
-    assert parallel_report.rows_agreeing == serial_report.rows_agreeing
-    assert parallel_report.rows_with_predicted_match == serial_report.rows_with_predicted_match
-    assert (
-        parallel_report.rows_with_ground_truth_match == serial_report.rows_with_ground_truth_match
-    )
-
-
-def test_run_eval_workers_two_with_limit_zero_yields_empty(tmp_path: Path) -> None:
-    """``workers=2`` with ``limit=0`` produces a zero-row report (early return)."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
     report = run_eval(
-        ground_truth_path=gt_path,
+        vault_path=vault_path,
+        pool_path=pool_path,
         index_path=index_path,
         matching_config=_matching_config(),
         pairing_config=_pairing_config(),
-        limit=0,
-        workers=2,
     )
-    assert report.rows_evaluated == 0
+    assert report.marcs_evaluated == 1
+    assert report.marcs_with_matcher_top == 1
+    assert report.marcs_with_correct_top == 0
+    assert report.precision == 0.0
 
 
-def test_pool_eval_row_raises_without_initializer() -> None:
-    """``_pool_eval_row`` must raise when called outside the spawn-pool worker."""
-    from pd_matcher.eval import ground_truth as module_under_test
-
-    module_under_test._WORKER_STATE = None
-    with raises(RuntimeError, match="_pool_initializer"):
-        module_under_test._pool_eval_row({"marc_id": "x"})
-
-
-def test_pool_initializer_and_eval_row_in_process(tmp_path: Path) -> None:
-    """Exercise ``_pool_initializer`` + ``_pool_eval_row`` in the main process."""
-    import pd_matcher.eval.ground_truth as module_under_test
-
+def test_run_eval_latest_verdict_wins(tmp_path: Path) -> None:
+    """A re-labeled pair: only the latest verdict shows up in the counts."""
     index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path)
-    rows = module_under_test._load_rows(gt_path, sample=None, seed=0)
-    module_under_test._pool_initializer(index_path, _matching_config(), _pairing_config())
-    try:
-        outcome = module_under_test._pool_eval_row(rows[0])
-        assert outcome.has_ground_truth_match is True
-    finally:
-        state = module_under_test._WORKER_STATE
-        if state is not None:
-            state.lookup.close()
-        module_under_test._WORKER_STATE = None
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, _standard_marc_records())
+    vault_path = tmp_path / "vault.jsonl"
+    _seed_vault(
+        vault_path,
+        (
+            _vault_entry(
+                marc_control_id="marc-aaa",
+                nypl_uuid="UUID-0001",
+                verdict="match",
+                timestamp="2026-05-01T10:00:00+00:00",
+            ),
+            _vault_entry(
+                marc_control_id="marc-aaa",
+                nypl_uuid="UUID-0001",
+                verdict="no_match",
+                timestamp="2026-05-22T10:00:00+00:00",
+            ),
+        ),
+    )
+    report = run_eval(
+        vault_path=vault_path,
+        pool_path=pool_path,
+        index_path=index_path,
+        matching_config=_matching_config(),
+        pairing_config=_pairing_config(),
+    )
+    assert report.pairs_positive == 0
+    assert report.pairs_negative == 1
+    assert report.marcs_evaluated == 0

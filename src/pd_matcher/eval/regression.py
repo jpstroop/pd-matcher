@@ -8,13 +8,14 @@ is unit-testable by fabricating :class:`EvalReport` instances directly.
 
 The slow, index-dependent end-to-end gate (``pdm run regression``) lives
 under ``tests/regression`` and is the only place that actually runs the
-1000-row eval; it consumes the helpers defined here.
+vault-driven eval; it consumes the helpers defined here.
 
 The gate locks two metrics, precision and recall, against the baseline
 with a symmetric tolerance: a drop of more than ``tolerance`` (default
 2 percentage points) below the baseline fails; improvements never fail.
-F1 is reported for context but is not itself gated, since it is fully
-determined by precision and recall.
+F1, AUC, and AP are reported for context but are not themselves gated.
+F1 is a function of the gated metrics; AUC and AP gate-in once the
+vault stabilises enough to lock them (separate ticket).
 """
 
 from pathlib import Path
@@ -34,27 +35,37 @@ class RegressionError(Exception):
 class BaselineParams(Struct, frozen=True, forbid_unknown_fields=True):
     """The eval invocation parameters that the baseline was measured under."""
 
-    sample: int
-    seed: int
+    vault: str
+    pool: str
     year_window: int
-    ground_truth: str
 
 
 class BaselineMetrics(Struct, frozen=True, forbid_unknown_fields=True):
-    """The locked precision/recall/F1 numbers for the baseline run."""
+    """The locked numbers for the baseline run.
+
+    ``precision`` and ``recall`` are gated by :func:`compare`. ``f1``,
+    ``auc_roc``, and ``average_precision`` are reported but not gated
+    against the baseline yet — they exist so a future ticket can lock
+    them once we have a stable vault to compare against.
+    """
 
     precision: float
     recall: float
     f1: float
+    auc_roc: float
+    average_precision: float
 
 
 class BaselineCounts(Struct, frozen=True, forbid_unknown_fields=True):
-    """The locked row counts for the baseline run (context, not gated)."""
+    """The locked vault counts for the baseline run (context, not gated)."""
 
-    rows_evaluated: int
-    rows_with_predicted_match: int
-    rows_with_ground_truth_match: int
-    rows_agreeing: int
+    pairs_evaluated: int
+    pairs_positive: int
+    pairs_negative: int
+    pairs_unsure_excluded: int
+    marcs_evaluated: int
+    marcs_with_matcher_top: int
+    marcs_with_correct_top: int
 
 
 class Baseline(Struct, frozen=True, forbid_unknown_fields=True):
@@ -92,12 +103,24 @@ def _metric_message(name: str, baseline_value: float, report_value: float, toler
     )
 
 
+def _reported_message(name: str, baseline_value: float, report_value: float) -> str:
+    """Build a human-readable report-only line for an ungated metric."""
+    delta = report_value - baseline_value
+    return (
+        f"{name}: REPORT "
+        f"(baseline={baseline_value:.6f} report={report_value:.6f} delta={delta:+.6f})"
+    )
+
+
 def compare(baseline: Baseline, report: EvalReport) -> RegressionResult:
     """Compare a fresh :class:`EvalReport` against a :class:`Baseline`.
 
     The gate passes when neither precision nor recall has dropped more
     than ``baseline.tolerance`` below the baseline value. Improvements,
-    and drops within tolerance, both pass.
+    and drops within tolerance, both pass. AUC and AP are formatted into
+    the messages tuple alongside the gated lines so the regression
+    output surfaces both signals at once, but they are not used in the
+    pass/fail decision.
 
     Args:
         baseline: The checked-in baseline to compare against.
@@ -107,7 +130,7 @@ def compare(baseline: Baseline, report: EvalReport) -> RegressionResult:
     Returns:
         A :class:`RegressionResult` carrying the pass/fail verdict, the
         precision and recall deltas (report minus baseline), and one
-        human-readable message per gated metric.
+        human-readable message per gated and reported metric.
     """
     tolerance = baseline.tolerance
     precision_delta = report.precision - baseline.metrics.precision
@@ -116,6 +139,12 @@ def compare(baseline: Baseline, report: EvalReport) -> RegressionResult:
     messages = (
         _metric_message("precision", baseline.metrics.precision, report.precision, tolerance),
         _metric_message("recall", baseline.metrics.recall, report.recall, tolerance),
+        _reported_message("auc_roc", baseline.metrics.auc_roc, report.auc_roc),
+        _reported_message(
+            "average_precision",
+            baseline.metrics.average_precision,
+            report.average_precision,
+        ),
     )
     return RegressionResult(
         passed=passed,
@@ -159,8 +188,8 @@ def baseline_from_report(
     """Build a :class:`Baseline` from a fresh :class:`EvalReport`.
 
     Used by the refresh script (``pdm run regression-baseline``) to
-    regenerate the checked-in baseline after an intentional change to the
-    matching or assessment pipeline.
+    regenerate the checked-in baseline after an intentional change to
+    the matching or assessment pipeline.
 
     Args:
         report: A fresh report produced by
@@ -178,12 +207,17 @@ def baseline_from_report(
             precision=report.precision,
             recall=report.recall,
             f1=report.f1,
+            auc_roc=report.auc_roc,
+            average_precision=report.average_precision,
         ),
         counts=BaselineCounts(
-            rows_evaluated=report.rows_evaluated,
-            rows_with_predicted_match=report.rows_with_predicted_match,
-            rows_with_ground_truth_match=report.rows_with_ground_truth_match,
-            rows_agreeing=report.rows_agreeing,
+            pairs_evaluated=report.pairs_evaluated,
+            pairs_positive=report.pairs_positive,
+            pairs_negative=report.pairs_negative,
+            pairs_unsure_excluded=report.pairs_unsure_excluded,
+            marcs_evaluated=report.marcs_evaluated,
+            marcs_with_matcher_top=report.marcs_with_matcher_top,
+            marcs_with_correct_top=report.marcs_with_correct_top,
         ),
         tolerance=tolerance,
         notes=notes,
