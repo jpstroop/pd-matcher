@@ -15,6 +15,7 @@ from datetime import date
 from datetime import datetime
 from re import IGNORECASE
 from re import compile as re_compile
+from urllib.parse import quote
 
 from msgspec import Struct
 from msgspec.json import decode as json_decode
@@ -37,6 +38,7 @@ _ONLINE_RESOURCE_MARKER: str = "online resource"
 
 _LCCN_BASE_URL: str = "https://lccn.loc.gov/"
 _OCLC_BASE_URL: str = "https://www.worldcat.org/oclc/"
+_HATHITRUST_BASE_URL: str = "https://catalog.hathitrust.org/api/volumes/"
 
 
 class EvidenceBar(Struct, frozen=True, forbid_unknown_fields=True):
@@ -82,6 +84,7 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     marc_isbns: tuple[str, ...]
     marc_oclc: str | None
     marc_oclc_url: str | None
+    marc_hathitrust_url: str | None
     marc_language_code: str | None
     marc_country_code: str | None
     marc_is_online_resource: bool
@@ -199,6 +202,30 @@ def _oclc_url(oclc: str | None) -> str | None:
     if not oclc:
         return None
     return f"{_OCLC_BASE_URL}{_OCLC_PREFIX_RE.sub('', oclc)}"
+
+
+def _hathitrust_url(oclc: str | None, lccn: str | None, isbns: tuple[str, ...]) -> str | None:
+    """Return a HathiTrust catalog deep-link or ``None`` when no identifier is present.
+
+    HathiTrust's per-identifier catalog view accepts ``oclc``, ``lccn``, and
+    ``isbn`` as identifier types. We pick a single identifier in precision
+    order: OCLC (one bibliographic record) wins over LCCN (unique-ish) wins
+    over the first ISBN (least specific). When all three are absent the
+    function returns ``None`` and the template suppresses the row.
+
+    The OCLC value is stripped of the historical ``ocm``/``ocn``/``on``
+    prefix via :data:`_OCLC_PREFIX_RE` before interpolation. LCCN values are
+    URL-encoded with :func:`urllib.parse.quote` (with ``safe=""`` so spaces
+    and forward-slashes — both allowed in LCCNs per HathiTrust's docs — are
+    encoded). ISBNs are passed through; HathiTrust normalizes them server-side.
+    """
+    if oclc:
+        return f"{_HATHITRUST_BASE_URL}oclc/{_OCLC_PREFIX_RE.sub('', oclc)}.html"
+    if lccn:
+        return f"{_HATHITRUST_BASE_URL}lccn/{quote(lccn, safe='')}.html"
+    if isbns:
+        return f"{_HATHITRUST_BASE_URL}isbn/{isbns[0]}.html"
+    return None
 
 
 def _parse_iso_date(raw: str | None) -> date | None:
@@ -332,6 +359,7 @@ def build_card(row: ReviewPairRow) -> ReviewCard:
         marc_isbns=marc.isbns,
         marc_oclc=marc.oclc,
         marc_oclc_url=_oclc_url(marc.oclc),
+        marc_hathitrust_url=_hathitrust_url(marc.oclc, marc.lccn, marc.isbns),
         marc_language_code=marc.language_code,
         marc_country_code=marc.country_code,
         marc_is_online_resource=_is_online_resource(marc.extent),
