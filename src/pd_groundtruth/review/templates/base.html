@@ -6,12 +6,14 @@
   <title>pd-groundtruth review</title>
   <style>
     :root { --bg: #f7f7f8; --fg: #1d1d1f; --muted: #6b6b70; --line: #e0e0e3;
-            --match: #1e7d34; --no: #b3261e; --unsure: #8a6d00; --accent: #2962ff; }
+            --match: #1e7d34; --no: #b3261e; --unsure: #8a6d00; --accent: #2962ff;
+            --header-h: 2.65rem; }
     * { box-sizing: border-box; }
     body { margin: 0; font: 15px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif;
            background: var(--bg); color: var(--fg); }
     header { display: flex; align-items: baseline; gap: 1.5rem; padding: .6rem 1.2rem;
-             background: #fff; border-bottom: 1px solid var(--line); position: sticky; top: 0; }
+             background: #fff; border-bottom: 1px solid var(--line);
+             position: sticky; top: 0; z-index: 20; }
     header .tally { color: var(--muted); font-size: .9rem; }
     header a { color: var(--accent); text-decoration: none; }
     main { max-width: 980px; margin: 1.4rem auto; padding: 0 1.2rem; }
@@ -76,7 +78,7 @@
     .ev-score { white-space: nowrap; }
     .ev-source { color: var(--muted); font-style: italic; margin-left: .35rem; }
     .actions { display: flex; gap: .6rem;
-               position: sticky; top: 0; z-index: 10;
+               position: sticky; top: var(--header-h); z-index: 10;
                background: var(--bg); padding: .8rem 1.2rem;
                border-bottom: 1px solid var(--line);
                margin: 0 -1.2rem 1.2rem; }
