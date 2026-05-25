@@ -5,21 +5,21 @@
     "year_window": 0
   },
   "metrics": {
-    "precision": 0.95,
-    "recall": 0.85,
-    "f1": 0.9,
-    "auc_roc": 0.9,
-    "average_precision": 0.9
+    "precision": 0.9961685823754789,
+    "recall": 0.9961685823754789,
+    "f1": 0.9961685823754789,
+    "auc_roc": 0.9621647509578544,
+    "average_precision": 0.9976873416628662
   },
   "counts": {
-    "pairs_evaluated": 0,
-    "pairs_positive": 0,
-    "pairs_negative": 0,
-    "pairs_unsure_excluded": 0,
-    "marcs_evaluated": 0,
-    "marcs_with_matcher_top": 0,
-    "marcs_with_correct_top": 0
+    "pairs_evaluated": 277,
+    "pairs_positive": 261,
+    "pairs_negative": 16,
+    "pairs_unsure_excluded": 25,
+    "marcs_evaluated": 261,
+    "marcs_with_matcher_top": 261,
+    "marcs_with_correct_top": 260
   },
   "tolerance": 0.02,
-  "notes": "PLACEHOLDER baseline shape (numbers are not measured). Regenerate via `pdm run regression-baseline` after this branch merges so the locked numbers reflect the live vault + pool + index at merge time."
+  "notes": "Vault-driven eval. Pair-level AUC/AP plus per-MARC P/R; gate is precision/recall only on linkage agreement (latest 'match' verdict wins). Generated: vault=data/label_vault.jsonl pool=data/candidates year_window=0."
 }
