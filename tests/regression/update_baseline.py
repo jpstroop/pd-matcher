@@ -2,8 +2,8 @@
 
 Runs the canonical 1000-row eval against the local LMDB index and writes
 ``tests/regression/baseline.json`` from the resulting metrics. Use this
-after an intentional change to the matching or assessment pipeline (for
-example once #19 reg-date parsing lands), then commit the new JSON.
+after an intentional change to the matching pipeline, then commit the new
+JSON.
 
 Invoke via ``pdm run regression-baseline``. This is a script, not a
 pytest test; it is outside the coverage source.
@@ -16,7 +16,6 @@ from msgspec import to_builtins
 
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.eval.ground_truth import run_eval
 from pd_matcher.eval.regression import BaselineParams
@@ -30,18 +29,13 @@ _BASELINE_PATH = Path(__file__).resolve().parent / "baseline.json"
 _SAMPLE = 1000
 _SEED = 42
 _YEAR_WINDOW = 0
-_AS_OF_YEAR = 2026
 _GROUND_TRUTH = "combined_ground_truth.csv"
 _TOLERANCE = 0.02
 _WORKERS = 8
 _NOTES = (
     "Thin-record eval (records reconstructed from GT CSV columns). Gate is "
-    "precision/recall only; per-status confusion is not validated because GT "
-    "status labels predate the current CopyrightStatus enum. Refreshed 2026-05-21 "
-    "after #22 (inverted-index candidate retrieval) landed: matching now scores "
-    "only token-sharing candidates, which raised precision and recall. Generated: "
-    f"sample={_SAMPLE} seed={_SEED} "
-    f"year_window={_YEAR_WINDOW} as_of={_AS_OF_YEAR}."
+    "precision/recall only on linkage agreement (match_source_id). Generated: "
+    f"sample={_SAMPLE} seed={_SEED} year_window={_YEAR_WINDOW}."
 )
 
 
@@ -66,13 +60,10 @@ def main() -> None:
         scorer=base_matching.scorer,
     )
     pairing_config = _load_default_pairing_config()
-    copyright_config = CopyrightAssessmentConfig(as_of_year=_AS_OF_YEAR)
     report = run_eval(
         ground_truth_path=ground_truth_path,
         index_path=_INDEX_PATH,
-        as_of_year=_AS_OF_YEAR,
         matching_config=matching_config,
-        copyright_config=copyright_config,
         pairing_config=pairing_config,
         sample=_SAMPLE,
         seed=_SEED,
@@ -82,7 +73,6 @@ def main() -> None:
         sample=_SAMPLE,
         seed=_SEED,
         year_window=_YEAR_WINDOW,
-        as_of_year=_AS_OF_YEAR,
         ground_truth=_GROUND_TRUTH,
     )
     baseline = baseline_from_report(

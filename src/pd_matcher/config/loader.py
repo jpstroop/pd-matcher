@@ -16,7 +16,6 @@ from msgspec import convert
 from yaml import YAMLError
 from yaml import safe_load
 
-from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import IndexConfig
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
@@ -74,25 +73,6 @@ def load_matching_config(path: Path) -> MatchingConfig:
         raise ConfigError(f"Invalid matching config in {path}: {exc}") from exc
 
 
-def load_copyright_rules(path: Path) -> CopyrightRuleSet:
-    """Load and validate a :class:`CopyrightRuleSet` from ``path``.
-
-    Args:
-        path: YAML file containing the copyright rule set.
-
-    Returns:
-        A validated :class:`CopyrightRuleSet`.
-
-    Raises:
-        ConfigError: If the file cannot be read, parsed, or validated.
-    """
-    data = _read_yaml(path)
-    try:
-        return convert(data, type=CopyrightRuleSet, dec_hook=_path_dec_hook)
-    except (ValidationError, ValueError) as exc:
-        raise ConfigError(f"Invalid copyright rule set in {path}: {exc}") from exc
-
-
 def load_index_config(path: Path) -> IndexConfig:
     """Load and validate an :class:`IndexConfig` from ``path``.
 
@@ -133,7 +113,6 @@ def load_pairing_config(path: Path) -> PairingConfig:
 
 __all__ = [
     "ConfigError",
-    "load_copyright_rules",
     "load_index_config",
     "load_matching_config",
     "load_pairing_config",

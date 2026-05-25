@@ -1,6 +1,5 @@
 """Tests for :class:`pd_matcher.workers.reporter.RunningTotals`."""
 
-from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.workers.events import ProducerHeartbeat
 from pd_matcher.workers.events import RecordProcessed
 from pd_matcher.workers.events import ShutdownEvent
@@ -8,24 +7,11 @@ from pd_matcher.workers.events import WriterHeartbeat
 from pd_matcher.workers.reporter import RunningTotals
 
 
-def test_record_processed_updates_counters_and_status_histogram() -> None:
+def test_record_processed_updates_counters() -> None:
     totals = RunningTotals(started_at=0.0)
-    totals.apply(
-        RecordProcessed(
-            status=CopyrightStatus.PD_BY_AGE_PRE_95_YEARS,
-            confidence=0.9,
-            candidates_considered=2,
-        )
-    )
-    totals.apply(
-        RecordProcessed(
-            status=CopyrightStatus.PD_BY_AGE_PRE_95_YEARS,
-            confidence=0.7,
-            candidates_considered=3,
-        )
-    )
+    totals.apply(RecordProcessed(confidence=0.9, candidates_considered=2))
+    totals.apply(RecordProcessed(confidence=0.7, candidates_considered=3))
     assert totals.records_processed == 2
-    assert totals.by_status[CopyrightStatus.PD_BY_AGE_PRE_95_YEARS] == 2
 
 
 def test_producer_heartbeat_overwrites_enqueued() -> None:
@@ -87,12 +73,9 @@ def test_eta_seconds_estimates_remaining_time() -> None:
     assert eta == 20.0
 
 
-def test_snapshot_exposes_string_keyed_status_counts() -> None:
+def test_snapshot_exposes_counters() -> None:
     totals = RunningTotals(started_at=0.0)
     totals.records_processed = 1
-    totals.by_status[CopyrightStatus.IN_COPYRIGHT_REGISTERED_AND_RENEWED] = 1
     snapshot = totals.snapshot()
-    assert snapshot.by_status == {
-        CopyrightStatus.IN_COPYRIGHT_REGISTERED_AND_RENEWED.value: 1,
-    }
+    assert snapshot.records_processed == 1
     assert snapshot.stop_reason == "running"

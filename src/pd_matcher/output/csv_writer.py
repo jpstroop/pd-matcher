@@ -1,18 +1,15 @@
 """Streaming CSV writer for matcher output rows.
 
-The output schema mirrors ``data/combined_ground_truth.csv`` field for
-field so the matcher's CSV can be diffed against the historic ground
-truth without a separate adapter. :class:`CsvResultWriter` is a
-context-manager :class:`ResultWriter` that buffers a single underlying
-file handle and flushes after every row so a partial run is always
-readable.
+The output schema is a flat linkage row: MARC metadata, matched CCE metadata,
+and per-field plus combined scores. :class:`CsvResultWriter` is a
+context-manager :class:`ResultWriter` that buffers a single underlying file
+handle and flushes after every row so a partial run is always readable.
 
 Per-record normalization/stemming is recomputed at write time to keep
 this module independent from the matcher: it expects only a
-:class:`MarcRecord`, an optional :class:`MatchResult`, and a
-:class:`CopyrightAssessment`. This is intentionally a per-row cost — a
-single CSV row's normalize+stem work is dwarfed by the matcher pipeline
-that produced it.
+:class:`MarcRecord` and a :class:`MatchResult`. This is intentionally a
+per-row cost — a single CSV row's normalize+stem work is dwarfed by the
+matcher pipeline that produced it.
 """
 
 from csv import DictWriter
@@ -22,7 +19,6 @@ from typing import IO
 from typing import Protocol
 from typing import Self
 
-from pd_matcher.copyright.assessment import CopyrightAssessment
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.result import MatchResult
 from pd_matcher.models import IndexedNyplRegRecord
@@ -67,12 +63,11 @@ CSV_COLUMNS: tuple[str, ...] = (
     "publisher_score",
     "combined_score",
     "year_difference",
-    "copyright_status",
 )
 
 
 class ResultWriter(Protocol):
-    """Streaming writer for ``(MarcRecord, MatchResult|None, CopyrightAssessment)`` triples."""
+    """Streaming writer for one linkage row per processed MARC record."""
 
     def __enter__(self) -> Self:  # pragma: no cover
         """Open the underlying sink."""
@@ -91,7 +86,6 @@ class ResultWriter(Protocol):
         self,
         marc: MarcRecord,
         match: MatchResult | None,
-        assessment: CopyrightAssessment,
         matched_nypl: IndexedNyplRegRecord | None = None,
     ) -> None:
         """Emit one CSV row for the supplied triple."""
@@ -142,7 +136,6 @@ def _format_match_date(record: IndexedNyplRegRecord) -> str:
 def _build_row(
     marc: MarcRecord,
     match: MatchResult | None,
-    assessment: CopyrightAssessment,
     matched_nypl: IndexedNyplRegRecord | None,
 ) -> dict[str, str]:
     """Translate the input triple into a flat ``dict[str, str]`` row."""
@@ -185,7 +178,6 @@ def _build_row(
         "publisher_score": "",
         "combined_score": "",
         "year_difference": "",
-        "copyright_status": assessment.status.value,
     }
     if match is None or match.best is None or matched_nypl is None:
         return row
@@ -218,7 +210,7 @@ def _build_row(
 
 
 class CsvResultWriter:
-    """:class:`ResultWriter` that emits the combined_ground_truth.csv schema."""
+    """:class:`ResultWriter` that emits the verified-linkage CSV schema."""
 
     __slots__ = ("_fp", "_path", "_writer")
 
@@ -253,15 +245,13 @@ class CsvResultWriter:
         self,
         marc: MarcRecord,
         match: MatchResult | None,
-        assessment: CopyrightAssessment,
         matched_nypl: IndexedNyplRegRecord | None = None,
     ) -> None:
         """Emit one CSV row for the supplied triple.
 
         Args:
-            marc: The MARC record being assessed.
+            marc: The MARC record being matched.
             match: The matcher's verdict, or ``None`` when no match was made.
-            assessment: The rule-engine verdict.
             matched_nypl: The CCE registration corresponding to
                 ``match.best``. When omitted the row's ``match_*`` columns
                 are blank even if ``match.best`` is set, because the writer
@@ -269,7 +259,7 @@ class CsvResultWriter:
         """
         if self._writer is None or self._fp is None:
             raise RuntimeError("CsvResultWriter not entered; use as a context manager")
-        row = _build_row(marc, match, assessment, matched_nypl)
+        row = _build_row(marc, match, matched_nypl)
         self._writer.writerow(row)
         self._fp.flush()
 

@@ -52,12 +52,8 @@ from pd_groundtruth.sampling import band_of
 from pd_groundtruth.sampling import reservoir_sample
 from pd_groundtruth.vault_pair_resolver import IDF_CACHE_NAME as _SHARED_IDF_CACHE_NAME
 from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
-from pd_matcher.config.loader import load_copyright_rules
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
-from pd_matcher.copyright.assessment import CopyrightAssessment
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.calibrator import load_calibrator
@@ -168,7 +164,6 @@ def _build_pair_insert(
     score: float,
     band: str,
     source: str,
-    predicted_status: str | None,
     evidence_sources: tuple[tuple[str, str], ...] = (),
 ) -> PairInsert:
     """Assemble a :class:`PairInsert` snapshot from one matched record."""
@@ -206,7 +201,6 @@ def _build_pair_insert(
         cce_notice_date=_iso_or_none(matched_nypl.notice_date),
         cce_lccn=matched_nypl.lccn,
         cce_prev_regnums=_join_prev_regnums(matched_nypl.prev_regnums),
-        cce_predicted_status=predicted_status,
         cce_renewal_id=matched_nypl.renewal_id,
         cce_renewal_oreg=matched_nypl.renewal_oreg,
         cce_renewal_rdat=_iso_or_none(matched_nypl.renewal_rdat),
@@ -309,7 +303,6 @@ class StratifyingResultWriter:
         self,
         marc: MarcRecord,
         match: MatchResult | None,
-        assessment: CopyrightAssessment,
         matched_nypl: IndexedNyplRegRecord | None = None,
     ) -> None:
         """Band one matched record and persist or buffer it accordingly."""
@@ -320,7 +313,6 @@ class StratifyingResultWriter:
         language = _language_of(marc)
         score = match.best.combined.calibrated
         band = band_of(score)
-        predicted_status = assessment.status.name
         if band == BAND_BELOW:
             pair = _build_pair_insert(
                 marc,
@@ -330,7 +322,6 @@ class StratifyingResultWriter:
                 score=score,
                 band=BAND_BELOW,
                 source=SOURCE_BELOW_SAMPLE,
-                predicted_status=predicted_status,
                 evidence_sources=match.best.evidence_sources,
             )
             self._below_buffer.setdefault(language, []).append(
@@ -348,7 +339,6 @@ class StratifyingResultWriter:
             score=score,
             band=band,
             source=SOURCE_BANDED,
-            predicted_status=predicted_status,
             evidence_sources=match.best.evidence_sources,
         )
         self._insert_with_vault(db, pair)
@@ -536,8 +526,6 @@ def build_queue(
     budget: BudgetModel,
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
-    ruleset: CopyrightRuleSet,
-    copyright_config: CopyrightAssessmentConfig,
     seed: int,
     workers: int,
     sample_per_lang: int,
@@ -571,8 +559,6 @@ def build_queue(
         budget: Per-(language, band) caps.
         matching_config: Active config; the score floor is forced to ``0.0``.
         pairing_config: Active field-pairing config.
-        ruleset: Loaded copyright ruleset for the matcher's assessment stage.
-        copyright_config: Loaded copyright assessment config.
         seed: Seed for the reservoir samplers.
         workers: Number of matcher worker processes (``>= 1``).
         sample_per_lang: Reservoir size per language directory.
@@ -596,8 +582,6 @@ def build_queue(
         index_path=index_path,
         matching_config=matching_config,
         pairing_config=pairing_config,
-        ruleset=ruleset,
-        copyright_config=copyright_config,
         idf=idf,
         calibrator=calibrator,
     )
@@ -632,8 +616,6 @@ def build_queue(
             index_path=index_path,
             output_path=out_path,
             matching_config=floored_config,
-            copyright_config=copyright_config,
-            ruleset=ruleset,
             pairing_config=pairing_config,
             idf=idf,
             calibrator=calibrator,
@@ -684,20 +666,9 @@ def _read_stratum_counts(out_path: Path) -> dict[tuple[str, str], int]:
         return db.stratum_counts()
 
 
-def load_default_ruleset() -> CopyrightRuleSet:
-    """Load the shipped copyright ruleset for the matcher's assessment stage."""
-    from importlib.resources import as_file
-    from importlib.resources import files
-
-    resource = files("pd_matcher.config.defaults") / "copyright_rules.yaml"
-    with as_file(resource) as path:
-        return load_copyright_rules(Path(path))
-
-
 __all__ = [
     "BuildSummary",
     "StratifyingResultWriter",
     "StratifyingWriterFactory",
     "build_queue",
-    "load_default_ruleset",
 ]

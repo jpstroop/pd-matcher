@@ -52,8 +52,6 @@ def test_match_cli_produces_one_row_per_record(tmp_path: Path) -> None:
             "1",
             "--min-score",
             "1.0",
-            "--as-of",
-            "2026",
         ],
     )
     assert result.exit_code == 0, result.output

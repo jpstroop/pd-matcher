@@ -22,13 +22,10 @@ from msgspec import Struct
 from msgspec.msgpack import Decoder
 from msgspec.msgpack import Encoder
 
-from pd_matcher.copyright.status import CopyrightStatus
-
 
 class RecordProcessed(Struct, frozen=True, forbid_unknown_fields=True, tag="record_processed"):
     """One MARC record was processed by a worker."""
 
-    status: CopyrightStatus
     confidence: float
     candidates_considered: int
 

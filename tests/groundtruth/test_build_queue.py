@@ -43,13 +43,7 @@ from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
 from pd_groundtruth.vault_pair_resolver import ResolveSummary
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
-from pd_matcher.copyright.assessment import CopyrightAssessment
-from pd_matcher.copyright.coverage import LEGACY_COVERAGE
-from pd_matcher.copyright.coverage import Coverage
-from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.prepare import read_manifest
@@ -73,15 +67,6 @@ _MARCXML_TEMPLATE = (
 
 _MATCHING_CONFIG: MatchingConfig = _load_default_matching_config()
 _PAIRING_CONFIG = _load_default_pairing_config()
-_RULESET: CopyrightRuleSet = bq.load_default_ruleset()
-_COPYRIGHT_CONFIG = CopyrightAssessmentConfig(as_of_year=2024)
-
-_ASSESSMENT = CopyrightAssessment(
-    status=CopyrightStatus.PD_REGISTERED_NOT_RENEWED,
-    matched_rule_name=None,
-    explanation="",
-    assumptions=(),
-)
 
 
 def _write_shard(path: Path, control_id: str, title: str) -> None:
@@ -292,7 +277,7 @@ def test_writer_accepts_banded_until_cap(tmp_path: Path) -> None:
     budget = BudgetModel(caps={("eng", "ge90"): 2})
     with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
         for index in range(4):
-            writer.write(_marc(control_id=f"c{index}"), _match(0.95), _ASSESSMENT, _cce())
+            writer.write(_marc(control_id=f"c{index}"), _match(0.95), _cce())
     with ReviewDb.connect(db_path) as db:
         counts = db.stratum_counts()
     assert counts[("eng", "ge90")] == 2
@@ -318,8 +303,8 @@ def test_writer_preapplies_vault_labels_for_known_pairs(tmp_path: Path) -> None:
     )
     vault = {("c0", "uuid-1"): vault_entry}
     with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1, vault=vault) as writer:
-        writer.write(_marc(control_id="c0"), _match(0.95), _ASSESSMENT, _cce())
-        writer.write(_marc(control_id="c1"), _match(0.95), _ASSESSMENT, _cce("uuid-other"))
+        writer.write(_marc(control_id="c0"), _match(0.95), _cce())
+        writer.write(_marc(control_id="c1"), _match(0.95), _cce("uuid-other"))
 
     with ReviewDb.connect(db_path) as db:
         progress = db.progress()
@@ -354,8 +339,8 @@ def test_writer_preapplies_vault_labels_to_below_sample(tmp_path: Path) -> None:
     )
     vault = {("c0", "uuid-1"): vault_entry}
     with StratifyingResultWriter(db_path=db_path, budget=budget, seed=42, vault=vault) as writer:
-        writer.write(_marc(control_id="c0"), _match(0.3), _ASSESSMENT, _cce())
-        writer.write(_marc(control_id="c1"), _match(0.3), _ASSESSMENT, _cce("uuid-other"))
+        writer.write(_marc(control_id="c0"), _match(0.3), _cce())
+        writer.write(_marc(control_id="c1"), _match(0.3), _cce("uuid-other"))
 
     with ReviewDb.connect(db_path) as db:
         labels = list(db.iter_current_labels())
@@ -367,7 +352,7 @@ def test_writer_persists_snapshot_fields(tmp_path: Path) -> None:
     db_path = tmp_path / "review.db"
     budget = BudgetModel(caps={("eng", "ge90"): 1})
     with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
-        writer.write(_marc(control_id="c0"), _match(0.95), _ASSESSMENT, _cce())
+        writer.write(_marc(control_id="c0"), _match(0.95), _cce())
     with ReviewDb.connect(db_path) as db:
         row = db.next_unlabeled()
     assert row is not None
@@ -394,14 +379,13 @@ def test_writer_persists_snapshot_fields(tmp_path: Path) -> None:
     assert row.cce_notice_date == "1953-04-02"
     assert row.cce_lccn == "28000854"
     assert row.cce_prev_regnums == "A100000; A200000"
-    assert row.cce_predicted_status == "PD_REGISTERED_NOT_RENEWED"
 
 
 def test_writer_persists_evidence_sources_for_obvious_pairing(tmp_path: Path) -> None:
     db_path = tmp_path / "review.db"
     budget = BudgetModel(caps={("eng", "ge90"): 1})
     with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
-        writer.write(_marc(control_id="c-obvious"), _match(0.95), _ASSESSMENT, _cce())
+        writer.write(_marc(control_id="c-obvious"), _match(0.95), _cce())
     with ReviewDb.connect(db_path) as db:
         row = db.next_unlabeled()
     assert row is not None
@@ -425,7 +409,7 @@ def test_writer_persists_evidence_sources_for_cross_pairing(tmp_path: Path) -> N
         ),
     )
     with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
-        writer.write(_marc(control_id="c-cross"), cross_match, _ASSESSMENT, _cce())
+        writer.write(_marc(control_id="c-cross"), cross_match, _cce())
     with ReviewDb.connect(db_path) as db:
         row = db.next_unlabeled()
     assert row is not None
@@ -456,9 +440,7 @@ def test_writer_persists_renewal_projection_when_matched_nypl_carries_it(
         renewal_new_matter="added ch. 7",
     )
     with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
-        writer.write(
-            _marc(control_id="cr"), _match(0.95, uuid="uuid-r"), _ASSESSMENT, cce_with_renewal
-        )
+        writer.write(_marc(control_id="cr"), _match(0.95, uuid="uuid-r"), cce_with_renewal)
     with ReviewDb.connect(db_path) as db:
         row = db.next_unlabeled()
     assert row is not None
@@ -471,29 +453,12 @@ def test_writer_persists_renewal_projection_when_matched_nypl_carries_it(
     assert row.cce_renewal_new_matter == "added ch. 7"
 
 
-def test_writer_persists_predicted_status_from_assessment(tmp_path: Path) -> None:
-    db_path = tmp_path / "review.db"
-    budget = BudgetModel(caps={("eng", "ge90"): 1})
-    in_copyright_assessment = CopyrightAssessment(
-        status=CopyrightStatus.IN_COPYRIGHT_REGISTERED_AND_RENEWED,
-        matched_rule_name=None,
-        explanation="",
-        assumptions=(),
-    )
-    with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
-        writer.write(_marc(control_id="cs"), _match(0.95), in_copyright_assessment, _cce())
-    with ReviewDb.connect(db_path) as db:
-        row = db.next_unlabeled()
-    assert row is not None
-    assert row.cce_predicted_status == "IN_COPYRIGHT_REGISTERED_AND_RENEWED"
-
-
 def test_writer_below_sample_reservoir_caps_on_close(tmp_path: Path) -> None:
     db_path = tmp_path / "review.db"
     budget = BudgetModel(caps={("eng", "below"): 2})
     with StratifyingResultWriter(db_path=db_path, budget=budget, seed=42) as writer:
         for index in range(6):
-            writer.write(_marc(control_id=f"c{index}"), _match(0.3), _ASSESSMENT, _cce())
+            writer.write(_marc(control_id=f"c{index}"), _match(0.3), _cce())
         with ReviewDb.connect(db_path) as mid:
             assert mid.stratum_counts() == {}
     with ReviewDb.connect(db_path) as db:
@@ -509,9 +474,9 @@ def test_writer_skips_when_match_or_nypl_is_none(tmp_path: Path) -> None:
     budget = BudgetModel(caps={("eng", "ge90"): 5, ("eng", "below"): 5})
     empty = MatchResult(marc_control_id="ctrl-1", best=None, alternates=(), candidates_considered=0)
     with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
-        writer.write(_marc(), None, _ASSESSMENT, _cce())
-        writer.write(_marc(), empty, _ASSESSMENT, _cce())
-        writer.write(_marc(), _match(0.95), _ASSESSMENT, None)
+        writer.write(_marc(), None, _cce())
+        writer.write(_marc(), empty, _cce())
+        writer.write(_marc(), _match(0.95), None)
     with ReviewDb.connect(db_path) as db:
         assert db.stratum_counts() == {}
 
@@ -524,7 +489,7 @@ def test_writer_logs_fill_at_interval_for_banded_inserts(
     budget = BudgetModel(caps={("eng", "ge90"): 5})
     with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1) as writer:
         for index in range(3):
-            writer.write(_marc(control_id=f"c{index}"), _match(0.95), _ASSESSMENT, _cce())
+            writer.write(_marc(control_id=f"c{index}"), _match(0.95), _cce())
     with ReviewDb.connect(db_path) as db:
         assert db.stratum_counts() == {("eng", "ge90"): 3}
 
@@ -585,7 +550,7 @@ def test_writer_requires_context_manager(tmp_path: Path) -> None:
         seed=1,
     )
     with raises(RuntimeError, match="not entered"):
-        writer.write(_marc(), _match(0.95), _ASSESSMENT, _cce())
+        writer.write(_marc(), _match(0.95), _cce())
 
 
 def test_build_queue_rejects_zero_workers(tmp_path: Path) -> None:
@@ -598,8 +563,6 @@ def test_build_queue_rejects_zero_workers(tmp_path: Path) -> None:
             budget=BudgetModel(caps={}),
             matching_config=_MATCHING_CONFIG,
             pairing_config=_PAIRING_CONFIG,
-            ruleset=_RULESET,
-            copyright_config=_COPYRIGHT_CONFIG,
             seed=1,
             workers=0,
             sample_per_lang=10,
@@ -627,14 +590,13 @@ def test_build_queue_drives_run_match_and_summarizes(
         assert (prepared_dir / "manifest.json").exists()
         writer = factory(tmp_path / "ignored.csv")
         with writer as active:
-            active.write(_marc(control_id="id-1"), _match(0.95), _ASSESSMENT, _cce())
-            active.write(_marc(control_id="id-2"), _match(0.3), _ASSESSMENT, _cce("uuid-1"))
+            active.write(_marc(control_id="id-1"), _match(0.95), _cce())
+            active.write(_marc(control_id="id-2"), _match(0.3), _cce("uuid-1"))
         return RunReport(
             records_processed=2,
             records_written=2,
             records_enqueued=2,
             duration_seconds=0.1,
-            by_status={},
             interrupted=False,
         )
 
@@ -649,8 +611,6 @@ def test_build_queue_drives_run_match_and_summarizes(
         budget=BudgetModel(caps={("eng", "ge90"): 5, ("eng", "below"): 5}),
         matching_config=_MATCHING_CONFIG,
         pairing_config=_PAIRING_CONFIG,
-        ruleset=_RULESET,
-        copyright_config=_COPYRIGHT_CONFIG,
         seed=42,
         workers=2,
         sample_per_lang=10,
@@ -688,7 +648,6 @@ def test_build_queue_threads_log_file_to_run_match(
             records_written=0,
             records_enqueued=1,
             duration_seconds=0.0,
-            by_status={},
             interrupted=False,
         )
 
@@ -702,8 +661,6 @@ def test_build_queue_threads_log_file_to_run_match(
         budget=BudgetModel(caps={("eng", "ge90"): 1}),
         matching_config=_MATCHING_CONFIG,
         pairing_config=_PAIRING_CONFIG,
-        ruleset=_RULESET,
-        copyright_config=_COPYRIGHT_CONFIG,
         seed=1,
         workers=1,
         sample_per_lang=10,
@@ -779,9 +736,7 @@ def test_writer_injects_vault_pairs_outside_per_stratum_caps(tmp_path: Path) -> 
     with StratifyingResultWriter(
         db_path=db_path, budget=budget, seed=1, vault_pairs=resolved
     ) as writer:
-        writer.write(
-            _marc(control_id="not-in-vault"), _match(0.95), _ASSESSMENT, _cce("uuid-other")
-        )
+        writer.write(_marc(control_id="not-in-vault"), _match(0.95), _cce("uuid-other"))
 
     with ReviewDb.connect(db_path) as db:
         progress = db.progress()
@@ -852,7 +807,6 @@ def test_writer_vault_matcher_route_preapplies_field_annotations(tmp_path: Path)
         writer.write(
             _marc(control_id="ctrl-known"),
             _match(0.95),
-            _ASSESSMENT,
             _cce("uuid-known"),
         )
     with ReviewDb.connect(db_path) as db:
@@ -906,7 +860,6 @@ def test_build_queue_carries_vault_pair_through_rebuild(
             records_written=len(chunk),
             records_enqueued=len(chunk),
             duration_seconds=0.0,
-            by_status={},
             interrupted=False,
         )
 
@@ -921,8 +874,6 @@ def test_build_queue_carries_vault_pair_through_rebuild(
         budget=BudgetModel(caps={("eng", "ge90"): 5, ("eng", "below"): 5}),
         matching_config=_MATCHING_CONFIG,
         pairing_config=_PAIRING_CONFIG,
-        ruleset=_RULESET,
-        copyright_config=_COPYRIGHT_CONFIG,
         seed=42,
         workers=1,
         sample_per_lang=10,
@@ -988,7 +939,6 @@ def test_build_queue_excludes_vault_marcs_from_sample(
             records_written=0,
             records_enqueued=len(chunk),
             duration_seconds=0.0,
-            by_status={},
             interrupted=False,
         )
 
@@ -1002,8 +952,6 @@ def test_build_queue_excludes_vault_marcs_from_sample(
         budget=BudgetModel(caps={("eng", "ge90"): 5}),
         matching_config=_MATCHING_CONFIG,
         pairing_config=_PAIRING_CONFIG,
-        ruleset=_RULESET,
-        copyright_config=_COPYRIGHT_CONFIG,
         seed=1,
         workers=1,
         sample_per_lang=10,
@@ -1019,9 +967,6 @@ class _NullCceLookup:
 
     def get_registration(self, _uuid: str) -> object:
         return None
-
-    def coverage(self) -> Coverage:
-        return LEGACY_COVERAGE
 
 
 def test_build_queue_reports_vault_entries_missing_from_pool(
@@ -1051,7 +996,6 @@ def test_build_queue_reports_vault_entries_missing_from_pool(
             records_written=0,
             records_enqueued=1,
             duration_seconds=0.0,
-            by_status={},
             interrupted=False,
         )
 
@@ -1065,8 +1009,6 @@ def test_build_queue_reports_vault_entries_missing_from_pool(
         budget=BudgetModel(caps={("eng", "ge90"): 1}),
         matching_config=_MATCHING_CONFIG,
         pairing_config=_PAIRING_CONFIG,
-        ruleset=_RULESET,
-        copyright_config=_COPYRIGHT_CONFIG,
         seed=1,
         workers=1,
         sample_per_lang=10,
@@ -1107,7 +1049,6 @@ def test_build_queue_reports_vault_entry_missing_from_index(
             records_written=0,
             records_enqueued=0,
             duration_seconds=0.0,
-            by_status={},
             interrupted=False,
         )
 
@@ -1121,8 +1062,6 @@ def test_build_queue_reports_vault_entry_missing_from_index(
         budget=BudgetModel(caps={("eng", "ge90"): 1}),
         matching_config=_MATCHING_CONFIG,
         pairing_config=_PAIRING_CONFIG,
-        ruleset=_RULESET,
-        copyright_config=_COPYRIGHT_CONFIG,
         seed=1,
         workers=1,
         sample_per_lang=10,
@@ -1170,7 +1109,6 @@ def test_build_queue_cleans_up_prepared_dir(tmp_path: Path, monkeypatch: MonkeyP
             records_written=0,
             records_enqueued=1,
             duration_seconds=0.0,
-            by_status={},
             interrupted=False,
         )
 
@@ -1183,8 +1121,6 @@ def test_build_queue_cleans_up_prepared_dir(tmp_path: Path, monkeypatch: MonkeyP
         budget=BudgetModel(caps={("eng", "ge90"): 1}),
         matching_config=_MATCHING_CONFIG,
         pairing_config=_PAIRING_CONFIG,
-        ruleset=_RULESET,
-        copyright_config=_COPYRIGHT_CONFIG,
         seed=1,
         workers=1,
         sample_per_lang=10,

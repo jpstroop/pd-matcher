@@ -7,11 +7,8 @@ from pathlib import Path
 
 from _pytest.capture import CaptureFixture
 
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
-from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.logging_config import configure_logging
 from pd_matcher.match.idf import IdfTable
@@ -41,10 +38,6 @@ def _make_marc() -> MarcRecord:
     )
 
 
-def _drain_until(items: list[bytes], n: int) -> list[bytes]:
-    return items[:n]
-
-
 def _build_input_get(blobs: list[bytes | None]) -> Callable[[], bytes | None]:
     """Wrap a static list of pre-encoded batches as a queue.get-style callable."""
     iterator = iter(blobs)
@@ -68,10 +61,7 @@ def test_worker_loop_processes_one_batch_and_stops_on_poison_pill(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
-    coverage: Coverage,
 ) -> None:
     outputs: list[bytes] = []
     stats: list[bytes] = []
@@ -86,9 +76,6 @@ def test_worker_loop_processes_one_batch_and_stops_on_poison_pill(
             idf=tiny_idf,
             calibrator=None,
             pairings=compiled_pairings,
-            ruleset=ruleset,
-            assessment_config=copyright_config,
-            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=outputs.append,
             stats_put=stats.append,
@@ -111,10 +98,7 @@ def test_worker_loop_stops_when_shutdown_before_processing(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
-    coverage: Coverage,
 ) -> None:
     outputs: list[bytes] = []
     stats: list[bytes] = []
@@ -125,9 +109,6 @@ def test_worker_loop_stops_when_shutdown_before_processing(
             idf=tiny_idf,
             calibrator=None,
             pairings=compiled_pairings,
-            ruleset=ruleset,
-            assessment_config=copyright_config,
-            coverage=coverage,
             input_get=_build_input_get([encode_batch((_make_marc(),))]),
             output_put=outputs.append,
             stats_put=stats.append,
@@ -141,17 +122,12 @@ def test_worker_loop_stops_between_records_when_shutdown_fires(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
-    coverage: Coverage,
 ) -> None:
     """A multi-record batch is aborted mid-batch when ``is_shutdown`` flips True."""
     outputs: list[bytes] = []
     stats: list[bytes] = []
     batch = encode_batch((_make_marc(), _make_marc(), _make_marc()))
-    # is_shutdown returns False once (to enter loop, get blob), then True for
-    # every record-level check that follows.
     flag = cycle([False, True])
 
     def is_shutdown() -> bool:
@@ -164,9 +140,6 @@ def test_worker_loop_stops_between_records_when_shutdown_fires(
             idf=tiny_idf,
             calibrator=None,
             pairings=compiled_pairings,
-            ruleset=ruleset,
-            assessment_config=copyright_config,
-            coverage=coverage,
             input_get=_build_input_get([batch, None]),
             output_put=outputs.append,
             stats_put=stats.append,
@@ -179,8 +152,6 @@ def test_worker_main_opens_lookup_and_runs_loop(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     pairing_config: PairingConfig,
 ) -> None:
     outputs: list[bytes] = []
@@ -189,8 +160,6 @@ def test_worker_main_opens_lookup_and_runs_loop(
     processed = worker_main(
         index_path=tiny_index_path,
         matching_config=matching_config,
-        copyright_config=copyright_config,
-        ruleset=ruleset,
         pairing_config=pairing_config,
         idf=tiny_idf,
         calibrator=None,
@@ -206,8 +175,6 @@ def test_worker_main_with_unmatchable_record_emits_blank_match(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     pairing_config: PairingConfig,
 ) -> None:
     outputs: list[bytes] = []
@@ -217,8 +184,6 @@ def test_worker_main_with_unmatchable_record_emits_blank_match(
     processed = worker_main(
         index_path=tiny_index_path,
         matching_config=matching_config,
-        copyright_config=copyright_config,
-        ruleset=ruleset,
         pairing_config=pairing_config,
         idf=tiny_idf,
         calibrator=None,
@@ -250,10 +215,7 @@ def test_worker_loop_silent_at_verbosity_zero(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
-    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
     """Default verbosity emits no per-worker lines."""
@@ -266,9 +228,6 @@ def test_worker_loop_silent_at_verbosity_zero(
             idf=tiny_idf,
             calibrator=None,
             pairings=compiled_pairings,
-            ruleset=ruleset,
-            assessment_config=copyright_config,
-            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=_sink(),
             stats_put=_sink(),
@@ -285,10 +244,7 @@ def test_worker_loop_logs_start_and_finish_with_id_and_rate_at_v(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
-    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
     """``-v`` logs worker id + rate on start and finish; no per-record hits."""
@@ -302,9 +258,6 @@ def test_worker_loop_logs_start_and_finish_with_id_and_rate_at_v(
             idf=tiny_idf,
             calibrator=None,
             pairings=compiled_pairings,
-            ruleset=ruleset,
-            assessment_config=copyright_config,
-            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=_sink(),
             stats_put=_sink(),
@@ -325,13 +278,10 @@ def test_worker_loop_logs_per_record_hits_at_vv(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
-    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
-    """``-vv`` logs one hit line per record, carrying marc id and status."""
+    """``-vv`` logs one hit line per record, carrying marc id."""
     configure_logging(level="INFO", json_output=False)
     blobs: list[bytes | None] = [encode_batch((_make_marc(),)), None]
     with NyplIndexLookup(tiny_index_path) as lookup:
@@ -341,9 +291,6 @@ def test_worker_loop_logs_per_record_hits_at_vv(
             idf=tiny_idf,
             calibrator=None,
             pairings=compiled_pairings,
-            ruleset=ruleset,
-            assessment_config=copyright_config,
-            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=_sink(),
             stats_put=_sink(),
@@ -354,17 +301,13 @@ def test_worker_loop_logs_per_record_hits_at_vv(
     err = capsys.readouterr().err
     assert "worker.hit" in err
     assert "marc=m-1" in err
-    assert "status=" in err
 
 
 def test_worker_loop_logs_progress_every_n_records(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
-    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
     """A worker crossing the every-N threshold emits an interim progress line."""
@@ -378,9 +321,6 @@ def test_worker_loop_logs_progress_every_n_records(
             idf=tiny_idf,
             calibrator=None,
             pairings=compiled_pairings,
-            ruleset=ruleset,
-            assessment_config=copyright_config,
-            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=_sink(),
             stats_put=_sink(),
@@ -396,10 +336,7 @@ def test_worker_loop_finish_logged_when_shutdown_mid_batch_at_v(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
-    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
     """The mid-batch shutdown exit still logs a finish line under ``-v``."""
@@ -413,9 +350,6 @@ def test_worker_loop_finish_logged_when_shutdown_mid_batch_at_v(
             idf=tiny_idf,
             calibrator=None,
             pairings=compiled_pairings,
-            ruleset=ruleset,
-            assessment_config=copyright_config,
-            coverage=coverage,
             input_get=_build_input_get([batch, None]),
             output_put=_sink(),
             stats_put=_sink(),
@@ -432,10 +366,7 @@ def test_worker_loop_hit_line_marks_no_match_at_vv(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     compiled_pairings: CompiledPairings,
-    coverage: Coverage,
     capsys: CaptureFixture[str],
 ) -> None:
     """An unmatchable record logs ``reg=none`` and ``score=0.0`` under ``-vv``."""
@@ -451,9 +382,6 @@ def test_worker_loop_hit_line_marks_no_match_at_vv(
             idf=tiny_idf,
             calibrator=None,
             pairings=compiled_pairings,
-            ruleset=ruleset,
-            assessment_config=copyright_config,
-            coverage=coverage,
             input_get=_build_input_get(blobs),
             output_put=_sink(),
             stats_put=_sink(),
@@ -470,8 +398,6 @@ def test_worker_main_threads_worker_id_and_verbosity(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     pairing_config: PairingConfig,
     capsys: CaptureFixture[str],
 ) -> None:
@@ -481,8 +407,6 @@ def test_worker_main_threads_worker_id_and_verbosity(
     processed = worker_main(
         index_path=tiny_index_path,
         matching_config=matching_config,
-        copyright_config=copyright_config,
-        ruleset=ruleset,
         pairing_config=pairing_config,
         idf=tiny_idf,
         calibrator=None,
@@ -495,30 +419,3 @@ def test_worker_main_threads_worker_id_and_verbosity(
     )
     assert processed == 1
     assert "worker=9" in capsys.readouterr().err
-
-
-def test_worker_main_uses_default_year_when_assessment_config_unpinned(
-    tiny_index_path: Path,
-    tiny_idf: IdfTable,
-    matching_config: MatchingConfig,
-    ruleset: CopyrightRuleSet,
-    pairing_config: PairingConfig,
-) -> None:
-    """When ``copyright_config.as_of_year is None`` the worker uses the current year."""
-    outputs: list[bytes] = []
-    stats: list[bytes] = []
-    blobs: list[bytes | None] = [encode_batch((_make_marc(),)), None]
-    processed = worker_main(
-        index_path=tiny_index_path,
-        matching_config=matching_config,
-        copyright_config=CopyrightAssessmentConfig(as_of_year=None),
-        ruleset=ruleset,
-        pairing_config=pairing_config,
-        idf=tiny_idf,
-        calibrator=None,
-        input_get=_build_input_get(blobs),
-        output_put=outputs.append,
-        stats_put=stats.append,
-        is_shutdown=lambda: False,
-    )
-    assert processed == 1

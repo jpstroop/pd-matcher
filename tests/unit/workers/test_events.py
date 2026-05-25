@@ -1,6 +1,5 @@
 """Tests for :mod:`pd_matcher.workers.events`."""
 
-from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.workers.events import ProducerHeartbeat
 from pd_matcher.workers.events import RecordProcessed
 from pd_matcher.workers.events import ShutdownEvent
@@ -11,7 +10,6 @@ from pd_matcher.workers.events import encode_stats_event
 
 def test_record_processed_roundtrip() -> None:
     event = RecordProcessed(
-        status=CopyrightStatus.PD_REGISTERED_NOT_RENEWED,
         confidence=0.84,
         candidates_considered=5,
     )
@@ -40,13 +38,7 @@ def test_shutdown_event_roundtrip() -> None:
 def test_events_are_disambiguated_by_tag() -> None:
     """All four event types decode through the same tagged union without collision."""
     blobs = [
-        encode_stats_event(
-            RecordProcessed(
-                status=CopyrightStatus.PD_BY_AGE_PRE_95_YEARS,
-                confidence=0.99,
-                candidates_considered=1,
-            )
-        ),
+        encode_stats_event(RecordProcessed(confidence=0.99, candidates_considered=1)),
         encode_stats_event(ProducerHeartbeat(records_enqueued=1)),
         encode_stats_event(WriterHeartbeat(records_written=1)),
         encode_stats_event(ShutdownEvent(reason="sigint")),

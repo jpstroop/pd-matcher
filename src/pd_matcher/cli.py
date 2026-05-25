@@ -6,12 +6,11 @@ reported on stderr with these exit codes:
 * ``0`` — success
 * ``1`` — runtime error (missing file, bad config, IO failure)
 * ``2`` — argument error (typer-default for parse failures, plus the
-  ``--as-of`` year validator and the not-yet-implemented stubs)
+  validators and the not-yet-implemented stubs)
 * ``130`` — interrupted by SIGINT
 """
 
 from datetime import UTC
-from datetime import date
 from datetime import datetime
 from importlib.resources import as_file
 from importlib.resources import files
@@ -30,10 +29,8 @@ from typer import Typer
 from typer import echo
 
 from pd_matcher.config.loader import ConfigError
-from pd_matcher.config.loader import load_copyright_rules
 from pd_matcher.config.loader import load_matching_config
 from pd_matcher.config.loader import load_pairing_config
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.eval.ground_truth import EvalReport
@@ -58,9 +55,6 @@ _INTERRUPTED_EXIT_CODE: int = 130
 
 _IDF_CACHE_NAME: str = "idf.msgpack"
 _CALIBRATOR_NAME: str = "calibrator.msgpack"
-
-_AS_OF_MIN_YEAR: int = 1923
-_AS_OF_MAX_YEAR: int = 2100
 
 _YEAR_WINDOW_MIN: int = 0
 _YEAR_WINDOW_MAX: int = 100
@@ -111,7 +105,7 @@ def _resolve_log_file(command: str, override: Path | None) -> Path:
 
 
 app: Typer = Typer(
-    help="MARC ↔ NYPL public-domain matcher.",
+    help="MARC ↔ NYPL CCE linkage matcher.",
     no_args_is_help=True,
 )
 index_app: Typer = Typer(
@@ -173,30 +167,6 @@ def _fail(message: str, *, code: int = _RUNTIME_ERROR_EXIT_CODE) -> Exit:
     """Emit ``message`` to stderr and return a typer :class:`Exit` of ``code``."""
     echo(message, err=True)
     return Exit(code=code)
-
-
-def _parse_as_of(value: str | None) -> int:
-    """Parse an ``--as-of`` flag value or default to the current year.
-
-    The data this CLI consumes (CCE registrations, MARC publication info,
-    renewal years) is year-granular, so the flag accepts a four-digit
-    year. ``1923`` is the lower bound of the CCE corpus; ``2100`` is a
-    typo-catcher upper bound. Values outside the range, or non-integer
-    strings, raise :class:`typer.BadParameter` with a clear message.
-    """
-    if value is None:
-        return date.today().year
-    try:
-        year = int(value, 10)
-    except ValueError as exc:
-        raise BadParameter(
-            f"--as-of: expected a four-digit year YYYY (got {value!r})",
-        ) from exc
-    if year < _AS_OF_MIN_YEAR or year > _AS_OF_MAX_YEAR:
-        raise BadParameter(
-            f"--as-of: year must be between {_AS_OF_MIN_YEAR} and {_AS_OF_MAX_YEAR} (got {year})",
-        )
-    return year
 
 
 def _validate_year_window(value: int | None) -> int | None:
@@ -261,18 +231,6 @@ def _load_default_pairing_config() -> PairingConfig:
         return load_pairing_config(path)
 
 
-def _load_default_ruleset_path() -> Path:
-    """Materialize a real filesystem path for the shipped copyright rules.
-
-    ``as_file`` keeps the temporary copy alive until the context exits;
-    the callable returns the path eagerly because the loader reads the
-    file immediately.
-    """
-    resource = files("pd_matcher.config.defaults") / "copyright_rules.yaml"
-    with as_file(resource) as path:
-        return Path(path)
-
-
 def _format_build_report(report: BuildReport, out_path: Path) -> str:
     """Render a :class:`BuildReport` as a small human-readable block."""
     skipped = "yes" if report.skipped else "no"
@@ -308,8 +266,7 @@ def _format_run_report(report: RunReport, out_path: Path) -> str:
         f"  records written: {report.records_written}\n"
         f"  records enqueued: {report.records_enqueued}\n"
         f"  duration: {report.duration_seconds:.2f}s\n"
-        f"  interrupted: {'yes' if report.interrupted else 'no'}\n"
-        f"  by status: {report.by_status}"
+        f"  interrupted: {'yes' if report.interrupted else 'no'}"
     )
 
 
@@ -499,22 +456,12 @@ def match(
         float | None,
         Option("--min-score", help="Override the matching config's min_combined_score."),
     ] = None,
-    as_of: Annotated[
-        str | None,
-        Option(
-            "--as-of",
-            help=(
-                "Reference year (YYYY) for the moving-wall calculation."
-                " Defaults to the current year."
-            ),
-        ),
-    ] = None,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
     ] = None,
 ) -> None:
-    """Match MARC records against the NYPL index and write a CSV report.
+    """Match MARC records against the NYPL index and write a CSV linkage report.
 
     Examples:
         pd-matcher match \\
@@ -524,7 +471,6 @@ def match(
             --workers 4
     """
     resolved_log_file = _enable_log_file("match", log_file)
-    as_of_year = _parse_as_of(as_of)
     if (marc is None) == (prepared is None):
         raise _fail(
             "exactly one of --marc or --prepared is required",
@@ -562,15 +508,9 @@ def match(
             scorer=matching_config.scorer,
         )
     try:
-        ruleset_path = _load_default_ruleset_path()
-        ruleset = load_copyright_rules(ruleset_path)
-    except ConfigError as exc:
-        raise _fail(f"failed to load copyright rules: {exc}") from exc
-    try:
         pairing_config = _load_default_pairing_config()
     except ConfigError as exc:
         raise _fail(f"failed to load pairing defaults: {exc}") from exc
-    copyright_config = CopyrightAssessmentConfig(as_of_year=as_of_year)
     idf_cache_path = index.parent / _IDF_CACHE_NAME
     try:
         idf = load_or_build_idf(idf_cache_path, lambda: NyplIndexLookup(index))
@@ -585,8 +525,6 @@ def match(
             index_path=index,
             output_path=out,
             matching_config=matching_config,
-            copyright_config=copyright_config,
-            ruleset=ruleset,
             pairing_config=pairing_config,
             idf=idf,
             calibrator=calibrator,
@@ -615,16 +553,6 @@ def eval_(
     report: Annotated[
         Path | None,
         Option("--report", help="Optional path for a JSON copy of the eval report."),
-    ] = None,
-    as_of: Annotated[
-        str | None,
-        Option(
-            "--as-of",
-            help=(
-                "Reference year (YYYY) for the moving-wall calculation."
-                " Defaults to the current year."
-            ),
-        ),
     ] = None,
     limit: Annotated[
         int | None,
@@ -669,7 +597,7 @@ def eval_(
         Option("--log-file", help="Override the auto-generated log file path."),
     ] = None,
 ) -> None:
-    """Evaluate the matcher against the ground-truth pairs.
+    """Evaluate the matcher's linkage against the ground-truth pairs.
 
     Examples:
         pd-matcher eval \\
@@ -679,7 +607,6 @@ def eval_(
             --workers 8
     """
     _enable_log_file("eval", log_file)
-    as_of_year = _parse_as_of(as_of)
     year_window = _validate_year_window(year_window)
     sample = _validate_sample(sample)
     workers = _validate_eval_workers(workers)
@@ -712,14 +639,11 @@ def eval_(
         pairing_config = _load_default_pairing_config()
     except ConfigError as exc:
         raise _fail(f"failed to load pairing defaults: {exc}") from exc
-    copyright_config = CopyrightAssessmentConfig(as_of_year=as_of_year)
     try:
         eval_report = run_eval(
             ground_truth_path=ground_truth,
             index_path=index,
-            as_of_year=as_of_year,
             matching_config=matching_config,
-            copyright_config=copyright_config,
             pairing_config=pairing_config,
             limit=limit,
             sample=sample,

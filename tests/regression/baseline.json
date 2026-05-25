@@ -3,7 +3,6 @@
     "sample": 1000,
     "seed": 42,
     "year_window": 0,
-    "as_of_year": 2026,
     "ground_truth": "combined_ground_truth.csv"
   },
   "metrics": {
@@ -18,5 +17,5 @@
     "rows_agreeing": 878
   },
   "tolerance": 0.02,
-  "notes": "Thin-record eval (records reconstructed from GT CSV columns). Gate is precision/recall only; per-status confusion is not validated because GT status labels predate the current CopyrightStatus enum. Refreshed 2026-05-21 after #22 (inverted-index candidate retrieval) landed: matching now scores only token-sharing candidates, which raised precision and recall. Generated: sample=1000 seed=42 year_window=0 as_of=2026."
+  "notes": "Thin-record eval (records reconstructed from GT CSV columns). Gate is precision/recall only on linkage agreement (match_source_id). Refreshed 2026-05-21 after #22 (inverted-index candidate retrieval) landed. Generated: sample=1000 seed=42 year_window=0."
 }

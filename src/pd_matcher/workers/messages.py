@@ -17,7 +17,6 @@ from msgspec import Struct
 from msgspec.msgpack import Decoder
 from msgspec.msgpack import Encoder
 
-from pd_matcher.copyright.assessment import CopyrightAssessment
 from pd_matcher.match.result import MatchResult
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
@@ -34,7 +33,6 @@ class WorkerOutput(Struct, frozen=True, forbid_unknown_fields=True):
 
     marc: MarcRecord
     match: MatchResult
-    assessment: CopyrightAssessment
     matched_nypl: IndexedNyplRegRecord | None
 
 

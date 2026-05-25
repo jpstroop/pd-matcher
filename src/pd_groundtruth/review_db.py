@@ -72,7 +72,6 @@ CREATE TABLE IF NOT EXISTS review_pair (
     cce_notice_date TEXT,
     cce_lccn TEXT,
     cce_prev_regnums TEXT,
-    cce_predicted_status TEXT,
     cce_renewal_id TEXT,
     cce_renewal_oreg TEXT,
     cce_renewal_rdat TEXT,
@@ -214,7 +213,6 @@ class PairInsert(Struct, frozen=True, forbid_unknown_fields=True):
     cce_notice_date: str | None = None
     cce_lccn: str | None = None
     cce_prev_regnums: str | None = None
-    cce_predicted_status: str | None = None
     cce_renewal_id: str | None = None
     cce_renewal_oreg: str | None = None
     cce_renewal_rdat: str | None = None
@@ -263,7 +261,6 @@ class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
     cce_notice_date: str | None = None
     cce_lccn: str | None = None
     cce_prev_regnums: str | None = None
-    cce_predicted_status: str | None = None
     cce_renewal_id: str | None = None
     cce_renewal_oreg: str | None = None
     cce_renewal_rdat: str | None = None
@@ -330,7 +327,6 @@ _ADDITIVE_CCE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("cce_notice_date", "TEXT"),
     ("cce_lccn", "TEXT"),
     ("cce_prev_regnums", "TEXT"),
-    ("cce_predicted_status", "TEXT"),
     ("cce_renewal_id", "TEXT"),
     ("cce_renewal_oreg", "TEXT"),
     ("cce_renewal_rdat", "TEXT"),
@@ -380,7 +376,6 @@ def _row_to_pair(row: Row) -> ReviewPairRow:
         cce_notice_date=row["cce_notice_date"],
         cce_lccn=row["cce_lccn"],
         cce_prev_regnums=row["cce_prev_regnums"],
-        cce_predicted_status=row["cce_predicted_status"],
         cce_renewal_id=row["cce_renewal_id"],
         cce_renewal_oreg=row["cce_renewal_oreg"],
         cce_renewal_rdat=row["cce_renewal_rdat"],
@@ -497,7 +492,6 @@ class ReviewDb:
                 cce_author_is_claimant, cce_copies, cce_aff_date, cce_desc,
                 cce_notes, cce_new_matter_claimed, cce_copy_date, cce_notice_date,
                 cce_lccn, cce_prev_regnums,
-                cce_predicted_status,
                 cce_renewal_id, cce_renewal_oreg, cce_renewal_rdat,
                 cce_renewal_author, cce_renewal_title, cce_renewal_claimants,
                 cce_renewal_new_matter,
@@ -507,7 +501,6 @@ class ReviewDb:
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?,
-                ?,
                 ?, ?, ?,
                 ?, ?, ?,
                 ?,
@@ -549,7 +542,6 @@ class ReviewDb:
                 pair.cce_notice_date,
                 pair.cce_lccn,
                 pair.cce_prev_regnums,
-                pair.cce_predicted_status,
                 pair.cce_renewal_id,
                 pair.cce_renewal_oreg,
                 pair.cce_renewal_rdat,

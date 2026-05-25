@@ -37,7 +37,6 @@ class BaselineParams(Struct, frozen=True, forbid_unknown_fields=True):
     sample: int
     seed: int
     year_window: int
-    as_of_year: int
     ground_truth: str
 
 

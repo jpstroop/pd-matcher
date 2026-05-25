@@ -13,7 +13,6 @@ joined so the last :class:`WriterHeartbeat` is guaranteed to be in the
 queue ahead of it.
 """
 
-from collections import Counter
 from collections.abc import Callable
 from queue import Empty
 from threading import Thread
@@ -25,7 +24,6 @@ from typing import Self
 from msgspec import Struct
 from structlog import get_logger
 
-from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.progress import ProgressSnapshot
 from pd_matcher.workers.events import ProducerHeartbeat
 from pd_matcher.workers.events import RecordProcessed
@@ -59,7 +57,6 @@ class RunningTotals:
     """Mutable per-thread aggregate of every event the reporter has seen."""
 
     __slots__ = (
-        "by_status",
         "records_enqueued",
         "records_processed",
         "records_written",
@@ -72,7 +69,6 @@ class RunningTotals:
         self.records_processed: int = 0
         self.records_written: int = 0
         self.records_enqueued: int = 0
-        self.by_status: Counter[CopyrightStatus] = Counter()
         self.started_at: float = started_at
         self.stop_reason: str = "running"
 
@@ -85,7 +81,6 @@ class RunningTotals:
         """
         if isinstance(event, RecordProcessed):
             self.records_processed += 1
-            self.by_status[event.status] += 1
             return False
         if isinstance(event, ProducerHeartbeat):
             self.records_enqueued = event.records_enqueued
@@ -119,7 +114,6 @@ class RunningTotals:
             records_processed=self.records_processed,
             records_written=self.records_written,
             records_enqueued=self.records_enqueued,
-            by_status={status.value: count for status, count in self.by_status.items()},
             duration_seconds=monotonic() - self.started_at,
             stop_reason=self.stop_reason,
         )
@@ -136,17 +130,13 @@ class TotalsSnapshot(Struct, frozen=True, forbid_unknown_fields=True):
     records_processed: int
     records_written: int
     records_enqueued: int
-    by_status: dict[str, int]
     duration_seconds: float
     stop_reason: str
 
 
 def _format_detail(totals: RunningTotals) -> str:
     """Render the domain-specific suffix appended to every progress line."""
-    by_status = {status.value: count for status, count in totals.by_status.items()}
-    return (
-        f"written={totals.records_written} enqueued={totals.records_enqueued} by_status={by_status}"
-    )
+    return f"written={totals.records_written} enqueued={totals.records_enqueued}"
 
 
 def _format_progress_line(

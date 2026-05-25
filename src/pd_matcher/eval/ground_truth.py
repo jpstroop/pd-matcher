@@ -1,11 +1,12 @@
-"""Lightweight precision/recall + confusion-matrix evaluator.
+"""Lightweight precision/recall evaluator for linkage accuracy.
 
 Drives a curated ground-truth CSV (the shape of
-``data/combined_ground_truth.csv``) through the full Phase 4 matcher and
-Phase 5 rule engine and returns an :class:`EvalReport` summarising how
-the predictions compare against the recorded labels. Phase 7's job is to
-make this runnable today; Phase 8 will layer baseline JSON, regression
-gates, and per-status breakdowns on top.
+``data/combined_ground_truth.csv``) through the matcher and returns an
+:class:`EvalReport` summarising how the predicted linkage compares
+against the recorded labels. The matcher's job is now linkage between
+MARC and CCE; this driver measures only "did the matcher pick the same
+CCE record that the human labeler did", scored as precision and recall
+on ``match_source_id``.
 
 The driver supports two execution modes:
 
@@ -23,8 +24,6 @@ uses spawn so behaviour is identical across macOS and Linux, and so we
 never depend on POSIX fork semantics with LMDB handles or stemmer state.
 """
 
-from collections import Counter
-from collections import defaultdict
 from collections.abc import Iterable
 from collections.abc import Iterator
 from csv import DictReader
@@ -35,14 +34,8 @@ from time import perf_counter
 
 from msgspec import Struct
 
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
-from pd_matcher.copyright import default_ruleset
-from pd_matcher.copyright.coverage import Coverage
-from pd_matcher.copyright.facts import build_facts
-from pd_matcher.copyright.rules import assess
-from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
 from pd_matcher.match.idf import IdfTable
@@ -50,8 +43,6 @@ from pd_matcher.match.idf import build_idf_table
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import match_record
 from pd_matcher.models import MarcRecord
-
-UNRECOGNIZED_GT_STATUS: str = "UNRECOGNIZED_GT_STATUS"
 
 _CHUNK_DIVISOR: int = 8
 
@@ -66,7 +57,6 @@ class EvalReport(Struct, frozen=True, forbid_unknown_fields=True):
     precision: float
     recall: float
     f1: float
-    status_confusion: dict[str, dict[str, int]]
     elapsed_seconds: float
 
 
@@ -79,28 +69,22 @@ class _RowOutcome(Struct, frozen=True, forbid_unknown_fields=True):
     has_predicted_match: bool
     has_ground_truth_match: bool
     agrees: bool
-    predicted_status: str
-    ground_truth_status: str
 
 
 class _WorkerState:
     """Per-process resources opened once in the pool initializer.
 
-    Holds the LMDB lookup, IDF table, combiner, ruleset, and configs so
-    each worker only pays the open/build cost a single time, then reuses
+    Holds the LMDB lookup, IDF table, combiner, and configs so each
+    worker only pays the open/build cost a single time, then reuses
     them across every row it processes.
     """
 
     __slots__ = (
-        "as_of_year",
         "combiner",
-        "copyright_config",
-        "coverage",
         "idf",
         "lookup",
         "matching_config",
         "pairings",
-        "ruleset",
     )
 
     def __init__(
@@ -108,19 +92,13 @@ class _WorkerState:
         *,
         index_path: Path,
         matching_config: MatchingConfig,
-        copyright_config: CopyrightAssessmentConfig,
         pairing_config: PairingConfig,
-        as_of_year: int,
     ) -> None:
         self.lookup = NyplIndexLookup(index_path)
         self.idf: IdfTable = build_idf_table(self.lookup)
         self.combiner = WeightedMeanCombiner(config=matching_config)
-        self.ruleset = default_ruleset()
         self.matching_config = matching_config
-        self.copyright_config = copyright_config
         self.pairings = compile_pairings(pairing_config)
-        self.as_of_year = as_of_year
-        self.coverage: Coverage = self.lookup.coverage()
 
 
 _WORKER_STATE: _WorkerState | None = None
@@ -156,16 +134,6 @@ def _marc_from_row(row: dict[str, str]) -> MarcRecord:
         language_code=_maybe(row.get("marc_language_code", "")),
         country_code=_maybe(row.get("marc_country_code", "")),
     )
-
-
-def _classify_gt_status(label: str) -> str:
-    """Return the enum value or :data:`UNRECOGNIZED_GT_STATUS`."""
-    if not label:
-        return UNRECOGNIZED_GT_STATUS
-    try:
-        return CopyrightStatus(label).value
-    except ValueError:
-        return UNRECOGNIZED_GT_STATUS
 
 
 def _safe_division(numerator: int, denominator: int) -> float:
@@ -225,36 +193,22 @@ def _eval_one_row(
         combiner=state.combiner,
         pairings=state.pairings,
     )
-    matched_nypl = None
     predicted_id: str | None = None
     if match.best is not None:
-        matched_nypl = state.lookup.get_registration(match.best.nypl_uuid)
         predicted_id = match.best.nypl_uuid
-    facts = build_facts(marc, match, as_of_year=state.as_of_year, matched_nypl=matched_nypl)
-    assessment = assess(
-        facts,
-        state.ruleset,
-        coverage=state.coverage,
-        enable_assumptions=state.copyright_config.enable_assumptions,
-    )
     gt_id = _maybe(row.get("match_source_id", ""))
-    gt_status = _classify_gt_status(row.get("copyright_status", ""))
     agrees = predicted_id is not None and gt_id is not None and predicted_id == gt_id
     return _RowOutcome(
         has_predicted_match=predicted_id is not None,
         has_ground_truth_match=gt_id is not None,
         agrees=agrees,
-        predicted_status=assessment.status.value,
-        ground_truth_status=gt_status,
     )
 
 
 def _pool_initializer(
     index_path: Path,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
     pairing_config: PairingConfig,
-    as_of_year: int,
 ) -> None:
     """Spawn-pool initializer: build the per-worker :class:`_WorkerState`.
 
@@ -267,9 +221,7 @@ def _pool_initializer(
     _WORKER_STATE = _WorkerState(
         index_path=index_path,
         matching_config=matching_config,
-        copyright_config=copyright_config,
         pairing_config=pairing_config,
-        as_of_year=as_of_year,
     )
 
 
@@ -286,18 +238,14 @@ def _iter_outcomes_sequential(
     *,
     index_path: Path,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
     pairing_config: PairingConfig,
-    as_of_year: int,
     limit: int | None,
 ) -> Iterator[_RowOutcome]:
     """Yield :class:`_RowOutcome` values by scoring every row in-process."""
     state = _WorkerState(
         index_path=index_path,
         matching_config=matching_config,
-        copyright_config=copyright_config,
         pairing_config=pairing_config,
-        as_of_year=as_of_year,
     )
     try:
         for index, row in enumerate(rows):
@@ -313,9 +261,7 @@ def _iter_outcomes_parallel(
     *,
     index_path: Path,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
     pairing_config: PairingConfig,
-    as_of_year: int,
     limit: int | None,
     workers: int,
 ) -> Iterator[_RowOutcome]:
@@ -325,7 +271,7 @@ def _iter_outcomes_parallel(
         return
     chunksize = max(1, len(target_rows) // (workers * _CHUNK_DIVISOR))
     ctx = get_context("spawn")
-    init_args = (index_path, matching_config, copyright_config, pairing_config, as_of_year)
+    init_args = (index_path, matching_config, pairing_config)
     with ctx.Pool(
         processes=workers,
         initializer=_pool_initializer,
@@ -344,7 +290,6 @@ def _aggregate(
     rows_with_predicted_match = 0
     rows_with_ground_truth_match = 0
     rows_agreeing = 0
-    confusion: dict[str, Counter[str]] = defaultdict(Counter)
     for outcome in outcomes:
         rows_evaluated += 1
         if outcome.has_predicted_match:
@@ -353,13 +298,9 @@ def _aggregate(
             rows_with_ground_truth_match += 1
         if outcome.agrees:
             rows_agreeing += 1
-        confusion[outcome.predicted_status][outcome.ground_truth_status] += 1
     precision = _safe_division(rows_agreeing, rows_with_predicted_match)
     recall = _safe_division(rows_agreeing, rows_with_ground_truth_match)
     f1 = _f1(precision, recall)
-    status_confusion: dict[str, dict[str, int]] = {
-        predicted: dict(counts) for predicted, counts in confusion.items()
-    }
     elapsed = perf_counter() - started
     return EvalReport(
         rows_evaluated=rows_evaluated,
@@ -369,7 +310,6 @@ def _aggregate(
         precision=precision,
         recall=recall,
         f1=f1,
-        status_confusion=status_confusion,
         elapsed_seconds=elapsed,
     )
 
@@ -378,9 +318,7 @@ def run_eval(
     *,
     ground_truth_path: Path,
     index_path: Path,
-    as_of_year: int,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
     pairing_config: PairingConfig,
     limit: int | None = None,
     sample: int | None = None,
@@ -393,10 +331,7 @@ def run_eval(
         ground_truth_path: CSV with the
             ``data/combined_ground_truth.csv`` schema.
         index_path: LMDB env produced by ``pd-matcher index build``.
-        as_of_year: Reference year for the moving wall and other
-            age-sensitive predicates.
         matching_config: Active :class:`MatchingConfig`.
-        copyright_config: Active :class:`CopyrightAssessmentConfig`.
         pairing_config: Active :class:`PairingConfig`; compiled once per
             worker into :class:`CompiledPairings`.
         limit: Optional maximum number of rows to evaluate. ``None``
@@ -423,9 +358,7 @@ def run_eval(
             rows,
             index_path=index_path,
             matching_config=matching_config,
-            copyright_config=copyright_config,
             pairing_config=pairing_config,
-            as_of_year=as_of_year,
             limit=limit,
         )
     else:
@@ -433,9 +366,7 @@ def run_eval(
             rows,
             index_path=index_path,
             matching_config=matching_config,
-            copyright_config=copyright_config,
             pairing_config=pairing_config,
-            as_of_year=as_of_year,
             limit=limit,
             workers=workers,
         )
@@ -443,7 +374,6 @@ def run_eval(
 
 
 __all__ = [
-    "UNRECOGNIZED_GT_STATUS",
     "EvalReport",
     "run_eval",
 ]

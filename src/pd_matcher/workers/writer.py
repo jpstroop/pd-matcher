@@ -10,6 +10,10 @@ The writer terminates when it dequeues the ``None`` poison pill placed
 on the output queue by the orchestrator after every worker has joined.
 A final :class:`WriterHeartbeat` is emitted before exit so the reporter
 always sees the canonical record count.
+
+The writer is currently tied to :class:`pd_matcher.output.csv_writer.ResultWriter`'s
+three-argument signature ``(marc, match, matched_nypl)`` — the linkage CSV.
+The groundtruth queue builder swaps in its own writer factory.
 """
 
 from collections.abc import Callable
@@ -64,7 +68,6 @@ def run_writer_loop(
         writer.write(
             payload.marc,
             payload.match,
-            payload.assessment,
             payload.matched_nypl,
         )
         written += 1

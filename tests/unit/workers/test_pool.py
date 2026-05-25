@@ -8,13 +8,8 @@ from pathlib import Path
 
 from pytest import raises
 
-from pd_matcher.config.loader import load_copyright_rules
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
-from pd_matcher.copyright.assessment import CopyrightAssessment
-from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import build_idf_table
@@ -36,14 +31,6 @@ from pd_matcher.workers.pool import _writer_entry
 from pd_matcher.workers.pool import run_match
 from pd_matcher.workers.producer import encode_batch
 
-_DEFAULTS = (
-    Path(__file__).resolve().parents[3]
-    / "src"
-    / "pd_matcher"
-    / "config"
-    / "defaults"
-    / "copyright_rules.yaml"
-)
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 
 
@@ -68,8 +55,6 @@ def test_worker_entry_runs_in_process_against_real_queues(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     pairing_config: PairingConfig,
 ) -> None:
     """``_worker_entry`` is reachable in-process via real spawn-context queues."""
@@ -84,8 +69,6 @@ def test_worker_entry_runs_in_process_against_real_queues(
     _worker_entry(
         index_path=tiny_index_path,
         matching_config=matching_config,
-        copyright_config=copyright_config,
-        ruleset=ruleset,
         pairing_config=pairing_config,
         idf=tiny_idf,
         calibrator=None,
@@ -115,12 +98,6 @@ def test_writer_entry_runs_in_process_against_real_queues(tmp_path: Path) -> Non
             alternates=(),
             candidates_considered=0,
         ),
-        assessment=CopyrightAssessment(
-            status=CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA,
-            matched_rule_name=None,
-            explanation="",
-            assumptions=(),
-        ),
         matched_nypl=None,
     )
     output_queue.put(encode_worker_output(payload))
@@ -141,19 +118,15 @@ def test_run_match_rejects_zero_workers(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
     pairing_config: PairingConfig,
     tmp_path: Path,
 ) -> None:
-    ruleset = load_copyright_rules(_DEFAULTS)
     with raises(ValueError, match="workers must be >= 1"):
         run_match(
             marc_path=_FIXTURES / "tiny.marcxml",
             index_path=tiny_index_path,
             output_path=tmp_path / "results.csv",
             matching_config=matching_config,
-            copyright_config=copyright_config,
-            ruleset=ruleset,
             pairing_config=pairing_config,
             idf=tiny_idf,
             workers=0,
@@ -189,16 +162,12 @@ def test_run_match_returns_run_report(
         min_combined_score=30.0,
         scorer="weighted_mean",
     )
-    copyright_config = CopyrightAssessmentConfig(as_of_year=2026)
-    ruleset = load_copyright_rules(_DEFAULTS)
     output_path = tmp_path / "results.csv"
     report = run_match(
         marc_path=_FIXTURES / "tiny.marcxml",
         index_path=index_path,
         output_path=output_path,
         matching_config=config,
-        copyright_config=copyright_config,
-        ruleset=ruleset,
         pairing_config=pairing_config,
         idf=idf,
         workers=1,
@@ -261,8 +230,6 @@ def test_run_match_consumes_prepared_chunks(
         min_combined_score=30.0,
         scorer="weighted_mean",
     )
-    copyright_config = CopyrightAssessmentConfig(as_of_year=2026)
-    ruleset = load_copyright_rules(_DEFAULTS)
     prepared = tmp_path / "prepared"
     prepare_report = prepare_marc(_FIXTURES / "tiny.marcxml", prepared, chunk_size=4)
     output_path = tmp_path / "results.csv"
@@ -272,8 +239,6 @@ def test_run_match_consumes_prepared_chunks(
         index_path=index_path,
         output_path=output_path,
         matching_config=config,
-        copyright_config=copyright_config,
-        ruleset=ruleset,
         pairing_config=pairing_config,
         idf=idf,
         workers=1,

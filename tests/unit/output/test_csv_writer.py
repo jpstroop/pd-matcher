@@ -6,8 +6,6 @@ from pathlib import Path
 
 from pytest import raises
 
-from pd_matcher.copyright.assessment import CopyrightAssessment
-from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.result import CandidateMatch
@@ -78,19 +76,10 @@ def _match() -> MatchResult:
     )
 
 
-def _assessment() -> CopyrightAssessment:
-    return CopyrightAssessment(
-        status=CopyrightStatus.PD_REGISTERED_NOT_RENEWED,
-        matched_rule_name="us_registered_not_renewed_1931_1963",
-        explanation="ok",
-        assumptions=(),
-    )
-
-
 def test_csv_writer_emits_header_and_matched_row(tmp_path: Path) -> None:
     path = tmp_path / "out.csv"
     with CsvResultWriter(path) as writer:
-        writer.write(_marc(), _match(), _assessment(), _nypl())
+        writer.write(_marc(), _match(), _nypl())
     rows = list(DictReader(path.open(encoding="utf-8")))
     assert len(rows) == 1
     row = rows[0]
@@ -110,27 +99,19 @@ def test_csv_writer_emits_header_and_matched_row(tmp_path: Path) -> None:
     assert row["publisher_score"] == "100"
     assert row["combined_score"] == f"{0.84 * 100.0:.2f}"
     assert row["year_difference"] == "0"
-    assert row["copyright_status"] == CopyrightStatus.PD_REGISTERED_NOT_RENEWED.value
 
 
 def test_csv_writer_emits_blank_match_columns_when_no_match(tmp_path: Path) -> None:
     path = tmp_path / "out.csv"
     marc = _marc()
-    assessment = CopyrightAssessment(
-        status=CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA,
-        matched_rule_name=None,
-        explanation="no match",
-        assumptions=(),
-    )
     with CsvResultWriter(path) as writer:
-        writer.write(marc, None, assessment)
+        writer.write(marc, None)
     rows = list(DictReader(path.open(encoding="utf-8")))
     assert rows[0]["match_type"] == ""
     assert rows[0]["match_source_id"] == ""
     assert rows[0]["title_score"] == ""
     assert rows[0]["combined_score"] == ""
     assert rows[0]["year_difference"] == ""
-    assert rows[0]["copyright_status"] == CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA.value
 
 
 def test_csv_writer_blanks_when_match_present_but_indexed_record_missing(
@@ -139,7 +120,7 @@ def test_csv_writer_blanks_when_match_present_but_indexed_record_missing(
     """Worker without an indexed record falls back to blank match columns."""
     path = tmp_path / "out.csv"
     with CsvResultWriter(path) as writer:
-        writer.write(_marc(), _match(), _assessment(), None)
+        writer.write(_marc(), _match(), None)
     rows = list(DictReader(path.open(encoding="utf-8")))
     assert rows[0]["match_source_id"] == ""
     assert rows[0]["title_score"] == ""
@@ -148,14 +129,8 @@ def test_csv_writer_blanks_when_match_present_but_indexed_record_missing(
 def test_csv_writer_handles_none_normalized_value(tmp_path: Path) -> None:
     path = tmp_path / "out.csv"
     marc = MarcRecord(control_id="m", title="X", title_main="X")
-    assessment = CopyrightAssessment(
-        status=CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA,
-        matched_rule_name=None,
-        explanation="",
-        assumptions=(),
-    )
     with CsvResultWriter(path) as writer:
-        writer.write(marc, None, assessment)
+        writer.write(marc, None)
     rows = list(DictReader(path.open(encoding="utf-8")))
     assert rows[0]["marc_title_normalized"] == "x"
     assert rows[0]["marc_publisher_original"] == ""
@@ -166,14 +141,8 @@ def test_csv_writer_handles_value_normalising_to_empty(tmp_path: Path) -> None:
     """A non-empty input that normalizes to empty (pure punctuation) is preserved."""
     path = tmp_path / "out.csv"
     marc = MarcRecord(control_id="m", title="X", title_main="X", publisher="///")
-    assessment = CopyrightAssessment(
-        status=CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA,
-        matched_rule_name=None,
-        explanation="",
-        assumptions=(),
-    )
     with CsvResultWriter(path) as writer:
-        writer.write(marc, None, assessment)
+        writer.write(marc, None)
     rows = list(DictReader(path.open(encoding="utf-8")))
     assert rows[0]["marc_publisher_original"] == "///"
     assert rows[0]["marc_publisher_normalized"] == ""
@@ -202,7 +171,7 @@ def test_csv_writer_match_date_falls_back_to_year(tmp_path: Path) -> None:
         candidates_considered=1,
     )
     with CsvResultWriter(path) as writer:
-        writer.write(_marc(), match, _assessment(), nypl)
+        writer.write(_marc(), match, nypl)
     rows = list(DictReader(path.open(encoding="utf-8")))
     assert rows[0]["match_date"] == "1942"
 
@@ -224,7 +193,7 @@ def test_csv_writer_match_date_blank_when_no_year(tmp_path: Path) -> None:
         candidates_considered=1,
     )
     with CsvResultWriter(path) as writer:
-        writer.write(_marc(), match, _assessment(), nypl)
+        writer.write(_marc(), match, nypl)
     rows = list(DictReader(path.open(encoding="utf-8")))
     assert rows[0]["match_date"] == ""
     assert rows[0]["match_year"] == ""
@@ -251,7 +220,7 @@ def test_csv_writer_skipped_evidence_returns_empty_score(tmp_path: Path) -> None
         candidates_considered=1,
     )
     with CsvResultWriter(path) as writer:
-        writer.write(_marc(), match, _assessment(), _nypl())
+        writer.write(_marc(), match, _nypl())
     rows = list(DictReader(path.open(encoding="utf-8")))
     assert rows[0]["title_score"] == ""
     assert rows[0]["author_score"] == "67"
@@ -261,16 +230,7 @@ def test_csv_writer_skipped_evidence_returns_empty_score(tmp_path: Path) -> None
 def test_csv_writer_write_outside_context_raises(tmp_path: Path) -> None:
     writer = CsvResultWriter(tmp_path / "out.csv")
     with raises(RuntimeError, match="not entered"):
-        writer.write(
-            _marc(),
-            None,
-            CopyrightAssessment(
-                status=CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA,
-                matched_rule_name=None,
-                explanation="",
-                assumptions=(),
-            ),
-        )
+        writer.write(_marc(), None)
 
 
 def test_csv_writer_exit_without_enter_is_a_noop(tmp_path: Path) -> None:
@@ -282,14 +242,5 @@ def test_csv_writer_exit_without_enter_is_a_noop(tmp_path: Path) -> None:
 def test_csv_writer_creates_parent_directory(tmp_path: Path) -> None:
     path = tmp_path / "sub" / "out.csv"
     with CsvResultWriter(path) as writer:
-        writer.write(
-            _marc(),
-            None,
-            CopyrightAssessment(
-                status=CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA,
-                matched_rule_name=None,
-                explanation="",
-                assumptions=(),
-            ),
-        )
+        writer.write(_marc(), None)
     assert path.exists()

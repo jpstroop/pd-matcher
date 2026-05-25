@@ -2,8 +2,6 @@
 
 from datetime import date
 
-from pd_matcher.copyright.assessment import CopyrightAssessment
-from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.result import CandidateMatch
@@ -45,13 +43,7 @@ def test_worker_output_roundtrip_with_full_match() -> None:
         alternates=(),
         candidates_considered=1,
     )
-    assessment = CopyrightAssessment(
-        status=CopyrightStatus.PD_REGISTERED_NOT_RENEWED,
-        matched_rule_name="rule",
-        explanation="ok",
-        assumptions=("a",),
-    )
-    payload = WorkerOutput(marc=marc, match=match, assessment=assessment, matched_nypl=nypl)
+    payload = WorkerOutput(marc=marc, match=match, matched_nypl=nypl)
     decoded = decode_worker_output(encode_worker_output(payload))
     assert decoded == payload
 
@@ -65,12 +57,6 @@ def test_worker_output_roundtrip_with_empty_match() -> None:
         alternates=(),
         candidates_considered=0,
     )
-    assessment = CopyrightAssessment(
-        status=CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA,
-        matched_rule_name=None,
-        explanation="",
-        assumptions=(),
-    )
-    payload = WorkerOutput(marc=marc, match=empty_match, assessment=assessment, matched_nypl=None)
+    payload = WorkerOutput(marc=marc, match=empty_match, matched_nypl=None)
     decoded = decode_worker_output(encode_worker_output(payload))
     assert decoded == payload
