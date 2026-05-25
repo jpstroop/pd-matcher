@@ -1,6 +1,8 @@
-"""Unit tests for the schema-2 -> schema-3 vault migration."""
+"""Unit tests for the label-vault migration commands."""
 
+from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 from msgspec.json import decode as json_decode
 from typer.testing import CliRunner
@@ -9,8 +11,12 @@ from pd_groundtruth.cli import app
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import iter_entries
 from pd_groundtruth.vault_migration import migrate_vault_v3
+from pd_groundtruth.vault_migration import migrate_vault_v4
+from pd_matcher.models import IndexedNyplRegRecord
 
 _RUNNER = CliRunner()
+
+_TARGET_V3_SCHEMA: int = 3
 
 
 _SCHEMA_2_NO_EXTRA = (
@@ -97,7 +103,7 @@ def test_migrate_folds_reasons_into_note(tmp_path: Path) -> None:
     assert report.reasons_folded == 1
     assert report.annotations_folded == 0
     [entry] = list(iter_entries(path))
-    assert entry.schema == SCHEMA_VERSION
+    assert entry.schema == _TARGET_V3_SCHEMA
     assert entry.note == "[reasons: diff_work, garbled] strange match"
 
 
@@ -134,7 +140,7 @@ def test_migrate_passes_through_entries_with_no_structured_signal(tmp_path: Path
     assert report.reasons_folded == 0
     assert report.annotations_folded == 0
     [entry] = list(iter_entries(path))
-    assert entry.schema == SCHEMA_VERSION
+    assert entry.schema == _TARGET_V3_SCHEMA
     assert entry.note is None
 
 
@@ -149,7 +155,7 @@ def test_migrate_mixed_vault_keeps_already_schema_3_entries_intact(tmp_path: Pat
     assert report.reasons_folded == 2
     assert report.annotations_folded == 1
     entries = list(iter_entries(path))
-    assert all(entry.schema == SCHEMA_VERSION for entry in entries)
+    assert all(entry.schema == _TARGET_V3_SCHEMA for entry in entries)
     note_lookup = {entry.marc_control_id: entry.note for entry in entries}
     assert note_lookup["a"] is None
     assert note_lookup["b"] == "[reasons: diff_work, garbled] strange match"
@@ -240,4 +246,281 @@ def test_migrate_strips_old_keys_from_persisted_lines(tmp_path: Path) -> None:
         decoded = json_decode(raw_line, type=dict[str, object])
         assert "reasons" not in decoded
         assert "field_annotations" not in decoded
+        assert decoded["schema"] == _TARGET_V3_SCHEMA
+
+
+# --- migrate_vault_v4 ----------------------------------------------------------------
+
+
+def _reg(
+    *,
+    uuid: str,
+    regnum: str | None,
+    renewal_id: str | None = None,
+    renewal_oreg: str | None = None,
+) -> IndexedNyplRegRecord:
+    return IndexedNyplRegRecord(
+        uuid=uuid,
+        title="Some title",
+        was_renewed=renewal_id is not None,
+        regnum=regnum,
+        renewal_id=renewal_id,
+        renewal_oreg=renewal_oreg,
+    )
+
+
+def _v3_line(*, marc_id: str, nypl_uuid: str) -> str:
+    return (
+        f'{{"schema":3,"marc_control_id":"{marc_id}","nypl_uuid":"{nypl_uuid}",'
+        '"verdict":"match","note":null,"labeled_at":"2026-05-01T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]}}'
+    )
+
+
+def _v4_line(
+    *,
+    marc_id: str,
+    nypl_uuid: str,
+    cce_regnum: str | None,
+    cce_renewal_id: str | None,
+    cce_renewal_oreg: str | None,
+) -> str:
+    def _render(value: str | None) -> str:
+        return "null" if value is None else f'"{value}"'
+
+    return (
+        f'{{"schema":4,"marc_control_id":"{marc_id}","nypl_uuid":"{nypl_uuid}",'
+        '"verdict":"match","note":null,"labeled_at":"2026-05-01T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]},'
+        f'"cce_regnum":{_render(cce_regnum)},'
+        f'"cce_renewal_id":{_render(cce_renewal_id)},'
+        f'"cce_renewal_oreg":{_render(cce_renewal_oreg)}}}'
+    )
+
+
+def _make_cce_lookup(
+    records: dict[str, IndexedNyplRegRecord],
+) -> Callable[[str], IndexedNyplRegRecord | None]:
+    def lookup(uuid: str) -> IndexedNyplRegRecord | None:
+        return records.get(uuid)
+
+    return lookup
+
+
+def test_v4_missing_vault_returns_zero_report(tmp_path: Path) -> None:
+    report = migrate_vault_v4(tmp_path / "missing.jsonl", lambda _u: None)
+    assert report.total_entries == 0
+    assert report.enriched == 0
+    assert report.orphaned == 0
+
+
+def test_v4_empty_vault_returns_zero_report(tmp_path: Path) -> None:
+    path = tmp_path / "empty.jsonl"
+    path.write_bytes(b"")
+    report = migrate_vault_v4(path, lambda _u: None)
+    assert report.total_entries == 0
+    assert report.enriched == 0
+    assert report.orphaned == 0
+
+
+def test_v4_enriches_every_entry_when_all_uuids_resolve(tmp_path: Path) -> None:
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v3_line(marc_id="a", nypl_uuid="u-a"),
+            _v3_line(marc_id="b", nypl_uuid="u-b"),
+            _v3_line(marc_id="c", nypl_uuid="u-c"),
+        ],
+    )
+    records = {
+        "u-a": _reg(uuid="u-a", regnum="A1", renewal_id="R1", renewal_oreg="A1"),
+        "u-b": _reg(uuid="u-b", regnum="A2", renewal_id=None, renewal_oreg=None),
+        "u-c": _reg(uuid="u-c", regnum="A3", renewal_id="R3-typo", renewal_oreg="A3"),
+    }
+    report = migrate_vault_v4(path, _make_cce_lookup(records))
+    assert report.total_entries == 3
+    assert report.enriched == 3
+    assert report.orphaned == 0
+    entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
+    assert entries["a"].schema == SCHEMA_VERSION
+    assert entries["a"].cce_regnum == "A1"
+    assert entries["a"].cce_renewal_id == "R1"
+    assert entries["a"].cce_renewal_oreg == "A1"
+    assert entries["b"].cce_regnum == "A2"
+    assert entries["b"].cce_renewal_id is None
+    assert entries["b"].cce_renewal_oreg is None
+    assert entries["c"].cce_renewal_id == "R3-typo"
+    assert entries["c"].cce_renewal_oreg == "A3"
+
+
+def test_v4_handles_orphaned_uuid_with_none_fields(tmp_path: Path) -> None:
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v3_line(marc_id="a", nypl_uuid="u-a"),
+            _v3_line(marc_id="b", nypl_uuid="u-missing"),
+        ],
+    )
+    records = {
+        "u-a": _reg(uuid="u-a", regnum="A1", renewal_id="R1", renewal_oreg="A1"),
+    }
+    report = migrate_vault_v4(path, _make_cce_lookup(records))
+    assert report.total_entries == 2
+    assert report.enriched == 1
+    assert report.orphaned == 1
+    entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
+    assert entries["a"].cce_regnum == "A1"
+    assert entries["b"].schema == SCHEMA_VERSION
+    assert entries["b"].cce_regnum is None
+    assert entries["b"].cce_renewal_id is None
+    assert entries["b"].cce_renewal_oreg is None
+
+
+def test_v4_is_idempotent_on_already_v4_vault(tmp_path: Path) -> None:
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v4_line(
+                marc_id="a",
+                nypl_uuid="u-a",
+                cce_regnum="A1",
+                cce_renewal_id="R1",
+                cce_renewal_oreg="A1",
+            ),
+        ],
+    )
+    original_bytes = path.read_bytes()
+    original_mtime = path.stat().st_mtime_ns
+
+    def _should_not_be_called(_uuid: str) -> IndexedNyplRegRecord | None:
+        raise AssertionError("cce_lookup must not be called when vault is already v4")
+
+    report = migrate_vault_v4(path, _should_not_be_called)
+    assert report.total_entries == 1
+    assert report.enriched == 0
+    assert report.orphaned == 0
+    assert path.read_bytes() == original_bytes
+    assert path.stat().st_mtime_ns == original_mtime
+
+
+def test_v4_writes_atomically_no_archive_file_left_behind(tmp_path: Path) -> None:
+    """No ``.pre-v4`` archive and no leftover ``*.tmp`` after the migration."""
+    path = tmp_path / "vault.jsonl"
+    _write_vault(path, [_v3_line(marc_id="a", nypl_uuid="u-a")])
+    records = {"u-a": _reg(uuid="u-a", regnum="A1", renewal_id="R1", renewal_oreg="A1")}
+    migrate_vault_v4(path, _make_cce_lookup(records))
+    siblings = sorted(child.name for child in tmp_path.iterdir())
+    assert siblings == ["vault.jsonl"]
+
+
+def test_v4_bumps_schema_field_in_persisted_lines(tmp_path: Path) -> None:
+    """Every persisted line ends up at ``schema=4`` regardless of input schema."""
+    path = tmp_path / "vault.jsonl"
+    _write_vault(path, [_v3_line(marc_id="a", nypl_uuid="u-a")])
+    records = {"u-a": _reg(uuid="u-a", regnum="A1")}
+    migrate_vault_v4(path, _make_cce_lookup(records))
+    for raw_line in path.read_bytes().splitlines():
+        decoded = json_decode(raw_line, type=dict[str, object])
         assert decoded["schema"] == SCHEMA_VERSION
+
+
+def test_cli_migrate_vault_v4_missing_file_reports_zero(tmp_path: Path) -> None:
+    vault_path = tmp_path / "absent.jsonl"
+    index_path = tmp_path / "nypl.lmdb"
+    result = _RUNNER.invoke(
+        app,
+        ["migrate-vault-v4", "--vault", str(vault_path), "--index", str(index_path)],
+    )
+    assert result.exit_code == 0
+    assert "migrated 0 entries" in result.stdout
+    assert "enriched 0" in result.stdout
+    assert "orphaned 0" in result.stdout
+
+
+def test_cli_migrate_vault_v4_runs_and_reports(tmp_path: Path) -> None:
+    vault_path = tmp_path / "vault.jsonl"
+    _write_vault(
+        vault_path,
+        [
+            _v3_line(marc_id="a", nypl_uuid="u-a"),
+            _v3_line(marc_id="b", nypl_uuid="u-missing"),
+        ],
+    )
+    records = {"u-a": _reg(uuid="u-a", regnum="A1", renewal_id="R1", renewal_oreg="A1")}
+
+    class _FakeLookup:
+        def __enter__(self) -> _FakeLookup:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def get_registration(self, uuid: str) -> IndexedNyplRegRecord | None:
+            return records.get(uuid)
+
+    def _fake_factory(_path: Path) -> _FakeLookup:
+        return _FakeLookup()
+
+    with patch("pd_groundtruth.cli.NyplIndexLookup", _fake_factory):
+        result = _RUNNER.invoke(
+            app,
+            [
+                "migrate-vault-v4",
+                "--vault",
+                str(vault_path),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+            ],
+        )
+    assert result.exit_code == 0, result.stdout
+    assert "migrated 2 entries" in result.stdout
+    assert "enriched 1" in result.stdout
+    assert "orphaned 1" in result.stdout
+
+
+def test_cli_migrate_vault_v4_idempotent(tmp_path: Path) -> None:
+    vault_path = tmp_path / "vault.jsonl"
+    _write_vault(
+        vault_path,
+        [
+            _v4_line(
+                marc_id="a",
+                nypl_uuid="u-a",
+                cce_regnum="A1",
+                cce_renewal_id="R1",
+                cce_renewal_oreg="A1",
+            ),
+        ],
+    )
+
+    class _UnusedLookup:
+        def __enter__(self) -> _UnusedLookup:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def get_registration(self, _uuid: str) -> IndexedNyplRegRecord | None:
+            raise AssertionError("must not be called for an already-v4 vault")
+
+    def _fake_factory(_path: Path) -> _UnusedLookup:
+        return _UnusedLookup()
+
+    with patch("pd_groundtruth.cli.NyplIndexLookup", _fake_factory):
+        result = _RUNNER.invoke(
+            app,
+            [
+                "migrate-vault-v4",
+                "--vault",
+                str(vault_path),
+                "--index",
+                str(tmp_path / "nypl.lmdb"),
+            ],
+        )
+    assert result.exit_code == 0, result.stdout
+    assert "migrated 1 entries" in result.stdout
+    assert "enriched 0" in result.stdout
+    assert "orphaned 0" in result.stdout

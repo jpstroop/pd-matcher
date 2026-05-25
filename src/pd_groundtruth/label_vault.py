@@ -16,7 +16,15 @@ the full audit trail is preserved.
 
 Identifiers persisted alongside the verdict (under
 :class:`MarcIdentifiers`) let downstream tooling re-pair a labeled MARC record
-with its rebuilt index even if the ``marc_control_id`` ever shifts.
+with its rebuilt index even if the ``marc_control_id`` ever shifts. The same
+principle applies to the CCE side: ``cce_regnum``, ``cce_renewal_id``, and
+``cce_renewal_oreg`` are baked into every schema-4 entry as flat top-level
+fields so the published JSONL is a complete, self-contained linkage table that
+consumers can cross-reference back to Copyright Office data without joining
+anything else. ``cce_renewal_oreg`` exists alongside ``cce_regnum`` so future
+work matching against the renewal index independently can compare the
+renewal's transcribed original-registration cite to the matched registration's
+``regnum`` and surface NYPL OCR errors.
 """
 
 from collections.abc import Iterator
@@ -29,7 +37,7 @@ from msgspec.json import encode as json_encode
 
 from pd_matcher.models import MarcRecord
 
-SCHEMA_VERSION: int = 3
+SCHEMA_VERSION: int = 4
 
 
 class MarcIdentifiers(Struct, frozen=True, forbid_unknown_fields=True):
@@ -48,6 +56,13 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     structured signal the labeler carries alongside the verdict — the
     pre-schema-3 ``reasons`` and ``field_annotations`` fields have been retired
     in favor of letting accumulated notes surface patterns naturally.
+
+    Schema 4 adds three flat top-level CCE-side identifier fields:
+    ``cce_regnum`` (the registration's Copyright Office number),
+    ``cce_renewal_id`` (the NYPL renewal record id when the registration was
+    renewed), and ``cce_renewal_oreg`` (the original registration cite copied
+    from the renewal). All three default to ``None`` so schema-3 entries
+    decode cleanly during forward-compat reads.
     """
 
     schema: int
@@ -58,6 +73,9 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     labeled_at: str
     labeler: str
     marc_identifiers: MarcIdentifiers
+    cce_regnum: str | None = None
+    cce_renewal_id: str | None = None
+    cce_renewal_oreg: str | None = None
 
 
 def append_entry(path: Path, entry: VaultEntry) -> None:

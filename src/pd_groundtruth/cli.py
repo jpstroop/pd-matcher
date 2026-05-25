@@ -31,8 +31,10 @@ from pd_groundtruth.sampling import default_budget
 from pd_groundtruth.sampling import scale_budget
 from pd_groundtruth.vault_into_queue import vault_into_queue
 from pd_groundtruth.vault_migration import migrate_vault_v3
+from pd_groundtruth.vault_migration import migrate_vault_v4
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
+from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.models import MarcRecord
 
 app = Typer(add_completion=False, help="Acquire Princeton MARC ground-truth candidates.")
@@ -337,6 +339,9 @@ def seed_vault_command(
                 labeled_at=label.labeled_at,
                 labeler=_LABELER,
                 marc_identifiers=extract_marc_identifiers(marc),
+                cce_regnum=label.cce_regnum,
+                cce_renewal_id=label.cce_renewal_id,
+                cce_renewal_oreg=label.cce_renewal_oreg,
             )
             append_entry(vault, entry)
             seeded += 1
@@ -426,4 +431,43 @@ def migrate_vault_v3_command(
         f"folded reasons on {report.reasons_folded}; "
         f"folded annotations on {report.annotations_folded}; "
         f"{archive_note}"
+    )
+
+
+@app.command(name="migrate-vault-v4")
+def migrate_vault_v4_command(
+    vault: Annotated[
+        Path,
+        Option("--vault", help="JSONL label vault to migrate in place."),
+    ] = _DEFAULT_VAULT_PATH,
+    index: Annotated[
+        Path,
+        Option("--index", help="LMDB env produced by `pd-matcher index build`."),
+    ] = _DEFAULT_INDEX_PATH,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Backfill schema-4 CCE-side identifier fields onto every vault entry.
+
+    Looks each entry's ``nypl_uuid`` up in the CCE index at ``--index`` and
+    copies ``regnum`` / ``renewal_id`` / ``renewal_oreg`` into three flat
+    top-level fields on the entry, bumping the ``schema`` to 4. Entries whose
+    UUID no longer resolves (data drift) keep ``None`` for the new fields but
+    still get ``schema=4`` and are counted as orphaned. The pre-migration
+    vault lives in git history; no on-disk archive is written. Idempotent:
+    re-running on an already-migrated vault is a no-op and does not rewrite
+    the file.
+    """
+    _configure_logging("migrate-vault-v4", log_file)
+    if not vault.exists() or vault.stat().st_size == 0:
+        report = migrate_vault_v4(vault, lambda _uuid: None)
+    else:
+        with NyplIndexLookup(index) as lookup:
+            report = migrate_vault_v4(vault, lookup.get_registration)
+    echo(
+        f"migrated {report.total_entries} entries; "
+        f"enriched {report.enriched}; "
+        f"orphaned {report.orphaned}"
     )

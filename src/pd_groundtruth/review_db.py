@@ -97,7 +97,13 @@ class LabelInsertResult(Struct, frozen=True, forbid_unknown_fields=True):
 
 
 class CurrentLabelRow(Struct, frozen=True, forbid_unknown_fields=True):
-    """The current verdict for one pair joined with its MARC blob."""
+    """The current verdict for one pair joined with its MARC blob.
+
+    Also carries the CCE-side identifiers (``cce_regnum``, ``cce_renewal_id``,
+    ``cce_renewal_oreg``) so callers like ``seed-vault`` can persist the full
+    schema-4 :class:`~pd_groundtruth.label_vault.VaultEntry` without a second
+    lookup against the CCE index.
+    """
 
     pair_id: int
     marc_control_id: str
@@ -106,6 +112,9 @@ class CurrentLabelRow(Struct, frozen=True, forbid_unknown_fields=True):
     verdict: str
     note: str | None
     labeled_at: str
+    cce_regnum: str | None = None
+    cce_renewal_id: str | None = None
+    cce_renewal_oreg: str | None = None
 
 
 class LabeledPairRow(Struct, frozen=True, forbid_unknown_fields=True):
@@ -693,6 +702,9 @@ class ReviewDb:
                 rp.marc_control_id AS marc_control_id,
                 rp.nypl_uuid AS nypl_uuid,
                 rp.marc_json AS marc_json,
+                rp.cce_regnum AS cce_regnum,
+                rp.cce_renewal_id AS cce_renewal_id,
+                rp.cce_renewal_oreg AS cce_renewal_oreg,
                 cur.verdict AS verdict,
                 cur.note AS note,
                 cur.labeled_at AS labeled_at
@@ -718,6 +730,9 @@ class ReviewDb:
                 verdict=row["verdict"],
                 note=row["note"],
                 labeled_at=row["labeled_at"],
+                cce_regnum=row["cce_regnum"],
+                cce_renewal_id=row["cce_renewal_id"],
+                cce_renewal_oreg=row["cce_renewal_oreg"],
             )
 
     def insert_existing_label(
