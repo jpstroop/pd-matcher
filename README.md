@@ -6,6 +6,8 @@ Matches are produced from a pipeline of small, pure-function **scorers** that ea
 
 Output is a streaming CSV: one row per MARC record, with the matched CCE registration's id, year, and per-field scores. Anyone who needs copyright status from this dataset can apply their own analysis to the verified linkage; this project does not make copyright determinations.
 
+> **New here, or returning after a break?** Read [docs/USER_GUIDE.md](docs/USER_GUIDE.md) first — it's a 10-minute guided tour of setup, daily workflows, and maintenance. The rest of this README is per-command reference.
+
 ---
 
 ## Background
@@ -74,6 +76,8 @@ The labeling subsystem (`pd-groundtruth`) brings in additional optional dependen
 
 ## Quick start (matching)
 
+For the full guided walkthrough — install, index build, acquire, labeling, eval, maintenance — see [docs/USER_GUIDE.md](docs/USER_GUIDE.md). The shortest path from a fresh clone to a working match:
+
 ```bash
 # Install (once per clone)
 pdm install
@@ -83,22 +87,13 @@ pdm run pre-commit install
 pdm run pd-matcher index build \
   --reg-dir data/nypl-reg/xml \
   --ren-dir data/nypl-ren/data \
-  --out caches/cce.lmdb
-
-# Inspect the built index
-pdm run pd-matcher index info --lmdb-path caches/cce.lmdb
+  --out caches/nypl.lmdb
 
 # Match a MARC file against the index
 pdm run pd-matcher match \
   --marc data/candidate_marc_file.marcxml \
-  --index caches/cce.lmdb \
+  --index caches/nypl.lmdb \
   --out results.csv
-
-# Evaluate against the ground-truth pairs
-pdm run pd-matcher eval \
-  --ground-truth data/combined_ground_truth.csv \
-  --index caches/cce.lmdb \
-  --report eval.json
 ```
 
 The first time `pd-matcher match` runs against an index, it builds (and caches) a token-IDF table from the CCE titles. Subsequent runs reuse the cache.
@@ -115,7 +110,7 @@ Build the LMDB-backed CCE index. Streams the registration XML and renewal TSV fi
 pd-matcher index build \
   --reg-dir data/nypl-reg/xml \
   --ren-dir data/nypl-ren/data \
-  --out caches/cce.lmdb \
+  --out caches/nypl.lmdb \
   [--force]
 ```
 
@@ -128,7 +123,7 @@ The index is a directory containing LMDB data files. Memory map size defaults to
 Print build statistics for an existing index — counts, source hash, build timestamp.
 
 ```bash
-pd-matcher index info --lmdb-path caches/cce.lmdb
+pd-matcher index info --lmdb-path caches/nypl.lmdb
 ```
 
 ### `pd-matcher match`
@@ -138,7 +133,7 @@ Stream a MARC XML file through the matcher and write results to CSV.
 ```bash
 pd-matcher match \
   --marc data/candidate_marc_file.marcxml \
-  --index caches/cce.lmdb \
+  --index caches/nypl.lmdb \
   --out results.csv \
   [--workers N] \
   [--year-window N] \
@@ -155,27 +150,28 @@ The match command streams: it never holds the whole MARC file in memory. Workers
 
 ### `pd-matcher eval`
 
-Run the matcher against the project's ground-truth set and produce linkage precision / recall / F1.
+Run the matcher against the live label vault and produce linkage P/R, AUC, average precision, and a threshold sweep.
 
 ```bash
 pd-matcher eval \
-  --ground-truth data/combined_ground_truth.csv \
-  --index caches/cce.lmdb \
+  --vault data/label_vault.jsonl \
+  --pool data/candidates \
+  --index caches/nypl.lmdb \
   [--report eval.json] \
-  [--limit N] \
-  [--sample N [--seed S]] \
-  [--year-window N] \
-  [--workers N]
+  [--year-window N]
 ```
 
-- `--report PATH` — write the full `EvalReport` as JSON.
-- `--limit N` — evaluate only the first `N` rows; useful for fast smoke testing.
-- `--sample N` — randomly sample `N` rows from the ground-truth CSV. Mutually exclusive with `--limit`. Sample sizes larger than the file evaluate every row.
-- `--seed S` — integer seed for `--sample`'s random selection (default `0`). Same seed → same selection, run after run. Ignored when `--sample` is not set.
-- `--year-window N` — override the matching config's year window (default 2) for this eval run. Accepted range is 0–100. Useful when sweeping the window to study recall-at-window curves.
-- `--workers N` — number of worker processes (default `1`, single-process). With `N >= 2` the per-row work is fanned out across a `spawn` pool; each worker opens the LMDB index read-only (mmap-shared across workers) and reuses one IDF table per process. Accepted range is `1` to `cpu_count() * 2`. The single-process default keeps results bit-for-bit reproducible; opt into parallelism explicitly when sweeping configs over large samples.
+- `--vault PATH` — the JSONL label vault to evaluate against (default `data/label_vault.jsonl`).
+- `--pool PATH` — the MARC pool the vault entries reference (default `data/candidates`). Vault entries whose MARC is no longer in the pool are dropped with a logged warning (data drift).
+- `--index PATH` — the LMDB CCE index.
+- `--report PATH` — write the full `EvalReport` as JSON in addition to the human-readable summary.
+- `--year-window N` — override the matching config's year window for this run. Accepted range is 0–100.
 
-The eval reconstructs a `MarcRecord` from each ground-truth row, runs the matcher, and compares the predicted best match's `match_source_id` against the ground-truth `match_source_id`. Precision and recall measure linkage agreement only — no copyright reasoning is involved.
+Two passes:
+- **Per-MARC linkage** — for each unique MARC with a current `match` verdict in the vault, run `match_record` and check whether the matcher's top pick equals the labeled CCE UUID. Produces precision, recall, F1 (gated by `pdm run regression`).
+- **Pair-level discrimination** — score every non-`unsure` vault entry directly, collect `(score, label)` pairs, and compute AUC, average precision, and a 21-point threshold sweep across `0.00`–`1.00` step `0.05`. Reported, not currently gated.
+
+The vault is the sole eval corpus as of #25; the prior `combined_ground_truth.csv` workflow has been retired.
 
 ### `pd-matcher train-scorer`
 
