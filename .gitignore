@@ -25,5 +25,3 @@ data/review.db
 data/review.db-journal
 data/review.db-shm
 data/review.db-wal
-data/label_vault.jsonl.pre-ebook-purge
-data/label_vault.jsonl.pre-v3
