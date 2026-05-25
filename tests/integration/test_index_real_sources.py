@@ -29,7 +29,7 @@ _REN_DIR = _REPO_ROOT / "data" / "nypl-ren" / "data"
     reason="NYPL submodules not checked out",
 )
 def test_full_index_build_against_real_sources(tmp_path: Path) -> None:
-    out_path = tmp_path / "nypl.lmdb"
+    out_path = tmp_path / "cce.lmdb"
     report = build_index(reg_dir=_REG_DIR, ren_dir=_REN_DIR, out_path=out_path)
 
     assert report.skipped is False

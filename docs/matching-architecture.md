@@ -21,7 +21,7 @@ made the matcher unusably slow before #22 (see [Why](#why-this-design-22)).
 
 ## The LMDB index
 
-`index build` materialises one LMDB environment (`caches/nypl.lmdb`,
+`index build` materialises one LMDB environment (`caches/cce.lmdb`,
 `schema_version = 3`) with these named sub-DBs (`index/store.py`):
 
 | sub-DB | key → value | purpose |

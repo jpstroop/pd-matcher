@@ -34,7 +34,7 @@ NYPL CCE submodules                   Princeton MARC dump
 [pd-matcher index build]              [pd-groundtruth acquire]
         │                                     │
         ▼                                     ▼
-caches/nypl.lmdb                      data/candidates/  (MARC pool)
+caches/cce.lmdb                      data/candidates/  (MARC pool)
    (CCE index)                                │
         │                                     │
         └──────────────┬──────────────────────┘
@@ -108,7 +108,7 @@ useful. Order matters:
 pdm run pd-matcher index build \
   --reg-dir data/nypl-reg/xml \
   --ren-dir data/nypl-ren/data \
-  --out caches/nypl.lmdb
+  --out caches/cce.lmdb
 
 # 2. Acquire and filter a MARC pool from Princeton (~1 hour first run).
 pdm run pd-groundtruth acquire
@@ -132,7 +132,7 @@ pdm run pd-groundtruth build-queue --rebuild
 # Or, for production matching of a prepared chunk directory:
 pdm run pd-matcher match \
   --prepared data/prepared \
-  --index caches/nypl.lmdb \
+  --index caches/cce.lmdb \
   --out /tmp/matches.csv
 ```
 
@@ -192,7 +192,7 @@ near-duplicates).
 pdm run pd-matcher eval \
   --vault data/label_vault.jsonl \
   --pool data/candidates \
-  --index caches/nypl.lmdb
+  --index caches/cce.lmdb
 ```
 
 Output: counts, per-MARC precision/recall, AUC, average precision, and
@@ -232,7 +232,7 @@ discuss; don't ignore it.
 
 | Cache | Rebuild when |
 |---|---|
-| `caches/nypl.lmdb` | NYPL submodules updated; parser/model changes |
+| `caches/cce.lmdb` | NYPL submodules updated; parser/model changes |
 | `data/candidates/` | Acquire-filter changes (e.g. e-book detection) |
 | `data/review.db` | Pipeline changes that affect scoring or banding (`build-queue --rebuild`) |
 
@@ -277,7 +277,7 @@ change. Two commands:
 | `data/label_vault.jsonl` | Vault (source of truth for labels) | **yes** |
 | `data/candidates/` | MARC pool (acquire output) | no (gitignored) |
 | `data/review.db` | Transient label queue (SQLite) | no |
-| `caches/nypl.lmdb/` | Built CCE index | no |
+| `caches/cce.lmdb/` | Built CCE index | no |
 | `logs/` | Per-run log files | no |
 | `docs/` | Deep-dive docs (design, glossary, architecture, this guide) | yes |
 | `tests/regression/baseline.json` | Locked accuracy snapshot | yes |

@@ -429,7 +429,7 @@ def test_v4_bumps_schema_field_in_persisted_lines(tmp_path: Path) -> None:
 
 def test_cli_migrate_vault_v4_missing_file_reports_zero(tmp_path: Path) -> None:
     vault_path = tmp_path / "absent.jsonl"
-    index_path = tmp_path / "nypl.lmdb"
+    index_path = tmp_path / "cce.lmdb"
     result = _RUNNER.invoke(
         app,
         ["migrate-vault-v4", "--vault", str(vault_path), "--index", str(index_path)],
@@ -472,7 +472,7 @@ def test_cli_migrate_vault_v4_runs_and_reports(tmp_path: Path) -> None:
                 "--vault",
                 str(vault_path),
                 "--index",
-                str(tmp_path / "nypl.lmdb"),
+                str(tmp_path / "cce.lmdb"),
             ],
         )
     assert result.exit_code == 0, result.stdout
@@ -517,7 +517,7 @@ def test_cli_migrate_vault_v4_idempotent(tmp_path: Path) -> None:
                 "--vault",
                 str(vault_path),
                 "--index",
-                str(tmp_path / "nypl.lmdb"),
+                str(tmp_path / "cce.lmdb"),
             ],
         )
     assert result.exit_code == 0, result.stdout

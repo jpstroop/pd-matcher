@@ -22,7 +22,7 @@ from pd_matcher.eval.regression import BaselineParams
 from pd_matcher.eval.regression import baseline_from_report
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_INDEX_PATH = _REPO_ROOT / "caches" / "nypl.lmdb"
+_INDEX_PATH = _REPO_ROOT / "caches" / "cce.lmdb"
 _BASELINE_PATH = Path(__file__).resolve().parent / "baseline.json"
 
 _VAULT = "data/label_vault.jsonl"

@@ -84,8 +84,8 @@ def test_matching_config_forbids_extra_fields() -> None:
 
 def test_index_config_defaults_and_roundtrip() -> None:
     """IndexConfig should accept defaults and round-trip cleanly."""
-    cfg = convert({"lmdb_path": "caches/nypl.lmdb"}, type=IndexConfig, dec_hook=_path_dec_hook)
-    assert cfg.lmdb_path == Path("caches/nypl.lmdb")
+    cfg = convert({"lmdb_path": "caches/cce.lmdb"}, type=IndexConfig, dec_hook=_path_dec_hook)
+    assert cfg.lmdb_path == Path("caches/cce.lmdb")
     assert cfg.map_size_bytes == 16 * 1024 * 1024 * 1024
     assert cfg.schema_version == 3
     again = convert(to_builtins(cfg, enc_hook=str), type=IndexConfig, dec_hook=_path_dec_hook)

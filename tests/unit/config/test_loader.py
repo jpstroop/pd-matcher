@@ -33,11 +33,11 @@ def test_load_index_config_from_temp_yaml(tmp_path: Path) -> None:
     """A well-formed index config YAML should produce an ``IndexConfig``."""
     yaml_path = tmp_path / "index.yaml"
     yaml_path.write_text(
-        "lmdb_path: caches/nypl.lmdb\nmap_size_bytes: 2048\nschema_version: 3\n",
+        "lmdb_path: caches/cce.lmdb\nmap_size_bytes: 2048\nschema_version: 3\n",
         encoding="utf-8",
     )
     cfg = load_index_config(yaml_path)
-    assert cfg.lmdb_path == Path("caches/nypl.lmdb")
+    assert cfg.lmdb_path == Path("caches/cce.lmdb")
     assert cfg.map_size_bytes == 2048
     assert cfg.schema_version == 3
 

@@ -329,7 +329,7 @@ def index_build(
         pd-matcher index build \\
             --reg-dir data/nypl-reg/xml \\
             --ren-dir data/nypl-ren/data \\
-            --out caches/nypl.lmdb
+            --out caches/cce.lmdb
     """
     _enable_log_file("index-build", log_file)
     if not reg_dir.is_dir():
@@ -357,7 +357,7 @@ def index_info(
     """Print counts, build time, and source hashes for an existing index.
 
     Examples:
-        pd-matcher index info --lmdb-path caches/nypl.lmdb
+        pd-matcher index info --lmdb-path caches/cce.lmdb
     """
     _enable_log_file("index-info", log_file)
     if not lmdb_path.exists():
@@ -462,7 +462,7 @@ def match(
     Examples:
         pd-matcher match \\
             --marc data/sample.marcxml \\
-            --index caches/nypl.lmdb \\
+            --index caches/cce.lmdb \\
             --out /tmp/results.csv \\
             --workers 4
     """
@@ -572,7 +572,7 @@ def eval_(
         pd-matcher eval \\
             --vault data/label_vault.jsonl \\
             --pool data/candidates \\
-            --index caches/nypl.lmdb \\
+            --index caches/cce.lmdb \\
             --report /tmp/eval.json
     """
     _enable_log_file("eval", log_file)

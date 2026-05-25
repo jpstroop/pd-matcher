@@ -410,7 +410,7 @@ def test_cli_vault_into_queue_invokes_backfill_and_reports(tmp_path: Path) -> No
     db_path = tmp_path / "review.db"
     vault_path = tmp_path / "vault.jsonl"
     pool_path = tmp_path / "pool"
-    index_path = tmp_path / "nypl.lmdb"
+    index_path = tmp_path / "cce.lmdb"
 
     summary = BackfillSummary(
         backfilled=3, already_present=4, missing_in_pool=1, missing_in_index=2
@@ -460,7 +460,7 @@ def test_cli_vault_into_queue_honors_explicit_log_file(tmp_path: Path) -> None:
                 "--pool",
                 str(tmp_path / "pool"),
                 "--index",
-                str(tmp_path / "nypl.lmdb"),
+                str(tmp_path / "cce.lmdb"),
                 "--log-file",
                 str(target),
             ],
@@ -483,7 +483,7 @@ def test_vault_into_queue_end_to_end_against_fake_index(tmp_path: Path) -> None:
     )
 
     pool = _make_pool(tmp_path / "pool", {"eng": ["id-1"]})
-    index_path = tmp_path / "idx" / "nypl.lmdb"
+    index_path = tmp_path / "idx" / "cce.lmdb"
     index_path.parent.mkdir(parents=True)
 
     cce_table = {"uuid-1": _cce("uuid-1"), "uuid-2": _cce("uuid-2")}
@@ -559,7 +559,7 @@ def test_vault_into_queue_with_empty_vault_returns_zero_summary(tmp_path: Path) 
         db_path=db_path,
         vault_path=tmp_path / "vault.jsonl",
         pool_path=tmp_path / "pool",
-        index_path=tmp_path / "idx" / "nypl.lmdb",
+        index_path=tmp_path / "idx" / "cce.lmdb",
         matching_config=_load_default_matching_config(),
         pairing_config=_load_default_pairing_config(),
     )

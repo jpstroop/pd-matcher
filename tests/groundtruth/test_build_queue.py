@@ -600,7 +600,7 @@ def test_build_queue_drives_run_match_and_summarizes(
     out_path = tmp_path / "review.db"
     summary = build_queue(
         pool=pool,
-        index_path=tmp_path / "idx" / "nypl.lmdb",
+        index_path=tmp_path / "idx" / "cce.lmdb",
         out_path=out_path,
         vault_path=tmp_path / "vault.jsonl",
         budget=BudgetModel(caps={("eng", "ge90"): 5, ("eng", "below"): 5}),
@@ -650,7 +650,7 @@ def test_build_queue_threads_log_file_to_run_match(
     target = tmp_path / "queue.log"
     build_queue(
         pool=pool,
-        index_path=tmp_path / "idx" / "nypl.lmdb",
+        index_path=tmp_path / "idx" / "cce.lmdb",
         out_path=tmp_path / "review.db",
         vault_path=tmp_path / "vault.jsonl",
         budget=BudgetModel(caps={("eng", "ge90"): 1}),
@@ -821,7 +821,7 @@ def test_build_queue_carries_vault_pair_through_rebuild(
     out_path = tmp_path / "review.db"
     summary = build_queue(
         pool=pool,
-        index_path=tmp_path / "idx" / "nypl.lmdb",
+        index_path=tmp_path / "idx" / "cce.lmdb",
         out_path=out_path,
         vault_path=vault_path,
         budget=BudgetModel(caps={("eng", "ge90"): 5, ("eng", "below"): 5}),
@@ -899,7 +899,7 @@ def test_build_queue_excludes_vault_marcs_from_sample(
 
     build_queue(
         pool=pool,
-        index_path=tmp_path / "idx" / "nypl.lmdb",
+        index_path=tmp_path / "idx" / "cce.lmdb",
         out_path=tmp_path / "review.db",
         vault_path=tmp_path / "vault.jsonl",
         budget=BudgetModel(caps={("eng", "ge90"): 5}),
@@ -956,7 +956,7 @@ def test_build_queue_reports_vault_entries_missing_from_pool(
 
     summary = build_queue(
         pool=pool,
-        index_path=tmp_path / "idx" / "nypl.lmdb",
+        index_path=tmp_path / "idx" / "cce.lmdb",
         out_path=tmp_path / "review.db",
         vault_path=vault_path,
         budget=BudgetModel(caps={("eng", "ge90"): 1}),
@@ -1009,7 +1009,7 @@ def test_build_queue_reports_vault_entry_missing_from_index(
 
     summary = build_queue(
         pool=pool,
-        index_path=tmp_path / "idx" / "nypl.lmdb",
+        index_path=tmp_path / "idx" / "cce.lmdb",
         out_path=tmp_path / "review.db",
         vault_path=vault_path,
         budget=BudgetModel(caps={("eng", "ge90"): 1}),
@@ -1081,7 +1081,7 @@ def test_build_queue_threads_requeue_verdicts_to_resolver_and_factory(
 
     build_queue(
         pool=pool,
-        index_path=tmp_path / "idx" / "nypl.lmdb",
+        index_path=tmp_path / "idx" / "cce.lmdb",
         out_path=tmp_path / "review.db",
         vault_path=tmp_path / "vault.jsonl",
         budget=BudgetModel(caps={("eng", "ge90"): 1}),
@@ -1140,7 +1140,7 @@ def test_build_queue_cleans_up_prepared_dir(tmp_path: Path, monkeypatch: MonkeyP
     monkeypatch.setattr(bq, "run_match", _fake_run_match)
     build_queue(
         pool=pool,
-        index_path=tmp_path / "idx" / "nypl.lmdb",
+        index_path=tmp_path / "idx" / "cce.lmdb",
         out_path=tmp_path / "review.db",
         vault_path=tmp_path / "vault.jsonl",
         budget=BudgetModel(caps={("eng", "ge90"): 1}),

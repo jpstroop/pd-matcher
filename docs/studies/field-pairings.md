@@ -108,7 +108,7 @@ Ship the configurable subsystem with the data-derived default pairing set above.
 ```bash
 pdm run pd-matcher eval \
   --ground-truth data/combined_ground_truth.csv \
-  --index caches/nypl.lmdb \
+  --index caches/cce.lmdb \
   --sample 500 --seed 42 --workers 8 --year-window 0 \
   --report eval_pairings.json
 ```

@@ -87,12 +87,12 @@ pdm run pre-commit install
 pdm run pd-matcher index build \
   --reg-dir data/nypl-reg/xml \
   --ren-dir data/nypl-ren/data \
-  --out caches/nypl.lmdb
+  --out caches/cce.lmdb
 
 # Match a MARC file against the index
 pdm run pd-matcher match \
   --marc data/candidate_marc_file.marcxml \
-  --index caches/nypl.lmdb \
+  --index caches/cce.lmdb \
   --out results.csv
 ```
 
@@ -110,7 +110,7 @@ Build the LMDB-backed CCE index. Streams the registration XML and renewal TSV fi
 pd-matcher index build \
   --reg-dir data/nypl-reg/xml \
   --ren-dir data/nypl-ren/data \
-  --out caches/nypl.lmdb \
+  --out caches/cce.lmdb \
   [--force]
 ```
 
@@ -123,7 +123,7 @@ The index is a directory containing LMDB data files. Memory map size defaults to
 Print build statistics for an existing index — counts, source hash, build timestamp.
 
 ```bash
-pd-matcher index info --lmdb-path caches/nypl.lmdb
+pd-matcher index info --lmdb-path caches/cce.lmdb
 ```
 
 ### `pd-matcher match`
@@ -133,7 +133,7 @@ Stream a MARC XML file through the matcher and write results to CSV.
 ```bash
 pd-matcher match \
   --marc data/candidate_marc_file.marcxml \
-  --index caches/nypl.lmdb \
+  --index caches/cce.lmdb \
   --out results.csv \
   [--workers N] \
   [--year-window N] \
@@ -156,7 +156,7 @@ Run the matcher against the live label vault and produce linkage P/R, AUC, avera
 pd-matcher eval \
   --vault data/label_vault.jsonl \
   --pool data/candidates \
-  --index caches/nypl.lmdb \
+  --index caches/cce.lmdb \
   [--report eval.json] \
   [--year-window N]
 ```
@@ -282,7 +282,7 @@ Building the corpus is a three-stage pipeline. Each stage is one command, and ea
 
 ```
 Princeton bibdata          CCE index
-  MARC dumps              (caches/nypl.lmdb,
+  MARC dumps              (caches/cce.lmdb,
      │                     built by pd-matcher)
      │                          │
      ▼                          ▼
@@ -332,7 +332,7 @@ The first time a `(language, decade)` bucket fills it logs `bucket full: eng[196
 ```bash
 pdm run pd-groundtruth build-queue \
   --pool data/candidates \
-  --index caches/nypl.lmdb \
+  --index caches/cce.lmdb \
   --out data/review.db
 ```
 
@@ -498,7 +498,7 @@ pdm run pd-groundtruth vault-into-queue \
   --db data/review.db \
   --vault data/label_vault.jsonl \
   --pool data/candidates \
-  --index caches/nypl.lmdb
+  --index caches/cce.lmdb
 ```
 
 | flag | meaning |
@@ -522,13 +522,13 @@ Build a fresh CCE index, acquire MARC, build the queue, and start labeling.
 
 ```bash
 # from the repo root: build the CCE index once
-pdm run pd-matcher index build --out caches/nypl.lmdb \
+pdm run pd-matcher index build --out caches/cce.lmdb \
     --reg-dir data/nypl-reg/xml --ren-dir data/nypl-ren/data
 
 pdm install
 pdm run pd-groundtruth acquire     --out-dir data/candidates
 pdm run pd-groundtruth build-queue --pool data/candidates \
-                                   --index caches/nypl.lmdb \
+                                   --index caches/cce.lmdb \
                                    --out  data/review.db
 pdm run pd-groundtruth review      --db   data/review.db
 ```
@@ -551,7 +551,7 @@ When the e-book filter changes, Princeton publishes a new bibdata snapshot, the 
 rm -rf data/candidates
 pdm run pd-groundtruth acquire     --out-dir data/candidates
 pdm run pd-groundtruth build-queue --pool   data/candidates \
-                                   --index  caches/nypl.lmdb \
+                                   --index  caches/cce.lmdb \
                                    --out    data/review.db \
                                    --rebuild
 pdm run pd-groundtruth review      --db     data/review.db

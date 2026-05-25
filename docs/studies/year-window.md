@@ -119,7 +119,7 @@ The window remains configurable in `matching.yaml` and overridable per run with
 for W in 0 1 2 3; do
   pdm run pd-matcher eval \
     --ground-truth data/combined_ground_truth.csv \
-    --index caches/nypl.lmdb \
+    --index caches/cce.lmdb \
     --sample 500 --seed 42 --workers 8 --year-window "$W" \
     --report "eval_w${W}.json"
 done
@@ -129,7 +129,7 @@ for SEED in 1 2 3 4; do
   for W in 0 1; do
     pdm run pd-matcher eval \
       --ground-truth data/combined_ground_truth.csv \
-      --index caches/nypl.lmdb \
+      --index caches/cce.lmdb \
       --sample 500 --seed "$SEED" --workers 8 --year-window "$W" \
       --report "eval_s${SEED}_w${W}.json"
   done
