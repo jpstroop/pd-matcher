@@ -101,7 +101,6 @@ def _vault_entry(control_id: str, nypl_uuid: str) -> VaultEntry:
         marc_control_id=control_id,
         nypl_uuid=nypl_uuid,
         verdict="match",
-        reasons=(),
         note=None,
         labeled_at="2026-05-22T10:00:00+00:00",
         labeler="jpstroop",

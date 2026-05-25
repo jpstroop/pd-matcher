@@ -25,40 +25,4 @@
     {% endfor %}
   </table>
 </section>
-
-{% if reason_summary %}
-<section class="panel" style="margin-top: 1rem;">
-  <h2>Reasons (current no-match / unsure)</h2>
-  <table class="stats">
-    <tr><th>verdict</th><th>reason</th><th>count</th></tr>
-    {% for r in reason_summary %}
-    <tr>
-      <td>{{ r.verdict }}</td>
-      <td>{{ r.label }}</td>
-      <td>{{ r.count }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-</section>
-{% endif %}
-
-{% if annotation_summary %}
-<section class="panel" style="margin-top: 1rem;">
-  <h2>Field annotations</h2>
-  <table class="stats">
-    <tr>
-      <th>field</th>
-      {% for judgment in field_judgments %}<th>{{ judgment_label(judgment) }}</th>{% endfor %}
-      <th>total</th>
-    </tr>
-    {% for row in annotation_summary %}
-    <tr>
-      <td>{{ row.field_label }}</td>
-      {% for count in row.counts %}<td>{{ count }}</td>{% endfor %}
-      <td>{{ row.total }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-</section>
-{% endif %}
 {% endblock %}

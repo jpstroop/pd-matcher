@@ -108,7 +108,6 @@ def parse_filters(
 def parse_label_filters(
     verdict: str | None,
     language: str | None,
-    reason: str | None,
     q: str | None,
 ) -> LabelFilters:
     """Normalize raw ``/labels`` query values into typed :class:`LabelFilters`.
@@ -120,7 +119,6 @@ def parse_label_filters(
     return LabelFilters(
         verdict=_clean(verdict),
         language=_clean(language),
-        reason=_clean(reason),
         q=_clean(q),
     )
 
@@ -137,8 +135,6 @@ def label_filters_query_string(filters: LabelFilters, *, drop: str | None = None
         params.append(("verdict", filters.verdict))
     if filters.language is not None and drop != "language":
         params.append(("language", filters.language))
-    if filters.reason is not None and drop != "reason":
-        params.append(("reason", filters.reason))
     if filters.q is not None and drop != "q":
         params.append(("q", filters.q))
     return urlencode(params)
@@ -146,10 +142,7 @@ def label_filters_query_string(filters: LabelFilters, *, drop: str | None = None
 
 def label_filters_active(filters: LabelFilters) -> bool:
     """Return ``True`` when any of the label filters is set."""
-    return any(
-        value is not None
-        for value in (filters.verdict, filters.language, filters.reason, filters.q)
-    )
+    return any(value is not None for value in (filters.verdict, filters.language, filters.q))
 
 
 __all__ = [

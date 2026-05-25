@@ -27,10 +27,9 @@ from msgspec import Struct
 from msgspec.json import decode as json_decode
 from msgspec.json import encode as json_encode
 
-from pd_groundtruth.review.field_annotations import FieldAnnotation
 from pd_matcher.models import MarcRecord
 
-SCHEMA_VERSION: int = 2
+SCHEMA_VERSION: int = 3
 
 
 class MarcIdentifiers(Struct, frozen=True, forbid_unknown_fields=True):
@@ -45,23 +44,20 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     """One verdict event persisted to the label vault.
 
     A ``(marc_control_id, nypl_uuid)`` pair may appear in the vault multiple
-    times; the latest entry by file order wins. ``reasons`` is empty for
-    ``match`` verdicts and zero-or-more controlled codes otherwise.
-
-    ``field_annotations`` carries the per-field scorer judgments (schema 2+)
-    and defaults to the empty tuple so schema-1 lines decode unchanged.
+    times; the latest entry by file order wins. Free-text ``note`` is the only
+    structured signal the labeler carries alongside the verdict — the
+    pre-schema-3 ``reasons`` and ``field_annotations`` fields have been retired
+    in favor of letting accumulated notes surface patterns naturally.
     """
 
     schema: int
     marc_control_id: str
     nypl_uuid: str
     verdict: str
-    reasons: tuple[str, ...]
     note: str | None
     labeled_at: str
     labeler: str
     marc_identifiers: MarcIdentifiers
-    field_annotations: tuple[FieldAnnotation, ...] = ()
 
 
 def append_entry(path: Path, entry: VaultEntry) -> None:

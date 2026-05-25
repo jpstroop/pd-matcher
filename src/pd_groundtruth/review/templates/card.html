@@ -9,9 +9,6 @@
 <form id="label-form" method="post" action="/label">
   <input type="hidden" name="pair_id" value="{{ card.pair_id }}">
   <input type="hidden" name="verdict" id="verdict-field" value="">
-  {% for field in annotatable_fields %}
-  <input type="hidden" name="annotation_{{ field }}" id="annotation-input-{{ field }}" value="">
-  {% endfor %}
   {% if filters.language %}<input type="hidden" name="language" value="{{ filters.language }}">{% endif %}
   {% if filters.band %}<input type="hidden" name="band" value="{{ filters.band }}">{% endif %}
 
@@ -114,53 +111,12 @@
     {% endif %}
   </section>
 
-  <div class="reasons">
-    <div class="reason-group">
-      <span class="reason-label">No-match reason</span>
-      {% for r in no_match_reasons %}
-      <button type="button" class="chip no" data-verdict="no_match" data-reason="{{ r.code }}">{{ r.label }}</button>
-      {% endfor %}
-    </div>
-    <div class="reason-group">
-      <span class="reason-label">Unsure reason</span>
-      {% for r in unsure_reasons %}
-      <button type="button" class="chip unsure" data-verdict="unsure" data-reason="{{ r.code }}">{{ r.label }}</button>
-      {% endfor %}
-    </div>
-    <input type="text" name="note" id="note-field" class="note-input" autocomplete="off"
-           placeholder="Optional note (free text)">
-  </div>
-  <div class="field-annotations" id="field-annotations">
-    <div class="field-annotations-heading">field annotations <span class="field-annotations-hint">(optional — leave blank if scorer was right)</span></div>
-    <table class="field-annotations-table">
-      <thead>
-        <tr>
-          <th class="field-annotations-rowhead"></th>
-          {% for judgment in field_judgments %}
-          <th class="annotation-judgment-head {{ judgment }}">{{ judgment | replace("_", "/") }}</th>
-          {% endfor %}
-        </tr>
-      </thead>
-      <tbody>
-        {% for field in annotatable_fields %}
-        <tr>
-          <th class="field-annotations-rowhead">{{ field }}</th>
-          {% for judgment in field_judgments %}
-          <td>
-            <button type="button"
-                    class="annotation-cell {{ judgment }}"
-                    data-field="{{ field }}"
-                    data-judgment="{{ judgment }}"
-                    aria-label="{{ field }} {{ judgment }}">&nbsp;</button>
-          </td>
-          {% endfor %}
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="note-block">
+    <textarea name="note" id="note-field" rows="3" autocomplete="off"
+              placeholder="Note (optional) — capture anything notable about this pair"></textarea>
   </div>
 </form>
-<p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}. Toggle any number of reason chips to mark <em>why</em> a no-match/unsure; the chosen verdict key or button records the selected reasons (codes that don't fit the verdict are ignored). Per-field annotations are optional — click a cell to flag the scorer; click again to clear.</p>
+<p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}. The note field captures whatever you think is worth flagging about the pair; accumulated notes will be analyzed later to surface patterns.</p>
 
 <script>
 (function () {
@@ -170,46 +126,10 @@
   const nextUrl = "/{% if filters.query_string() %}?{{ filters.query_string() | safe }}{% endif %}";
   const skipUrl = "/{% set qs = filters.next_query_string(additional_skip_id=card.pair_id) %}{% if qs %}?{{ qs | safe }}{% endif %}";
   const backLink = document.getElementById("back-link");
-  const chips = document.querySelectorAll(".reasons .chip");
-  const annotationCells = document.querySelectorAll(".annotation-cell");
-
-  function selectedReasons() {
-    const codes = [];
-    chips.forEach(function (chip) {
-      if (chip.classList.contains("selected")) { codes.push(chip.dataset.reason); }
-    });
-    return codes;
-  }
-
-  function clearFieldSelection(field) {
-    annotationCells.forEach(function (cell) {
-      if (cell.dataset.field === field) { cell.classList.remove("selected"); }
-    });
-    const input = document.getElementById("annotation-input-" + field);
-    if (input) { input.value = ""; }
-  }
-
-  function setFieldSelection(field, judgment) {
-    annotationCells.forEach(function (cell) {
-      if (cell.dataset.field === field) {
-        cell.classList.toggle("selected", cell.dataset.judgment === judgment);
-      }
-    });
-    const input = document.getElementById("annotation-input-" + field);
-    if (input) { input.value = judgment; }
-  }
 
   function submitVerdict(verdict) {
     if (!verdict) { window.location.href = skipUrl; return; }
     verdictField.value = verdict;
-    form.querySelectorAll('input[name="reason"]').forEach(function (el) { el.remove(); });
-    selectedReasons().forEach(function (code) {
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = "reason";
-      input.value = code;
-      form.appendChild(input);
-    });
     form.submit();
   }
 
@@ -219,20 +139,6 @@
 
   document.querySelectorAll(".actions button").forEach(function (btn) {
     btn.addEventListener("click", function () { submitVerdict(btn.dataset.verdict); });
-  });
-  chips.forEach(function (chip) {
-    chip.addEventListener("click", function () { chip.classList.toggle("selected"); });
-  });
-  annotationCells.forEach(function (cell) {
-    cell.addEventListener("click", function () {
-      const field = cell.dataset.field;
-      const judgment = cell.dataset.judgment;
-      if (cell.classList.contains("selected")) {
-        clearFieldSelection(field);
-      } else {
-        setFieldSelection(field, judgment);
-      }
-    });
   });
 
   document.addEventListener("keydown", function (e) {

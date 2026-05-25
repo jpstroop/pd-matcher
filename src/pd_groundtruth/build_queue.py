@@ -227,7 +227,7 @@ class StratifyingResultWriter:
 
     When a vault entry exists for an inserted pair's
     ``(marc_control_id, nypl_uuid)`` key, the writer also inserts a ``label``
-    row using that vault entry's verdict / reasons / note / ``labeled_at`` so a
+    row using that vault entry's verdict / note / ``labeled_at`` so a
     rebuilt queue still reports the pair as labeled and ``next_unlabeled`` skips
     it. The reviewer can step back to re-label if needed.
 
@@ -373,8 +373,6 @@ class StratifyingResultWriter:
                 verdict=resolved.entry.verdict,
                 labeled_at=resolved.entry.labeled_at,
                 note=resolved.entry.note,
-                reasons=resolved.entry.reasons,
-                annotations=resolved.entry.field_annotations,
             )
             self._vault_applied += 1
             key = (resolved.pair.language, resolved.pair.band)
@@ -391,8 +389,6 @@ class StratifyingResultWriter:
             verdict=entry.verdict,
             labeled_at=entry.labeled_at,
             note=entry.note,
-            reasons=entry.reasons,
-            annotations=entry.field_annotations,
         )
         self._vault_applied += 1
 

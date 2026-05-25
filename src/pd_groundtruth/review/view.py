@@ -19,9 +19,6 @@ from re import compile as re_compile
 from msgspec import Struct
 from msgspec.json import decode as json_decode
 
-from pd_groundtruth.review.field_annotations import FieldAnnotation
-from pd_groundtruth.review.field_annotations import judgment_symbol
-from pd_groundtruth.review.reasons import reasons_for
 from pd_groundtruth.review.relative_time import format_relative
 from pd_groundtruth.review_db import LabeledPairRow
 from pd_groundtruth.review_db import ReviewPairRow
@@ -393,6 +390,9 @@ def _build_evidence(evidence_json: str, evidence_sources_json: str) -> tuple[Evi
     )
 
 
+_NOTE_TRUNCATE: int = 120
+
+
 class LabeledRow(Struct, frozen=True, forbid_unknown_fields=True):
     """A render-ready projection of one row in the ``/labels`` table."""
 
@@ -404,12 +404,10 @@ class LabeledRow(Struct, frozen=True, forbid_unknown_fields=True):
     cce_title: str
     cce_title_short: str
     verdict: str
-    reason_codes: tuple[str, ...]
-    reason_labels: tuple[str, ...]
+    note: str
+    note_short: str
     labeled_at: str
     labeled_relative: str
-    field_annotations: tuple[FieldAnnotation, ...]
-    annotation_tags: tuple[str, ...]
 
 
 def _truncate(value: str, limit: int = _TITLE_TRUNCATE) -> str:
@@ -419,33 +417,17 @@ def _truncate(value: str, limit: int = _TITLE_TRUNCATE) -> str:
     return value[: limit - 1].rstrip() + _ELLIPSIS
 
 
-def _resolve_reason_labels(verdict: str, codes: tuple[str, ...]) -> tuple[str, ...]:
-    """Map reason codes to their human-readable labels for ``verdict``.
-
-    Codes outside the verdict's vocabulary fall back to the raw code so the
-    display never silently drops a stored value (e.g. an entry preserved from
-    an older vocabulary).
-    """
-    if not codes:
-        return ()
-    vocabulary = {reason.code: reason.label for reason in reasons_for(verdict)}
-    return tuple(vocabulary.get(code, code) for code in codes)
-
-
-def _annotation_tag(annotation: FieldAnnotation) -> str:
-    """Render one annotation as a compact ``field:symbol`` tag for the labels table."""
-    return f"{annotation.field}:{judgment_symbol(annotation.judgment)}"
-
-
 def build_labeled_row(row: LabeledPairRow, now: datetime) -> LabeledRow:
     """Project one :class:`LabeledPairRow` into a render-ready :class:`LabeledRow`.
 
     Empty / null titles render as the empty string in the table; the truncated
     forms drive what the cell displays while the full strings live in the
-    hover ``title`` attribute for disambiguation.
+    hover ``title`` attribute for disambiguation. The same shape applies to
+    the optional ``note``.
     """
     marc_title = row.marc_title or ""
     cce_title = row.cce_title or ""
+    note = row.note or ""
     return LabeledRow(
         pair_id=row.pair_id,
         language=row.language,
@@ -455,12 +437,10 @@ def build_labeled_row(row: LabeledPairRow, now: datetime) -> LabeledRow:
         cce_title=cce_title,
         cce_title_short=_truncate(cce_title),
         verdict=row.verdict,
-        reason_codes=row.reason_codes,
-        reason_labels=_resolve_reason_labels(row.verdict, row.reason_codes),
+        note=note,
+        note_short=_truncate(note, _NOTE_TRUNCATE),
         labeled_at=row.labeled_at,
         labeled_relative=format_relative(row.labeled_at, now),
-        field_annotations=row.field_annotations,
-        annotation_tags=tuple(_annotation_tag(ann) for ann in row.field_annotations),
     )
 
 
