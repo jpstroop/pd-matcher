@@ -7,10 +7,6 @@ from datetime import timedelta
 
 from msgspec.json import encode as json_encode
 
-from pd_groundtruth.review.field_annotations import JUDGMENT_CORRECT
-from pd_groundtruth.review.field_annotations import JUDGMENT_NA
-from pd_groundtruth.review.field_annotations import JUDGMENT_OVERSCORED
-from pd_groundtruth.review.field_annotations import FieldAnnotation
 from pd_groundtruth.review.view import CLAIMANT_LABEL
 from pd_groundtruth.review.view import RENEWAL_NOT_RENEWED
 from pd_groundtruth.review.view import RENEWAL_RENEWED
@@ -515,9 +511,8 @@ def _labeled_row(
     marc_title: str | None = "A short title",
     cce_title: str | None = "CCE title",
     verdict: str = "no_match",
-    reason_codes: tuple[str, ...] = (),
+    note: str | None = None,
     labeled_at: str = "2026-05-23T11:30:00+00:00",
-    field_annotations: tuple[FieldAnnotation, ...] = (),
 ) -> LabeledPairRow:
     return LabeledPairRow(
         pair_id=pair_id,
@@ -526,9 +521,8 @@ def _labeled_row(
         marc_title=marc_title,
         cce_title=cce_title,
         verdict=verdict,
-        reason_codes=reason_codes,
+        note=note,
         labeled_at=labeled_at,
-        field_annotations=field_annotations,
     )
 
 
@@ -558,45 +552,27 @@ def test_build_labeled_row_handles_null_titles() -> None:
     assert row.cce_title_short == ""
 
 
-def test_build_labeled_row_resolves_reason_codes_to_labels() -> None:
+def test_build_labeled_row_handles_null_note() -> None:
     now = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
-    row = build_labeled_row(
-        _labeled_row(verdict="no_match", reason_codes=("diff_work", "garbled")),
-        now,
-    )
-    assert row.reason_codes == ("diff_work", "garbled")
-    assert row.reason_labels == (
-        "Different work / title collision",
-        "Garbled transcription",
-    )
+    row = build_labeled_row(_labeled_row(note=None), now)
+    assert row.note == ""
+    assert row.note_short == ""
 
 
-def test_build_labeled_row_renders_annotation_tags() -> None:
+def test_build_labeled_row_preserves_short_note_unchanged() -> None:
     now = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
-    annotations = (
-        FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),
-        FieldAnnotation(field="author", judgment=JUDGMENT_OVERSCORED),
-        FieldAnnotation(field="year", judgment=JUDGMENT_NA),
-    )
-    row = build_labeled_row(_labeled_row(field_annotations=annotations), now)
-    assert row.field_annotations == annotations
-    assert row.annotation_tags == ("title:OK", "author:over", "year:n/a")
+    row = build_labeled_row(_labeled_row(note="quick check"), now)
+    assert row.note == "quick check"
+    assert row.note_short == "quick check"
 
 
-def test_build_labeled_row_empty_annotation_tags_when_none_present() -> None:
+def test_build_labeled_row_truncates_long_note_with_ellipsis() -> None:
     now = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
-    row = build_labeled_row(_labeled_row(), now)
-    assert row.field_annotations == ()
-    assert row.annotation_tags == ()
-
-
-def test_build_labeled_row_falls_back_to_code_when_label_unknown() -> None:
-    now = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
-    row = build_labeled_row(
-        _labeled_row(verdict="match", reason_codes=("legacy_code",)),
-        now,
-    )
-    assert row.reason_labels == ("legacy_code",)
+    long_note = "x" * 200
+    row = build_labeled_row(_labeled_row(note=long_note), now)
+    assert row.note == long_note
+    assert len(row.note_short) == 120
+    assert row.note_short.endswith("…")
 
 
 def test_build_labeled_row_renders_relative_time() -> None:

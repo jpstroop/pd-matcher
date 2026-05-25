@@ -23,19 +23,11 @@ from sqlite3 import connect as sqlite_connect
 
 from msgspec import Struct
 
-from pd_groundtruth.review.field_annotations import ALL_JUDGMENTS
-from pd_groundtruth.review.field_annotations import ANNOTATABLE_FIELDS
-from pd_groundtruth.review.field_annotations import FieldAnnotation
-from pd_groundtruth.review.field_annotations import field_index
-
 VERDICT_MATCH: str = "match"
 VERDICT_NO_MATCH: str = "no_match"
 VERDICT_UNSURE: str = "unsure"
 
 _VALID_VERDICTS: frozenset[str] = frozenset({VERDICT_MATCH, VERDICT_NO_MATCH, VERDICT_UNSURE})
-
-ANNOTATABLE_FIELDS_SET: frozenset[str] = frozenset(ANNOTATABLE_FIELDS)
-ALL_JUDGMENTS_SET: frozenset[str] = frozenset(ALL_JUDGMENTS)
 
 _SCHEMA: str = """
 CREATE TABLE IF NOT EXISTS review_pair (
@@ -88,33 +80,12 @@ CREATE TABLE IF NOT EXISTS label (
     id INTEGER PRIMARY KEY,
     pair_id INTEGER NOT NULL REFERENCES review_pair(id),
     verdict TEXT NOT NULL CHECK (verdict IN ('match', 'no_match', 'unsure')),
-    reason TEXT,
     note TEXT,
     labeled_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS label_reason (
-    label_id INTEGER NOT NULL REFERENCES label(id),
-    code TEXT NOT NULL,
-    PRIMARY KEY (label_id, code)
-);
-
-CREATE TABLE IF NOT EXISTS label_field_annotation (
-    label_id INTEGER NOT NULL REFERENCES label(id),
-    field_name TEXT NOT NULL CHECK (
-        field_name IN ('title', 'author', 'publisher', 'year', 'edition')
-    ),
-    judgment TEXT NOT NULL CHECK (
-        judgment IN ('correct', 'overscored', 'underscored', 'n_a')
-    ),
-    PRIMARY KEY (label_id, field_name)
-);
-
 CREATE INDEX IF NOT EXISTS ix_review_pair_lang_band ON review_pair (language, band);
 CREATE INDEX IF NOT EXISTS ix_label_pair ON label (pair_id);
-CREATE INDEX IF NOT EXISTS ix_label_reason_label ON label_reason (label_id);
-CREATE INDEX IF NOT EXISTS ix_label_field_annotation_label
-    ON label_field_annotation (label_id);
 """
 
 
@@ -126,7 +97,7 @@ class LabelInsertResult(Struct, frozen=True, forbid_unknown_fields=True):
 
 
 class CurrentLabelRow(Struct, frozen=True, forbid_unknown_fields=True):
-    """The current verdict for one pair joined with its reasons and MARC blob."""
+    """The current verdict for one pair joined with its MARC blob."""
 
     pair_id: int
     marc_control_id: str
@@ -135,8 +106,6 @@ class CurrentLabelRow(Struct, frozen=True, forbid_unknown_fields=True):
     verdict: str
     note: str | None
     labeled_at: str
-    reasons: tuple[str, ...]
-    field_annotations: tuple[FieldAnnotation, ...] = ()
 
 
 class LabeledPairRow(Struct, frozen=True, forbid_unknown_fields=True):
@@ -144,7 +113,7 @@ class LabeledPairRow(Struct, frozen=True, forbid_unknown_fields=True):
 
     Carries only the columns the table view renders (no MARC blob, no
     evidence): the originating pair id and its denormalized ``marc_*`` /
-    ``cce_title`` columns, the current verdict and its reason codes, plus the
+    ``cce_title`` columns, the current verdict and its optional note, plus the
     ``labeled_at`` timestamp for relative-time rendering.
     """
 
@@ -154,9 +123,8 @@ class LabeledPairRow(Struct, frozen=True, forbid_unknown_fields=True):
     marc_title: str | None
     cce_title: str | None
     verdict: str
-    reason_codes: tuple[str, ...]
+    note: str | None
     labeled_at: str
-    field_annotations: tuple[FieldAnnotation, ...] = ()
 
 
 class LabelFilters(Struct, frozen=True, forbid_unknown_fields=True):
@@ -164,13 +132,11 @@ class LabelFilters(Struct, frozen=True, forbid_unknown_fields=True):
 
     All fields AND together; an unset field imposes no constraint. ``q`` is a
     case-insensitive substring matched against ``marc_title``, ``cce_title``,
-    and ``marc_control_id``. ``reason`` filters to labels carrying the given
-    reason code (labels with no reasons are excluded when ``reason`` is set).
+    and ``marc_control_id``.
     """
 
     verdict: str | None = None
     language: str | None = None
-    reason: str | None = None
     q: str | None = None
 
 
@@ -302,17 +268,6 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _split_reason_codes(raw: str | None) -> tuple[str, ...]:
-    """Split a GROUP_CONCAT'd reason-code string into an ordered tuple.
-
-    Returns an empty tuple when the aggregate is ``NULL`` (no reasons on the
-    label) or after filtering yields no non-empty codes.
-    """
-    if not raw:
-        return ()
-    return tuple(code for code in raw.split(",") if code)
-
-
 _ADDITIVE_CCE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("cce_edition", "TEXT"),
     ("cce_publication_places", "TEXT"),
@@ -425,19 +380,15 @@ class ReviewDb:
     def init_schema(self) -> None:
         """Create tables and indices if they do not already exist.
 
-        Runs three idempotent migrations so a partially-labeled ``review.db``
-        upgrades in place without losing any verdicts:
+        Also adds the extended ``cce_*`` columns to ``review_pair`` on databases
+        created before the full CCE surface was carried into the queue. Existing
+        rows get ``NULL`` for the new columns; the card view guards every new
+        field with an "if set" check.
 
-        1. Add the scalar ``label.reason`` column to databases created before
-           reason codes existed. The column is retained but no longer written;
-           SQLite makes dropping a column painful and a stale column is harmless.
-        2. Backfill the normalized ``label_reason`` table from any pre-existing
-           scalar ``label.reason`` values, so single-reason labels recorded
-           under the old schema still feed :meth:`reason_counts`.
-        3. Add the extended ``cce_*`` columns to ``review_pair`` for databases
-           created before the full CCE surface was carried into the queue.
-           Existing rows get ``NULL`` for the new columns; the card view
-           guards every new field with an "if set" check.
+        Legacy ``label_reason`` and ``label_field_annotation`` tables from
+        prior schema versions are left in place when present; SQLite makes
+        column/table drops painful and the new code never queries them. Use
+        ``build-queue --rebuild`` to get a clean schema next time.
         """
         self._conn.executescript(_SCHEMA)
         pair_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(review_pair)")}
@@ -446,34 +397,6 @@ class ReviewDb:
                 self._conn.execute(
                     f"ALTER TABLE review_pair ADD COLUMN {column_name} {column_type}"
                 )
-        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(label)")}
-        if "reason" not in columns:
-            self._conn.execute("ALTER TABLE label ADD COLUMN reason TEXT")
-        unmigrated = self._conn.execute(
-            """
-            SELECT EXISTS (
-                SELECT 1 FROM label l
-                WHERE l.reason IS NOT NULL
-                  AND NOT EXISTS (
-                      SELECT 1 FROM label_reason lr
-                      WHERE lr.label_id = l.id AND lr.code = l.reason
-                  )
-            )
-            """
-        ).fetchone()[0]
-        if unmigrated:
-            self._conn.execute(
-                """
-                INSERT INTO label_reason (label_id, code)
-                SELECT l.id, l.reason
-                FROM label l
-                WHERE l.reason IS NOT NULL
-                  AND NOT EXISTS (
-                      SELECT 1 FROM label_reason lr
-                      WHERE lr.label_id = l.id AND lr.code = l.reason
-                  )
-                """
-            )
 
     def commit(self) -> None:
         """Flush pending writes to disk."""
@@ -732,27 +655,14 @@ class ReviewDb:
         pair_id: int,
         verdict: str,
         note: str | None = None,
-        reasons: tuple[str, ...] = (),
-        annotations: tuple[FieldAnnotation, ...] = (),
     ) -> LabelInsertResult:
         """Append a verdict for ``pair_id`` and return the new label's id + timestamp.
 
-        ``reasons`` is zero or more controlled reason codes (see
-        :mod:`pd_groundtruth.review.reasons`), each written as its own
-        ``label_reason`` row; ``note`` is optional free text. The codes are
-        stored as-is — the caller is responsible for validating them against
-        the verdict's vocabulary. The legacy scalar ``label.reason`` column is
-        left ``NULL``; reasons live only in ``label_reason`` going forward.
-
-        ``annotations`` is zero or more :class:`FieldAnnotation` rows captured
-        from the per-field annotation grid; the caller is responsible for
-        normalizing them via :func:`normalize_annotations` before passing them
-        in. Each annotation lands in ``label_field_annotation`` keyed on the
-        new ``label_id``.
-
-        The returned :class:`LabelInsertResult` exposes the ISO-8601 timestamp
-        stamped onto the row so the caller (review UI) can pass the exact same
-        value to the label vault and keep DB and vault in lockstep.
+        ``note`` is optional free text — the only structured signal the labeler
+        carries alongside the verdict. The returned :class:`LabelInsertResult`
+        exposes the ISO-8601 timestamp stamped onto the row so the caller
+        (review UI) can pass the exact same value to the label vault and keep
+        DB and vault in lockstep.
 
         Raises:
             ValueError: If ``verdict`` is not one of ``match``,
@@ -768,23 +678,13 @@ class ReviewDb:
         row_id = cursor.lastrowid
         if row_id is None:  # pragma: no cover
             raise RuntimeError("INSERT did not return a rowid")
-        self._conn.executemany(
-            "INSERT INTO label_reason (label_id, code) VALUES (?, ?)",
-            [(row_id, code) for code in reasons],
-        )
-        self._conn.executemany(
-            "INSERT INTO label_field_annotation (label_id, field_name, judgment) VALUES (?, ?, ?)",
-            [(row_id, ann.field, ann.judgment) for ann in annotations],
-        )
         return LabelInsertResult(label_id=row_id, labeled_at=labeled_at)
 
     def iter_current_labels(self) -> Iterator[CurrentLabelRow]:
         """Yield one :class:`CurrentLabelRow` per labeled pair, latest verdict only.
 
         The "current" label is the one with ``MAX(id)`` per ``pair_id`` (the
-        monotonic action order used elsewhere). Reasons are aggregated into a
-        tuple ordered by ``label_reason.code`` so the result is deterministic
-        across runs.
+        monotonic action order used elsewhere).
         """
         rows = self._conn.execute(
             """
@@ -795,8 +695,7 @@ class ReviewDb:
                 rp.marc_json AS marc_json,
                 cur.verdict AS verdict,
                 cur.note AS note,
-                cur.labeled_at AS labeled_at,
-                cur.id AS label_id
+                cur.labeled_at AS labeled_at
             FROM review_pair rp
             JOIN (
                 SELECT l.id, l.pair_id, l.verdict, l.note, l.labeled_at
@@ -811,10 +710,6 @@ class ReviewDb:
             """
         ).fetchall()
         for row in rows:
-            reason_rows = self._conn.execute(
-                "SELECT code FROM label_reason WHERE label_id = ? ORDER BY code",
-                (row["label_id"],),
-            ).fetchall()
             yield CurrentLabelRow(
                 pair_id=row["pair_id"],
                 marc_control_id=row["marc_control_id"],
@@ -823,8 +718,6 @@ class ReviewDb:
                 verdict=row["verdict"],
                 note=row["note"],
                 labeled_at=row["labeled_at"],
-                reasons=tuple(reason_row["code"] for reason_row in reason_rows),
-                field_annotations=self.annotations_for_label(row["label_id"]),
             )
 
     def insert_existing_label(
@@ -833,16 +726,13 @@ class ReviewDb:
         verdict: str,
         labeled_at: str,
         note: str | None = None,
-        reasons: tuple[str, ...] = (),
-        annotations: tuple[FieldAnnotation, ...] = (),
     ) -> int:
         """Insert a label whose verdict came from outside this database.
 
         Used by ``build-queue`` to pre-apply labels carried over from the label
-        vault: the verdict / reasons / note / ``labeled_at`` come from the
-        vault entry verbatim, so a rebuilt queue still reports the pair as
-        labeled without inventing a new timestamp. ``annotations`` carries the
-        vault entry's per-field annotations forward in the same way.
+        vault: the verdict / note / ``labeled_at`` come from the vault entry
+        verbatim, so a rebuilt queue still reports the pair as labeled without
+        inventing a new timestamp.
 
         Raises:
             ValueError: If ``verdict`` is not one of ``match``,
@@ -857,14 +747,6 @@ class ReviewDb:
         row_id = cursor.lastrowid
         if row_id is None:  # pragma: no cover
             raise RuntimeError("INSERT did not return a rowid")
-        self._conn.executemany(
-            "INSERT INTO label_reason (label_id, code) VALUES (?, ?)",
-            [(row_id, code) for code in reasons],
-        )
-        self._conn.executemany(
-            "INSERT INTO label_field_annotation (label_id, field_name, judgment) VALUES (?, ?, ?)",
-            [(row_id, ann.field, ann.judgment) for ann in annotations],
-        )
         return row_id
 
     def count_labeled_pairs(self, filters: LabelFilters = _NO_LABEL_FILTERS) -> int:
@@ -895,9 +777,7 @@ class ReviewDb:
         The "current" label is the latest by ``MAX(id)`` per ``pair_id``
         (matching :meth:`iter_current_labels` / :meth:`progress`). Rows are
         ordered ``labeled_at DESC`` so the most recently labeled pair appears
-        first, then sliced by ``page_size`` / ``page`` (1-indexed). Reason
-        codes are aggregated into a tuple ordered by ``label_reason.code`` so
-        the result is deterministic across runs.
+        first, then sliced by ``page_size`` / ``page`` (1-indexed).
         """
         if page < 1:
             raise ValueError(f"page must be >= 1, got {page}")
@@ -910,10 +790,7 @@ class ReviewDb:
                 "rp.id AS pair_id, rp.language AS language, "
                 "rp.marc_control_id AS marc_control_id, rp.marc_title AS marc_title, "
                 "rp.cce_title AS cce_title, l.verdict AS verdict, "
-                "l.labeled_at AS labeled_at, l.id AS label_id, "
-                "(SELECT GROUP_CONCAT(code, ',') FROM ("
-                "  SELECT code FROM label_reason WHERE label_id = l.id ORDER BY code"
-                ")) AS reason_codes"
+                "l.note AS note, l.labeled_at AS labeled_at"
             ),
             order_limit="ORDER BY l.labeled_at DESC, rp.id LIMIT ? OFFSET ?",
         )
@@ -927,9 +804,8 @@ class ReviewDb:
                 marc_title=row["marc_title"],
                 cce_title=row["cce_title"],
                 verdict=row["verdict"],
+                note=row["note"],
                 labeled_at=row["labeled_at"],
-                reason_codes=_split_reason_codes(row["reason_codes"]),
-                field_annotations=self.annotations_for_label(row["label_id"]),
             )
             for row in rows
         )
@@ -950,9 +826,6 @@ class ReviewDb:
         if filters.language is not None:
             clauses.append("rp.language = ?")
             params.append(filters.language)
-        if filters.reason is not None:
-            clauses.append("EXISTS (SELECT 1 FROM label_reason WHERE label_id = l.id AND code = ?)")
-            params.append(filters.reason)
         if filters.q:
             pattern = f"%{filters.q.lower()}%"
             clauses.append(
@@ -974,86 +847,12 @@ class ReviewDb:
         """
         return sql, tuple(params)
 
-    def annotations_for_label(self, label_id: int) -> tuple[FieldAnnotation, ...]:
-        """Return the per-field annotations attached to ``label_id`` in vocab order.
-
-        Rows are sorted by :data:`ANNOTATABLE_FIELDS` order in Python rather
-        than relying on SQLite's lexicographic ordering, so the result matches
-        the order :func:`normalize_annotations` produces. Empty tuple when the
-        label carries no annotations.
-        """
-        rows = self._conn.execute(
-            "SELECT field_name, judgment FROM label_field_annotation WHERE label_id = ?",
-            (label_id,),
-        ).fetchall()
-        annotations = [
-            FieldAnnotation(field=row["field_name"], judgment=row["judgment"])
-            for row in rows
-            if row["field_name"] in ANNOTATABLE_FIELDS_SET and row["judgment"] in ALL_JUDGMENTS_SET
-        ]
-        annotations.sort(key=lambda annotation: field_index(annotation.field))
-        return tuple(annotations)
-
-    def field_annotation_counts(self) -> dict[tuple[str, str], int]:
-        """Return counts of current-label annotations keyed on ``(field, judgment)``.
-
-        Joins ``label_field_annotation`` to the latest label per pair (matching
-        :meth:`progress`), so superseded labels' annotations are excluded. The
-        result is a tally of where the scorer is currently agreed-with /
-        flagged-as-overscored / flagged-as-underscored / not-assessable across
-        the labeled corpus, feeding the ``/stats`` per-field table.
-        """
-        rows = self._conn.execute(
-            """
-            SELECT lfa.field_name AS field_name, lfa.judgment AS judgment, COUNT(*) AS n
-            FROM (
-                SELECT l.id
-                FROM label l
-                JOIN (
-                    SELECT pair_id, MAX(id) AS max_id FROM label GROUP BY pair_id
-                ) latest
-                  ON l.pair_id = latest.pair_id AND l.id = latest.max_id
-            ) cur
-            JOIN label_field_annotation lfa ON lfa.label_id = cur.id
-            GROUP BY lfa.field_name, lfa.judgment
-            """
-        ).fetchall()
-        return {(row["field_name"], row["judgment"]): row["n"] for row in rows}
-
-    def reason_counts(self) -> dict[tuple[str, str], int]:
-        """Return counts of current-label reason codes keyed on ``(verdict, code)``.
-
-        Joins ``label_reason`` to the latest label per pair (matching
-        :meth:`progress`), so a label carrying two codes contributes to two
-        counts and superseded labels' reasons are excluded. The result is a
-        tally of *why* the current no_match / unsure verdicts were given.
-        """
-        rows = self._conn.execute(
-            """
-            SELECT cur.verdict AS verdict, lr.code AS code, COUNT(*) AS n
-            FROM (
-                SELECT l.id, l.verdict
-                FROM label l
-                JOIN (
-                    SELECT pair_id, MAX(id) AS max_id FROM label GROUP BY pair_id
-                ) latest
-                  ON l.pair_id = latest.pair_id AND l.id = latest.max_id
-            ) cur
-            JOIN label_reason lr ON lr.label_id = cur.id
-            GROUP BY cur.verdict, lr.code
-            """
-        ).fetchall()
-        return {(row["verdict"], row["code"]): row["n"] for row in rows}
-
 
 __all__ = [
-    "ALL_JUDGMENTS_SET",
-    "ANNOTATABLE_FIELDS_SET",
     "VERDICT_MATCH",
     "VERDICT_NO_MATCH",
     "VERDICT_UNSURE",
     "CurrentLabelRow",
-    "FieldAnnotation",
     "LabelFilters",
     "LabelInsertResult",
     "LabeledPairRow",

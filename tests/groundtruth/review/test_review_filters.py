@@ -72,43 +72,39 @@ def test_next_query_string_without_additional_id_includes_existing_skips() -> No
 
 
 def test_parse_label_filters_passes_through_set_values() -> None:
-    filters = parse_label_filters("match", "eng", "diff_work", "acme")
+    filters = parse_label_filters("match", "eng", "acme")
     assert filters.verdict == "match"
     assert filters.language == "eng"
-    assert filters.reason == "diff_work"
     assert filters.q == "acme"
 
 
 def test_parse_label_filters_blanks_become_none() -> None:
-    filters = parse_label_filters("  ", "", None, "")
+    filters = parse_label_filters("  ", "", "")
     assert filters.verdict is None
     assert filters.language is None
-    assert filters.reason is None
     assert filters.q is None
 
 
 def test_label_filters_active_detects_any_set_filter() -> None:
-    assert not label_filters_active(parse_label_filters(None, None, None, None))
-    assert label_filters_active(parse_label_filters("match", None, None, None))
-    assert label_filters_active(parse_label_filters(None, "eng", None, None))
-    assert label_filters_active(parse_label_filters(None, None, "diff_work", None))
-    assert label_filters_active(parse_label_filters(None, None, None, "acme"))
+    assert not label_filters_active(parse_label_filters(None, None, None))
+    assert label_filters_active(parse_label_filters("match", None, None))
+    assert label_filters_active(parse_label_filters(None, "eng", None))
+    assert label_filters_active(parse_label_filters(None, None, "acme"))
 
 
 def test_label_filters_query_string_renders_all_set_keys() -> None:
-    filters = parse_label_filters("match", "eng", "diff_work", "acme")
+    filters = parse_label_filters("match", "eng", "acme")
     qs = label_filters_query_string(filters)
     assert "verdict=match" in qs
     assert "language=eng" in qs
-    assert "reason=diff_work" in qs
     assert "q=acme" in qs
 
 
 def test_label_filters_query_string_empty_when_no_filters() -> None:
-    assert label_filters_query_string(parse_label_filters(None, None, None, None)) == ""
+    assert label_filters_query_string(parse_label_filters(None, None, None)) == ""
 
 
 def test_label_filters_query_string_drop_excludes_one_key() -> None:
-    filters = parse_label_filters("match", "eng", None, None)
+    filters = parse_label_filters("match", "eng", None)
     assert label_filters_query_string(filters, drop="verdict") == "language=eng"
     assert label_filters_query_string(filters, drop="language") == "verdict=match"

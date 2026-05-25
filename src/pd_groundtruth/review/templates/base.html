@@ -77,53 +77,13 @@
     .actions button.no { color: var(--no); }
     .actions button.unsure { color: var(--unsure); }
     .actions button.skip { color: var(--muted); }
-    .reasons { margin-top: .9rem; display: flex; flex-direction: column; gap: .5rem; }
-    .reason-group { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; }
-    .reason-label { color: var(--muted); font-size: .72rem; text-transform: uppercase;
-                    letter-spacing: .06em; min-width: 7.5rem; }
-    .chip { padding: .25rem .6rem; font-size: .82rem; border: 1px solid var(--line);
-            border-radius: 999px; background: #fff; cursor: pointer; }
-    .chip.no { color: var(--no); }
-    .chip.unsure { color: var(--unsure); }
-    .chip:hover { border-color: currentColor; }
-    .chip.selected { border-color: currentColor; border-width: 2px; font-weight: 600;
-                     background: currentColor; }
-    .chip.selected.no { color: var(--no); }
-    .chip.selected.unsure { color: var(--unsure); }
-    .chip.selected { box-shadow: inset 0 0 0 99px rgba(255, 255, 255, .82); }
-    .note-input { width: 100%; padding: .5rem .6rem; font-size: .9rem;
-                  border: 1px solid var(--line); border-radius: 8px; margin-top: .2rem; }
-    .field-annotations { margin-top: .9rem; padding: .6rem .8rem; border: 1px solid var(--line);
-                          border-radius: 8px; background: #fafafb; }
-    .field-annotations-heading { font-size: .72rem; text-transform: uppercase;
-                                  letter-spacing: .06em; color: var(--muted);
-                                  margin-bottom: .35rem; }
-    .field-annotations-hint { text-transform: none; letter-spacing: 0; font-style: italic;
-                               margin-left: .35rem; }
-    .field-annotations-table { border-collapse: collapse; width: auto; }
-    .field-annotations-table th, .field-annotations-table td { padding: .2rem .55rem;
-                                                                 text-align: center;
-                                                                 vertical-align: middle; }
-    .field-annotations-rowhead { color: var(--muted); font-size: .78rem; font-weight: 500;
-                                  text-align: left; }
-    .annotation-judgment-head { color: var(--muted); font-size: .68rem;
-                                 text-transform: uppercase; letter-spacing: .06em;
-                                 font-weight: 600; }
-    .annotation-cell { width: 1.4rem; height: 1.4rem; padding: 0; border: 1px solid var(--line);
-                        border-radius: 4px; background: #fff; cursor: pointer; }
-    .annotation-cell:hover { border-color: currentColor; }
-    .annotation-cell.selected { border-width: 2px; font-weight: 700; }
-    .annotation-cell.correct.selected { background: #d4edda; border-color: var(--match); }
-    .annotation-cell.overscored.selected { background: #f8d7da; border-color: var(--no); }
-    .annotation-cell.underscored.selected { background: #fff3cd; border-color: var(--unsure); }
-    .annotation-cell.n_a.selected { background: #e2e3e5; border-color: var(--muted); }
-    .annotation-judgment-head.correct { color: var(--match); }
-    .annotation-judgment-head.overscored { color: var(--no); }
-    .annotation-judgment-head.underscored { color: var(--unsure); }
-    .annotation-judgment-head.n_a { color: var(--muted); }
-    .annotation-tag { display: inline-block; padding: 0 .35rem; border-radius: 4px;
-                       background: #eef1ff; color: var(--accent); font-size: .72rem;
-                       margin-right: .2rem; }
+    .note-block { margin-top: 1rem; }
+    .note-block textarea { width: 100%; padding: .65rem .8rem; font-size: .95rem;
+                            border: 1px solid var(--line); border-radius: 10px;
+                            background: #fff; font-family: inherit; resize: vertical;
+                            min-height: 4.5rem; line-height: 1.4; }
+    .note-block textarea:focus { outline: none; border-color: var(--accent);
+                                  box-shadow: 0 0 0 2px rgba(41, 98, 255, .15); }
     .hint { color: var(--muted); font-size: .82rem; margin-top: .8rem; }
     table.stats { border-collapse: collapse; width: 100%; }
     table.stats th, table.stats td { text-align: left; padding: .4rem .8rem;
@@ -146,8 +106,7 @@
     table.labels-table tbody tr:hover { background: #eef1ff; }
     table.labels-table a { color: var(--accent); text-decoration: none; }
     table.labels-table a:hover { text-decoration: underline; }
-    .reasons-cell { display: flex; flex-wrap: wrap; gap: .25rem; }
-    .reason-chip { font-size: .72rem; padding: .1rem .45rem; cursor: default; }
+    .note-cell { color: var(--muted); font-size: .82rem; max-width: 28rem; }
     .filters-bar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: end;
                     margin: .6rem 0 .9rem; }
     .filters-bar label { display: flex; flex-direction: column; font-size: .72rem;

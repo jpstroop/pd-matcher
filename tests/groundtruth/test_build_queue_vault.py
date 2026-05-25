@@ -65,18 +65,11 @@ def test_make_vault_pair_builder_bands_below_when_score_under_threshold() -> Non
     assert pair.band == "below"
 
 
-def test_resolve_vault_for_build_carries_field_annotations() -> None:
-    """A pre-resolved vault entry's annotations land in the DB on re-insert.
-
-    Exercises the writer side via :class:`StratifyingResultWriter`
-    (covered in test_build_queue too), but here we verify the
-    ``ResolvedVaultPair`` round-trip preserves the entry verbatim.
-    """
+def test_resolve_vault_for_build_round_trips_entry_into_resolved_pair() -> None:
+    """A resolved vault pair carries the originating entry forward verbatim."""
     from pd_groundtruth.label_vault import SCHEMA_VERSION
     from pd_groundtruth.label_vault import MarcIdentifiers
     from pd_groundtruth.label_vault import VaultEntry
-    from pd_groundtruth.review.field_annotations import JUDGMENT_UNDERSCORED
-    from pd_groundtruth.review.field_annotations import FieldAnnotation
     from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
 
     builder = _make_vault_pair_builder()
@@ -86,14 +79,10 @@ def test_resolve_vault_for_build_carries_field_annotations() -> None:
         marc_control_id=pair.marc_control_id,
         nypl_uuid=pair.nypl_uuid,
         verdict="match",
-        reasons=(),
-        note=None,
+        note="seed",
         labeled_at="2026-05-22T10:00:00+00:00",
         labeler="jpstroop",
         marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
-        field_annotations=(FieldAnnotation(field="title", judgment=JUDGMENT_UNDERSCORED),),
     )
     resolved = ResolvedVaultPair(entry=entry, pair=pair)
-    assert resolved.entry.field_annotations == (
-        FieldAnnotation(field="title", judgment=JUDGMENT_UNDERSCORED),
-    )
+    assert resolved.entry == entry

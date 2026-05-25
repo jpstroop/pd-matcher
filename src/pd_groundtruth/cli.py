@@ -30,6 +30,7 @@ from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import default_budget
 from pd_groundtruth.sampling import scale_budget
 from pd_groundtruth.vault_into_queue import vault_into_queue
+from pd_groundtruth.vault_migration import migrate_vault_v3
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
 from pd_matcher.models import MarcRecord
@@ -332,12 +333,10 @@ def seed_vault_command(
                 marc_control_id=label.marc_control_id,
                 nypl_uuid=label.nypl_uuid,
                 verdict=label.verdict,
-                reasons=label.reasons,
                 note=label.note,
                 labeled_at=label.labeled_at,
                 labeler=_LABELER,
                 marc_identifiers=extract_marc_identifiers(marc),
-                field_annotations=label.field_annotations,
             )
             append_entry(vault, entry)
             seeded += 1
@@ -394,4 +393,37 @@ def vault_into_queue_command(
         f"{summary.missing_in_pool} MARC records not found in pool; "
         f"{summary.missing_in_index} CCE records not found in index; "
         f"{summary.already_present} already present (skipped)"
+    )
+
+
+@app.command(name="migrate-vault-v3")
+def migrate_vault_v3_command(
+    vault: Annotated[
+        Path,
+        Option("--vault", help="JSONL label vault to migrate in place."),
+    ] = _DEFAULT_VAULT_PATH,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Fold pre-schema-3 ``reasons`` / ``field_annotations`` into the note text.
+
+    Archives the original vault to ``<vault>.pre-v3`` and rewrites the
+    canonical path with one schema-3 :class:`VaultEntry` per line. Idempotent:
+    re-running on an already-migrated vault is a no-op and creates no
+    additional archive.
+    """
+    _configure_logging("migrate-vault-v3", log_file)
+    report = migrate_vault_v3(vault)
+    archive_note = (
+        f"archived original to {report.archive_path}"
+        if report.archive_path is not None
+        else "no migration needed (vault already at schema 3 or empty)"
+    )
+    echo(
+        f"migrated {report.total_entries} entries; "
+        f"folded reasons on {report.reasons_folded}; "
+        f"folded annotations on {report.annotations_folded}; "
+        f"{archive_note}"
     )

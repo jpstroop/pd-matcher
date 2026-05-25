@@ -145,8 +145,6 @@ def run_backfill(
                 verdict=resolved_pair.entry.verdict,
                 labeled_at=resolved_pair.entry.labeled_at,
                 note=resolved_pair.entry.note,
-                reasons=resolved_pair.entry.reasons,
-                annotations=resolved_pair.entry.field_annotations,
             )
     _LOGGER.info(
         "vault.backfill complete backfilled=%d already_present=%d "

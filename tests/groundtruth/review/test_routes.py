@@ -209,7 +209,7 @@ def labels_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
         eng_no = db.insert_pair(_pair(language="eng", control_id="eng-n", nypl_uuid="u-eng-n"))
         fre_match = db.insert_pair(_pair(language="fre", control_id="fre-m", nypl_uuid="u-fre-m"))
         db.add_label(eng_match, "match")
-        db.add_label(eng_no, "no_match", reasons=("diff_work",))
+        db.add_label(eng_no, "no_match", note="weird publisher")
         db.add_label(fre_match, "match")
     app = create_app(db_path, vault_path)
     with TestClient(app) as test_client:
@@ -283,6 +283,13 @@ def test_stats_route_renders_progress(client: TestClient) -> None:
     assert "By language" in response.text
 
 
+def test_stats_route_omits_reason_and_annotation_sections(client: TestClient) -> None:
+    response = client.get("/stats")
+    assert response.status_code == 200
+    assert "Reasons" not in response.text
+    assert "Field annotations" not in response.text
+
+
 def test_index_hides_back_link_before_any_label(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
@@ -312,58 +319,35 @@ def test_card_links_marc_control_id_to_princeton_catalog(client: TestClient) -> 
     assert 'href="https://catalog.princeton.edu/catalog/eng-1"' in response.text
 
 
-def test_card_renders_reason_chips(client: TestClient) -> None:
+def test_card_renders_note_textarea_not_chips_or_annotation_grid(client: TestClient) -> None:
     response = client.get("/")
-    assert "Different work / title collision" in response.text
-    assert "Insufficient data on one side" in response.text
-    assert 'name="note"' in response.text
+    assert response.status_code == 200
+    assert '<textarea name="note"' in response.text
+    assert 'class="chip' not in response.text
+    assert "annotation-cell" not in response.text
+    assert "Different work" not in response.text
+    assert "field annotations" not in response.text
 
 
-def test_reason_chip_records_reason(client: TestClient) -> None:
+def test_label_persists_note_to_db_and_vault(client: TestClient, vault_path: Path) -> None:
     client.post(
         "/label",
-        data={"pair_id": "1", "verdict": "no_match", "reason": "diff_work"},
+        data={"pair_id": "1", "verdict": "no_match", "note": "title collision"},
         follow_redirects=False,
     )
-    stats = client.get("/stats")
-    assert "Reasons (current" in stats.text
-    assert "Different work / title collision" in stats.text
+    [entry] = list(iter_entries(vault_path))
+    assert entry.verdict == "no_match"
+    assert entry.note == "title collision"
 
 
-def test_multiple_reasons_are_recorded(client: TestClient) -> None:
+def test_label_blank_note_collapses_to_none(client: TestClient, vault_path: Path) -> None:
     client.post(
         "/label",
-        data={"pair_id": "1", "verdict": "no_match", "reason": ["diff_work", "garbled"]},
+        data={"pair_id": "1", "verdict": "match", "note": "   "},
         follow_redirects=False,
     )
-    stats = client.get("/stats")
-    assert "Different work / title collision" in stats.text
-    assert "Garbled transcription" in stats.text
-
-
-def test_cross_verdict_and_invalid_reasons_are_dropped(client: TestClient) -> None:
-    client.post(
-        "/label",
-        data={
-            "pair_id": "1",
-            "verdict": "no_match",
-            "reason": ["diff_work", "edition_unsure", "nonsense"],
-        },
-        follow_redirects=False,
-    )
-    stats = client.get("/stats")
-    assert "Different work / title collision" in stats.text
-    assert "Unsure about edition" not in stats.text
-
-
-def test_invalid_reason_is_dropped(client: TestClient) -> None:
-    client.post(
-        "/label",
-        data={"pair_id": "1", "verdict": "match", "reason": "diff_work"},
-        follow_redirects=False,
-    )
-    stats = client.get("/stats")
-    assert "Reasons (current" not in stats.text
+    [entry] = list(iter_entries(vault_path))
+    assert entry.note is None
 
 
 def test_empty_queue_page_when_all_labeled(client: TestClient) -> None:
@@ -387,17 +371,6 @@ def test_ebook_badge_absent_for_physical_pairs(client: TestClient) -> None:
     assert '<span class="badge-ebook">' not in response.text
 
 
-def test_card_renders_new_reason_chips(client: TestClient) -> None:
-    response = client.get("/")
-    assert response.status_code == 200
-    assert "Generic title" in response.text
-    assert "Looks right but publisher differs" in response.text
-    assert "Possibly a translation vs. original" in response.text
-    assert "Reprint / different physical format" in response.text
-    assert "Possibly whole vs. part / volume" in response.text
-    assert "Looks like one issue of a periodical" in response.text
-
-
 def test_label_appends_to_vault(client: TestClient, vault_path: Path) -> None:
     assert not vault_path.exists()
     response = client.post(
@@ -413,9 +386,8 @@ def test_label_appends_to_vault(client: TestClient, vault_path: Path) -> None:
     assert entry.marc_control_id == "eng-1"
     assert entry.nypl_uuid == "u-eng-1"
     assert entry.verdict == "match"
-    assert entry.reasons == ()
     assert entry.labeler == "jpstroop"
-    assert entry.schema == 2
+    assert entry.schema == 3
     assert entry.marc_identifiers.lccn == "40012345"
     assert entry.marc_identifiers.oclc == "0001"
     assert entry.marc_identifiers.isbns == ("9780000000000",)
@@ -434,14 +406,14 @@ def test_label_relabel_preserves_history(client: TestClient, vault_path: Path) -
     client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
     client.post(
         "/label",
-        data={"pair_id": "1", "verdict": "no_match", "reason": "diff_work"},
+        data={"pair_id": "1", "verdict": "no_match", "note": "second look"},
         follow_redirects=False,
     )
     history = list(iter_entries(vault_path))
     assert [event.verdict for event in history] == ["match", "no_match"]
     latest = current_entries(vault_path)
     assert latest[("eng-1", "u-eng-1")].verdict == "no_match"
-    assert latest[("eng-1", "u-eng-1")].reasons == ("diff_work",)
+    assert latest[("eng-1", "u-eng-1")].note == "second look"
 
 
 def test_label_db_timestamp_matches_vault_timestamp(
@@ -449,7 +421,7 @@ def test_label_db_timestamp_matches_vault_timestamp(
 ) -> None:
     client.post(
         "/label",
-        data={"pair_id": "1", "verdict": "no_match", "reason": "diff_work", "note": "hmm"},
+        data={"pair_id": "1", "verdict": "no_match", "note": "hmm"},
         follow_redirects=False,
     )
     [vault_entry] = list(iter_entries(vault_path))
@@ -519,7 +491,20 @@ def test_labels_route_renders_table_for_each_label(labels_client: TestClient) ->
     assert 'href="/pair/3"' in response.text
     assert "verdict-match" in response.text
     assert "verdict-no_match" in response.text
-    assert "Different work / title collision" in response.text
+
+
+def test_labels_route_shows_note_column_with_recorded_text(labels_client: TestClient) -> None:
+    response = labels_client.get("/labels")
+    assert response.status_code == 200
+    assert ">note<" in response.text
+    assert "weird publisher" in response.text
+
+
+def test_labels_route_omits_reason_and_annotation_columns(labels_client: TestClient) -> None:
+    response = labels_client.get("/labels")
+    assert response.status_code == 200
+    assert ">reasons<" not in response.text
+    assert ">annotations<" not in response.text
 
 
 def test_labels_route_filter_by_verdict_narrows_rows(labels_client: TestClient) -> None:
@@ -536,16 +521,6 @@ def test_labels_route_filter_by_language_narrows_rows(labels_client: TestClient)
     assert 'href="/pair/3"' in response.text
     assert 'href="/pair/1"' not in response.text
     assert 'href="/pair/2"' not in response.text
-
-
-def test_labels_route_filter_by_reason_excludes_labels_without_reason(
-    labels_client: TestClient,
-) -> None:
-    response = labels_client.get("/labels", params={"reason": "diff_work"})
-    assert response.status_code == 200
-    assert 'href="/pair/2"' in response.text
-    assert 'href="/pair/1"' not in response.text
-    assert 'href="/pair/3"' not in response.text
 
 
 def test_labels_route_substring_search_matches_marc_title(labels_client: TestClient) -> None:
@@ -704,106 +679,6 @@ def test_card_omits_renewal_details_block_when_no_renewal_fields(
     assert response.status_code == 200
     assert "Renewal details" not in response.text
     assert "renewal date" not in response.text
-
-
-def test_card_renders_field_annotation_grid(client: TestClient) -> None:
-    response = client.get("/")
-    assert response.status_code == 200
-    assert "field annotations" in response.text
-    for field in ("title", "author", "publisher", "year", "edition"):
-        assert f'data-field="{field}"' in response.text
-    for judgment in ("correct", "overscored", "underscored", "n_a"):
-        assert f'data-judgment="{judgment}"' in response.text
-
-
-def test_label_records_field_annotations(client: TestClient, vault_path: Path) -> None:
-    response = client.post(
-        "/label",
-        data={
-            "pair_id": "1",
-            "verdict": "match",
-            "annotation_title": "correct",
-            "annotation_author": "overscored",
-        },
-        follow_redirects=False,
-    )
-    assert response.status_code == 303
-    [entry] = list(iter_entries(vault_path))
-    fields = {(ann.field, ann.judgment) for ann in entry.field_annotations}
-    assert fields == {("title", "correct"), ("author", "overscored")}
-
-
-def test_label_drops_blank_annotation_fields(client: TestClient, vault_path: Path) -> None:
-    client.post(
-        "/label",
-        data={
-            "pair_id": "1",
-            "verdict": "match",
-            "annotation_title": "correct",
-            "annotation_author": "",
-            "annotation_publisher": "",
-        },
-        follow_redirects=False,
-    )
-    [entry] = list(iter_entries(vault_path))
-    assert entry.field_annotations == tuple(
-        ann for ann in entry.field_annotations if ann.field == "title"
-    )
-    assert len(entry.field_annotations) == 1
-
-
-def test_stats_renders_per_field_annotation_table(client: TestClient, vault_path: Path) -> None:
-    client.post(
-        "/label",
-        data={
-            "pair_id": "1",
-            "verdict": "match",
-            "annotation_title": "correct",
-            "annotation_publisher": "overscored",
-        },
-        follow_redirects=False,
-    )
-    stats = client.get("/stats")
-    assert stats.status_code == 200
-    assert "Field annotations" in stats.text
-    assert ">title<" in stats.text
-    assert ">publisher<" in stats.text
-
-
-def test_stats_omits_annotation_table_when_no_annotations(client: TestClient) -> None:
-    client.post(
-        "/label",
-        data={"pair_id": "1", "verdict": "match"},
-        follow_redirects=False,
-    )
-    stats = client.get("/stats")
-    assert stats.status_code == 200
-    assert "Field annotations" not in stats.text
-
-
-def test_labels_table_shows_annotation_tags(labels_client: TestClient) -> None:
-    labels_client.post(
-        "/label",
-        data={
-            "pair_id": "1",
-            "verdict": "match",
-            "annotation_title": "correct",
-            "annotation_year": "n_a",
-        },
-        follow_redirects=False,
-    )
-    response = labels_client.get("/labels")
-    assert response.status_code == 200
-    assert "annotations" in response.text
-    assert "title:OK" in response.text
-    assert "year:n/a" in response.text
-
-
-def test_card_includes_hidden_inputs_for_each_annotation_field(client: TestClient) -> None:
-    response = client.get("/")
-    assert response.status_code == 200
-    for field in ("title", "author", "publisher", "year", "edition"):
-        assert f'name="annotation_{field}"' in response.text
 
 
 def test_card_renders_evidence_source_breadcrumb_when_present(

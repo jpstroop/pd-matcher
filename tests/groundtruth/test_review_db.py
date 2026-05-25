@@ -4,11 +4,6 @@ from pathlib import Path
 
 from pytest import raises
 
-from pd_groundtruth.review.field_annotations import JUDGMENT_CORRECT
-from pd_groundtruth.review.field_annotations import JUDGMENT_NA
-from pd_groundtruth.review.field_annotations import JUDGMENT_OVERSCORED
-from pd_groundtruth.review.field_annotations import JUDGMENT_UNDERSCORED
-from pd_groundtruth.review.field_annotations import FieldAnnotation
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
 from pd_groundtruth.review_db import VERDICT_UNSURE
@@ -527,53 +522,26 @@ def test_connect_context_manager_swallows_commit_when_exception_raised(tmp_path:
         assert db.stratum_counts() == {}
 
 
-def test_add_label_stores_single_reason_and_note(tmp_path: Path) -> None:
+def test_add_label_stores_note(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         pair = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
-        db.add_label(pair, VERDICT_NO_MATCH, note="looks off", reasons=("diff_work",))
+        db.add_label(pair, VERDICT_NO_MATCH, note="looks off")
     with ReviewDb.connect(tmp_path / "review.db") as db:
-        assert db.reason_counts() == {(VERDICT_NO_MATCH, "diff_work"): 1}
-
-
-def test_add_label_stores_multiple_reasons(tmp_path: Path) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        pair = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
-        db.add_label(pair, VERDICT_NO_MATCH, reasons=("diff_work", "garbled"))
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        assert db.reason_counts() == {
-            (VERDICT_NO_MATCH, "diff_work"): 1,
-            (VERDICT_NO_MATCH, "garbled"): 1,
-        }
-
-
-def test_reason_counts_uses_only_current_label(tmp_path: Path) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        pair = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
-        db.add_label(pair, VERDICT_NO_MATCH, reasons=("diff_work", "garbled"))
-        db.add_label(pair, VERDICT_UNSURE, reasons=("edition_unsure",))
-        assert db.reason_counts() == {(VERDICT_UNSURE, "edition_unsure"): 1}
-
-
-def test_reason_counts_ignores_labels_without_reasons(tmp_path: Path) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
-        second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
-        db.add_label(first, VERDICT_MATCH)
-        db.add_label(second, VERDICT_NO_MATCH, reasons=("garbled",))
-        assert db.reason_counts() == {(VERDICT_NO_MATCH, "garbled"): 1}
+        [label] = list(db.iter_current_labels())
+        assert label.note == "looks off"
+        assert label.verdict == VERDICT_NO_MATCH
 
 
 def test_iter_current_labels_yields_only_latest_per_pair(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         pair_id = db.insert_pair(_pair(control_id="ctrl-a", nypl_uuid="uuid-a"))
         db.add_label(pair_id, VERDICT_MATCH)
-        db.add_label(pair_id, VERDICT_NO_MATCH, note="changed", reasons=("diff_work",))
+        db.add_label(pair_id, VERDICT_NO_MATCH, note="changed")
     with ReviewDb.connect(tmp_path / "review.db") as db:
         labels = list(db.iter_current_labels())
     assert len(labels) == 1
     assert labels[0].verdict == VERDICT_NO_MATCH
     assert labels[0].note == "changed"
-    assert labels[0].reasons == ("diff_work",)
     assert labels[0].marc_control_id == "ctrl-a"
     assert labels[0].nypl_uuid == "uuid-a"
 
@@ -588,15 +556,6 @@ def test_iter_current_labels_skips_unlabeled_pairs(tmp_path: Path) -> None:
     assert [label.marc_control_id for label in labels] == ["ctrl-a"]
 
 
-def test_iter_current_labels_aggregates_reasons_in_deterministic_order(tmp_path: Path) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        pair_id = db.insert_pair(_pair(control_id="ctrl-a", nypl_uuid="uuid-a"))
-        db.add_label(pair_id, VERDICT_NO_MATCH, reasons=("garbled", "diff_work"))
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        labels = list(db.iter_current_labels())
-    assert labels[0].reasons == ("diff_work", "garbled")
-
-
 def test_insert_existing_label_preserves_supplied_timestamp(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         pair_id = db.insert_pair(_pair())
@@ -605,7 +564,6 @@ def test_insert_existing_label_preserves_supplied_timestamp(tmp_path: Path) -> N
             verdict=VERDICT_MATCH,
             labeled_at="2024-01-01T00:00:00+00:00",
             note="from vault",
-            reasons=(),
         )
     with ReviewDb.connect(tmp_path / "review.db") as db:
         labels = list(db.iter_current_labels())
@@ -624,74 +582,16 @@ def test_insert_existing_label_rejects_invalid_verdict(tmp_path: Path) -> None:
             )
 
 
-def test_init_schema_migrates_label_table_missing_reason(tmp_path: Path) -> None:
-    from sqlite3 import connect as sqlite_connect
-
-    db_path = tmp_path / "legacy.db"
-    legacy = sqlite_connect(db_path)
-    legacy.executescript(
-        """
-        CREATE TABLE label (
-            id INTEGER PRIMARY KEY,
-            pair_id INTEGER NOT NULL,
-            verdict TEXT NOT NULL,
-            note TEXT,
-            labeled_at TEXT NOT NULL
-        );
-        INSERT INTO label (pair_id, verdict, note, labeled_at)
-        VALUES (1, 'match', NULL, '2026-01-01T00:00:00+00:00');
-        """
-    )
-    legacy.commit()
-    legacy.close()
-
-    with ReviewDb.connect(db_path) as db:
-        columns = {row[1] for row in db._conn.execute("PRAGMA table_info(label)")}
-        assert "reason" in columns
-        existing = db._conn.execute("SELECT COUNT(*) FROM label").fetchone()[0]
-        assert existing == 1
-
-
-def test_init_schema_backfills_scalar_reason_into_label_reason(tmp_path: Path) -> None:
-    from sqlite3 import connect as sqlite_connect
-
-    db_path = tmp_path / "legacy.db"
-    legacy = sqlite_connect(db_path)
-    legacy.executescript(
-        """
-        CREATE TABLE label (
-            id INTEGER PRIMARY KEY,
-            pair_id INTEGER NOT NULL,
-            verdict TEXT NOT NULL,
-            reason TEXT,
-            note TEXT,
-            labeled_at TEXT NOT NULL
-        );
-        INSERT INTO label (pair_id, verdict, reason, note, labeled_at)
-        VALUES (1, 'no_match', 'diff_work', NULL, '2026-01-01T00:00:00+00:00');
-        """
-    )
-    legacy.commit()
-    legacy.close()
-
-    with ReviewDb.connect(db_path) as db:
-        assert db.reason_counts() == {(VERDICT_NO_MATCH, "diff_work"): 1}
-
-    with ReviewDb.connect(db_path) as db:
-        rows = db._conn.execute("SELECT COUNT(*) FROM label_reason").fetchone()[0]
-        assert rows == 1
-
-
 def test_iter_labeled_pairs_returns_latest_label_per_pair(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         pair_id = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
         db.add_label(pair_id, VERDICT_MATCH)
-        db.add_label(pair_id, VERDICT_NO_MATCH, reasons=("diff_work",))
+        db.add_label(pair_id, VERDICT_NO_MATCH, note="later")
         rows = db.iter_labeled_pairs()
     assert len(rows) == 1
     assert rows[0].pair_id == pair_id
     assert rows[0].verdict == VERDICT_NO_MATCH
-    assert rows[0].reason_codes == ("diff_work",)
+    assert rows[0].note == "later"
 
 
 def test_iter_labeled_pairs_excludes_unlabeled_rows(tmp_path: Path) -> None:
@@ -711,18 +611,6 @@ def test_iter_labeled_pairs_filters_by_verdict(tmp_path: Path) -> None:
         db.add_label(b, VERDICT_NO_MATCH)
         rows = db.iter_labeled_pairs(LabelFilters(verdict=VERDICT_MATCH))
     assert [row.pair_id for row in rows] == [a]
-
-
-def test_iter_labeled_pairs_filters_by_reason_excludes_label_without_reason(
-    tmp_path: Path,
-) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        with_reason = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
-        without_reason = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
-        db.add_label(with_reason, VERDICT_NO_MATCH, reasons=("diff_work",))
-        db.add_label(without_reason, VERDICT_NO_MATCH)
-        rows = db.iter_labeled_pairs(LabelFilters(reason="diff_work"))
-    assert [row.pair_id for row in rows] == [with_reason]
 
 
 def test_iter_labeled_pairs_filters_by_language(tmp_path: Path) -> None:
@@ -784,25 +672,16 @@ def test_count_labeled_pairs_matches_iter_results_across_filters(tmp_path: Path)
         b = db.insert_pair(_pair(language="eng", control_id="b", nypl_uuid="u-b"))
         c = db.insert_pair(_pair(language="fre", control_id="c", nypl_uuid="u-c"))
         db.add_label(a, VERDICT_MATCH)
-        db.add_label(b, VERDICT_NO_MATCH, reasons=("diff_work",))
+        db.add_label(b, VERDICT_NO_MATCH)
         db.add_label(c, VERDICT_MATCH)
         for filters in (
             LabelFilters(),
             LabelFilters(verdict=VERDICT_MATCH),
             LabelFilters(language="eng"),
             LabelFilters(verdict=VERDICT_MATCH, language="eng"),
-            LabelFilters(reason="diff_work"),
             LabelFilters(q="title"),
         ):
             assert db.count_labeled_pairs(filters) == len(db.iter_labeled_pairs(filters)), filters
-
-
-def test_iter_labeled_pairs_aggregates_multiple_reason_codes(tmp_path: Path) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        pair_id = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
-        db.add_label(pair_id, VERDICT_NO_MATCH, reasons=("garbled", "diff_work"))
-        rows = db.iter_labeled_pairs()
-    assert rows[0].reason_codes == ("diff_work", "garbled")
 
 
 def test_round_trip_preserves_renewal_details(tmp_path: Path) -> None:
@@ -924,160 +803,6 @@ def test_init_schema_adds_renewal_columns_to_legacy_pair_table(
     assert row is not None
     assert row.cce_renewal_id is None
     assert row.cce_renewal_new_matter is None
-
-
-def test_add_label_round_trips_field_annotations_in_vocab_order(tmp_path: Path) -> None:
-    annotations = (
-        FieldAnnotation(field="author", judgment=JUDGMENT_OVERSCORED),
-        FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),
-    )
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        pair = db.insert_pair(_pair())
-        result = db.add_label(pair, VERDICT_MATCH, annotations=annotations)
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        round_tripped = db.annotations_for_label(result.label_id)
-    assert round_tripped == (
-        FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),
-        FieldAnnotation(field="author", judgment=JUDGMENT_OVERSCORED),
-    )
-
-
-def test_annotations_for_label_returns_empty_for_label_without_annotations(
-    tmp_path: Path,
-) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        pair = db.insert_pair(_pair())
-        result = db.add_label(pair, VERDICT_MATCH)
-        assert db.annotations_for_label(result.label_id) == ()
-
-
-def test_iter_current_labels_exposes_field_annotations(tmp_path: Path) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        pair_id = db.insert_pair(_pair())
-        db.add_label(
-            pair_id,
-            VERDICT_MATCH,
-            annotations=(FieldAnnotation(field="year", judgment=JUDGMENT_NA),),
-        )
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        [label] = list(db.iter_current_labels())
-    assert label.field_annotations == (FieldAnnotation(field="year", judgment=JUDGMENT_NA),)
-
-
-def test_iter_labeled_pairs_exposes_field_annotations(tmp_path: Path) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        pair_id = db.insert_pair(_pair())
-        db.add_label(
-            pair_id,
-            VERDICT_NO_MATCH,
-            reasons=("diff_work",),
-            annotations=(FieldAnnotation(field="title", judgment=JUDGMENT_OVERSCORED),),
-        )
-        rows = db.iter_labeled_pairs()
-    assert rows[0].field_annotations == (
-        FieldAnnotation(field="title", judgment=JUDGMENT_OVERSCORED),
-    )
-
-
-def test_field_annotation_counts_uses_only_current_label(tmp_path: Path) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        pair = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
-        db.add_label(
-            pair,
-            VERDICT_MATCH,
-            annotations=(FieldAnnotation(field="title", judgment=JUDGMENT_OVERSCORED),),
-        )
-        db.add_label(
-            pair,
-            VERDICT_NO_MATCH,
-            annotations=(FieldAnnotation(field="title", judgment=JUDGMENT_UNDERSCORED),),
-        )
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        assert db.field_annotation_counts() == {("title", JUDGMENT_UNDERSCORED): 1}
-
-
-def test_field_annotation_counts_aggregates_across_pairs(tmp_path: Path) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
-        second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
-        db.add_label(
-            first,
-            VERDICT_MATCH,
-            annotations=(
-                FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),
-                FieldAnnotation(field="author", judgment=JUDGMENT_OVERSCORED),
-            ),
-        )
-        db.add_label(
-            second,
-            VERDICT_MATCH,
-            annotations=(FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),),
-        )
-        assert db.field_annotation_counts() == {
-            ("title", JUDGMENT_CORRECT): 2,
-            ("author", JUDGMENT_OVERSCORED): 1,
-        }
-
-
-def test_insert_existing_label_round_trips_annotations(tmp_path: Path) -> None:
-    annotations = (
-        FieldAnnotation(field="publisher", judgment=JUDGMENT_OVERSCORED),
-        FieldAnnotation(field="edition", judgment=JUDGMENT_NA),
-    )
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        pair_id = db.insert_pair(_pair())
-        db.insert_existing_label(
-            pair_id=pair_id,
-            verdict=VERDICT_MATCH,
-            labeled_at="2024-01-01T00:00:00+00:00",
-            annotations=annotations,
-        )
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        [label] = list(db.iter_current_labels())
-    assert label.field_annotations == annotations
-
-
-def test_init_schema_creates_field_annotation_table_on_legacy_db(tmp_path: Path) -> None:
-    from sqlite3 import connect as sqlite_connect
-
-    db_path = tmp_path / "legacy.db"
-    legacy = sqlite_connect(db_path)
-    legacy.executescript(
-        """
-        CREATE TABLE label (
-            id INTEGER PRIMARY KEY,
-            pair_id INTEGER NOT NULL,
-            verdict TEXT NOT NULL,
-            note TEXT,
-            labeled_at TEXT NOT NULL
-        );
-        """
-    )
-    legacy.commit()
-    legacy.close()
-
-    with ReviewDb.connect(db_path) as db:
-        tables = {
-            row[0] for row in db._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
-        assert "label_field_annotation" in tables
-
-
-def test_annotations_for_label_silently_drops_unknown_codes(tmp_path: Path) -> None:
-    with ReviewDb.connect(tmp_path / "review.db") as db:
-        pair_id = db.insert_pair(_pair())
-        result = db.add_label(pair_id, VERDICT_MATCH)
-        db._conn.execute(
-            "INSERT INTO label_field_annotation (label_id, field_name, judgment) VALUES (?, ?, ?)",
-            (result.label_id, "title", JUDGMENT_CORRECT),
-        )
-        db._conn.execute(
-            "INSERT OR IGNORE INTO label_field_annotation (label_id, field_name, judgment) "
-            "VALUES (?, ?, ?)",
-            (result.label_id, "title", "ignored_dup"),
-        )
-        annotations = db.annotations_for_label(result.label_id)
-    assert annotations == (FieldAnnotation(field="title", judgment=JUDGMENT_CORRECT),)
 
 
 def test_round_trip_preserves_evidence_sources_json(tmp_path: Path) -> None:
