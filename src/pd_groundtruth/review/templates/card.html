@@ -42,7 +42,6 @@
   <div class="grid">
     <section class="panel">
       <h2>MARC (Princeton)</h2>
-      <div class="field"><div class="k">catalog</div><div class="v"><a href="https://catalog.princeton.edu/catalog/{{ card.marc_control_id }}" target="_blank" rel="noopener noreferrer">{{ card.marc_control_id }}</a></div></div>
       <div class="field"><div class="k">title</div><div class="v title">{{ card.marc_title }}</div></div>
       {% if card.marc_title_part_number or card.marc_title_part_name %}<div class="field"><div class="k">title parts</div><div class="v"><small>{% if card.marc_title_part_number and card.marc_title_part_name %}{{ card.marc_title_part_number }}: {{ card.marc_title_part_name }}{% elif card.marc_title_part_number %}{{ card.marc_title_part_number }}{% else %}{{ card.marc_title_part_name }}{% endif %}</small></div></div>{% endif %}
       {% if card.marc_is_online_resource %}<div class="field"><span class="badge-ebook">E-book reprint</span></div>{% endif %}
@@ -60,6 +59,7 @@
       {% if card.marc_lccn %}<div class="field"><div class="k">lccn</div><div class="v">{{ card.marc_lccn }}</div></div>{% endif %}
       {% if card.marc_isbns %}<div class="field"><div class="k">isbns</div><div class="v">{{ card.marc_isbns | join("; ") }}</div></div>{% endif %}
       {% if card.marc_oclc %}<div class="field"><div class="k">oclc</div><div class="v"><a href="{{ card.marc_oclc_url }}" target="_blank" rel="noopener noreferrer">{{ card.marc_oclc }}</a></div></div>{% endif %}
+      <div class="field"><div class="k">Princeton</div><div class="v"><a href="https://catalog.princeton.edu/catalog/{{ card.marc_control_id }}" target="_blank" rel="noopener noreferrer">{{ card.marc_control_id }}</a></div></div>
       <div class="field"><div class="k">lang / country</div><div class="v">{{ card.marc_language_code or "?" }} / {{ card.marc_country_code or "?" }}</div></div>
     </section>
 
