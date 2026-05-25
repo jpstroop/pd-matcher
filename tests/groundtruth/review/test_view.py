@@ -434,6 +434,26 @@ def test_build_card_oclc_and_url_none_when_absent() -> None:
     assert card.marc_oclc_url is None
 
 
+def test_build_card_oclc_url_strips_number_class_prefixes() -> None:
+    # WorldCat URLs accept the numeric portion only; the historical
+    # ocm/ocn/on prefixes carried in 035 $a must be stripped.
+    marc_ocm = _marc(oclc="ocm01637690")
+    assert (
+        build_card(_row(marc_ocm, evidence_json="{}")).marc_oclc_url
+        == "https://www.worldcat.org/oclc/01637690"
+    )
+    marc_ocn = _marc(oclc="ocn123456789")
+    assert (
+        build_card(_row(marc_ocn, evidence_json="{}")).marc_oclc_url
+        == "https://www.worldcat.org/oclc/123456789"
+    )
+    marc_on = _marc(oclc="on1234567890")
+    assert (
+        build_card(_row(marc_on, evidence_json="{}")).marc_oclc_url
+        == "https://www.worldcat.org/oclc/1234567890"
+    )
+
+
 def test_build_card_projects_title_part_number_when_present() -> None:
     marc = _marc(title_part_number="Pt. 2")
     card = build_card(_row(marc, evidence_json="{}"))

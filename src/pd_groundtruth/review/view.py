@@ -13,6 +13,8 @@ boundary; this module is the unit-tested heart of the UI.
 
 from datetime import date
 from datetime import datetime
+from re import IGNORECASE
+from re import compile as re_compile
 
 from msgspec import Struct
 from msgspec.json import decode as json_decode
@@ -217,11 +219,21 @@ def _lccn_url(lccn: str | None) -> str | None:
     return f"{_LCCN_BASE_URL}{lccn}"
 
 
+_OCLC_PREFIX_RE = re_compile(r"^(?:ocm|ocn|on)(?=\d)", IGNORECASE)
+
+
 def _oclc_url(oclc: str | None) -> str | None:
-    """Return the WorldCat permalink for ``oclc`` or ``None`` when absent."""
+    """Return the WorldCat permalink for ``oclc`` or ``None`` when absent.
+
+    Strips the historical number-class prefix (``ocm`` for 8-digit,
+    ``ocn`` for 9-digit, ``on`` for 10+ digit) before building the URL;
+    WorldCat expects the numeric portion only. The regex lookahead
+    requires a following digit, so non-OCLC-shaped values (or values
+    without a prefix) round-trip unchanged.
+    """
     if not oclc:
         return None
-    return f"{_OCLC_BASE_URL}{oclc}"
+    return f"{_OCLC_BASE_URL}{_OCLC_PREFIX_RE.sub('', oclc)}"
 
 
 def _parse_iso_date(raw: str | None) -> date | None:
