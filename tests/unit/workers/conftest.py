@@ -1,26 +1,20 @@
 """Shared fixtures for Phase 6 worker tests.
 
 Most tests need: a tiny LMDB index built from the project's tiny
-fixtures, a minimal :class:`MatchingConfig`, a minimal
-:class:`CopyrightRuleSet`, an :class:`IdfTable` built from the index,
-and a :class:`CopyrightAssessmentConfig` pinned to a fixed date. The
-fixtures here construct each once per test so the worker / writer / pool
-suites can exercise the real pipeline without standing up the full
-package on their own.
+fixtures, a minimal :class:`MatchingConfig`, an :class:`IdfTable` built
+from the index, and a compiled pairings struct. The fixtures here
+construct each once per test so the worker / writer / pool suites can
+exercise the real pipeline without standing up the full package on their
+own.
 """
 
 from pathlib import Path
 
 from pytest import fixture
 
-from pd_matcher.config.loader import load_copyright_rules
 from pd_matcher.config.loader import load_pairing_config
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
-from pd_matcher.copyright.coverage import LEGACY_COVERAGE
-from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.index.builder import build_index
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.idf import IdfTable
@@ -30,7 +24,6 @@ from pd_matcher.match.pairing_compiler import compile_pairings
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 _DEFAULTS_DIR = Path(__file__).resolve().parents[3] / "src" / "pd_matcher" / "config" / "defaults"
-_DEFAULTS = _DEFAULTS_DIR / "copyright_rules.yaml"
 _PAIRINGS = _DEFAULTS_DIR / "field_pairings.yaml"
 
 
@@ -73,18 +66,6 @@ def matching_config() -> MatchingConfig:
 
 
 @fixture
-def copyright_config() -> CopyrightAssessmentConfig:
-    """Return a :class:`CopyrightAssessmentConfig` pinned to year 2026."""
-    return CopyrightAssessmentConfig(as_of_year=2026)
-
-
-@fixture
-def ruleset() -> CopyrightRuleSet:
-    """Return the production Cornell rule set."""
-    return load_copyright_rules(_DEFAULTS)
-
-
-@fixture
 def pairing_config() -> PairingConfig:
     """Return the shipped default field-pairing configuration."""
     return load_pairing_config(_PAIRINGS)
@@ -94,9 +75,3 @@ def pairing_config() -> PairingConfig:
 def compiled_pairings(pairing_config: PairingConfig) -> CompiledPairings:
     """Return the shipped default pairings compiled for the pipeline."""
     return compile_pairings(pairing_config)
-
-
-@fixture
-def coverage() -> Coverage:
-    """Return :data:`LEGACY_COVERAGE` for worker tests that don't need a tuned coverage."""
-    return LEGACY_COVERAGE

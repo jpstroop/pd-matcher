@@ -36,10 +36,6 @@ RENEWAL_UNKNOWN: str = "unknown"
 
 CLAIMANT_LABEL: str = "Author is claimant"
 
-PREDICTED_STATUS_FAMILY_PD: str = "pd"
-PREDICTED_STATUS_FAMILY_IN_COPYRIGHT: str = "in_copyright"
-PREDICTED_STATUS_FAMILY_UNKNOWN: str = "unknown"
-
 _ONLINE_RESOURCE_MARKER: str = "online resource"
 
 _LCCN_BASE_URL: str = "https://lccn.loc.gov/"
@@ -118,9 +114,6 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     cce_lccn_url: str | None
     cce_prev_regnums: tuple[str, ...]
 
-    predicted_status: str | None
-    predicted_status_family: str
-
     cce_renewal_id: str | None
     cce_renewal_oreg: str | None
     cce_renewal_rdat: date | None
@@ -132,30 +125,6 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     cce_has_renewal_details: bool
 
     evidence: tuple[EvidenceBar, ...]
-
-
-def predicted_status_family(status: str | None) -> str:
-    """Classify a stored Cornell status into a coarse rendering family.
-
-    Returns one of :data:`PREDICTED_STATUS_FAMILY_PD`,
-    :data:`PREDICTED_STATUS_FAMILY_IN_COPYRIGHT`, or
-    :data:`PREDICTED_STATUS_FAMILY_UNKNOWN`. The classifier inspects the
-    serialized name (``status.name``) so it stays decoupled from the
-    ``pd_matcher.copyright.status.CopyrightStatus`` import surface on the
-    review side.
-
-    Args:
-        status: The stored ``CopyrightStatus`` name (e.g.
-            ``"PD_REGISTERED_NOT_RENEWED"``), or ``None`` when the queue
-            row predates predicted-status capture.
-    """
-    if status is None:
-        return PREDICTED_STATUS_FAMILY_UNKNOWN
-    if status.startswith("PD_"):
-        return PREDICTED_STATUS_FAMILY_PD
-    if status.startswith("IN_COPYRIGHT"):
-        return PREDICTED_STATUS_FAMILY_IN_COPYRIGHT
-    return PREDICTED_STATUS_FAMILY_UNKNOWN
 
 
 def render_renewal_label(was_renewed: int | None) -> str:
@@ -400,8 +369,6 @@ def build_card(row: ReviewPairRow) -> ReviewCard:
         cce_lccn=row.cce_lccn,
         cce_lccn_url=_lccn_url(row.cce_lccn),
         cce_prev_regnums=_split_prev_regnums(row.cce_prev_regnums),
-        predicted_status=row.cce_predicted_status,
-        predicted_status_family=predicted_status_family(row.cce_predicted_status),
         cce_renewal_id=row.cce_renewal_id,
         cce_renewal_oreg=row.cce_renewal_oreg,
         cce_renewal_rdat=_parse_iso_date(row.cce_renewal_rdat),
@@ -499,9 +466,6 @@ def build_labeled_row(row: LabeledPairRow, now: datetime) -> LabeledRow:
 
 __all__ = [
     "CLAIMANT_LABEL",
-    "PREDICTED_STATUS_FAMILY_IN_COPYRIGHT",
-    "PREDICTED_STATUS_FAMILY_PD",
-    "PREDICTED_STATUS_FAMILY_UNKNOWN",
     "RENEWAL_NOT_RENEWED",
     "RENEWAL_RENEWED",
     "RENEWAL_UNKNOWN",
@@ -513,6 +477,5 @@ __all__ = [
     "build_labeled_row",
     "parse_evidence",
     "parse_evidence_sources",
-    "predicted_status_family",
     "render_renewal_label",
 ]

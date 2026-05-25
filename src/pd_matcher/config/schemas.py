@@ -2,10 +2,10 @@
 
 These are frozen structs with ``forbid_unknown_fields=True``: they reject
 unknown keys at load time and cannot be mutated after construction. Later
-phases (matching, copyright rules, indexing) consume these as their single
-source of truth. msgspec was chosen over pydantic because its strictly-typed
-metaclass leaks no ``Any`` into our type checker, and it generates ``__slots__``
-by default, matching the project's memory-efficiency policy.
+phases (matching, indexing) consume these as their single source of truth.
+msgspec was chosen over pydantic because its strictly-typed metaclass leaks
+no ``Any`` into our type checker, and it generates ``__slots__`` by default,
+matching the project's memory-efficiency policy.
 """
 
 from pathlib import Path
@@ -14,12 +14,9 @@ from typing import Literal
 
 from msgspec import Meta
 from msgspec import Struct
-from msgspec import field
 
 _WEIGHT_SUM_TOLERANCE: float = 1e-3
 _DEFAULT_LMDB_MAP_SIZE_BYTES: int = 16 * 1024 * 1024 * 1024
-_AS_OF_MIN_YEAR: int = 1923
-_AS_OF_MAX_YEAR: int = 2100
 
 
 class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
@@ -63,78 +60,6 @@ class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
                 "edition_weight + lccn_weight + isbn_weight must sum to 1.0 "
                 f"(got {total!r})"
             )
-
-
-class PredicateCall(Struct, frozen=True, forbid_unknown_fields=True):
-    """One predicate invocation inside a :class:`CopyrightRule` ``when`` list.
-
-    ``predicate`` is the name of a callable registered in either
-    :mod:`pd_matcher.copyright.predicates` (returns ``bool``) or
-    :mod:`pd_matcher.copyright.inference` (returns ``(bool, str | None)``
-    so it can surface a documented assumption). ``args`` holds positional
-    arguments; only ``int`` and ``float`` are supported because every
-    Cornell predicate takes year boundaries or confidence thresholds.
-    ``negate`` flips the predicate's truth value; an inference function
-    that fires under negation still surfaces its assumption (the
-    explanation should make clear the negation is intentional).
-    """
-
-    predicate: Annotated[str, Meta(min_length=1)]
-    args: tuple[int | float, ...] = ()
-    negate: bool = False
-
-
-class CopyrightRule(Struct, frozen=True, forbid_unknown_fields=True):
-    """One row of the Cornell public-domain matrix in declarative form.
-
-    Each ``when`` element is a :class:`PredicateCall`; the Phase 5 rule
-    engine resolves the names and evaluates them in order. ``then``
-    references a :class:`~pd_matcher.copyright.status.CopyrightStatus`
-    member by name and is resolved at evaluation time. ``assumptions``
-    holds static assumption strings that always apply when the rule
-    fires; inference predicates may add further dynamic assumptions.
-
-    ``on_coverage_fail`` names the :class:`CopyrightStatus` the engine
-    short-circuits to when a coverage-aware predicate inside ``when``
-    returns ``False``. Coverage-aware predicates are those that consult
-    a :class:`~pd_matcher.copyright.coverage.Coverage` value (currently
-    ``pub_year_in_reg_coverage`` and ``pub_year_in_ren_coverage``).
-    Rules that don't depend on absence-of-evidence leave this ``None``.
-    """
-
-    name: Annotated[str, Meta(min_length=1)]
-    then: Annotated[str, Meta(min_length=1)]
-    explanation: Annotated[str, Meta(min_length=1)]
-    when: list[PredicateCall] = field(default_factory=list)
-    assumptions: list[str] = field(default_factory=list)
-    on_coverage_fail: str | None = None
-
-
-class CopyrightRuleSet(Struct, frozen=True, forbid_unknown_fields=True):
-    """A versioned, ordered collection of :class:`CopyrightRule` entries."""
-
-    version: Annotated[str, Meta(min_length=1)]
-    rules: list[CopyrightRule] = field(default_factory=list)
-
-
-class CopyrightAssessmentConfig(Struct, frozen=True, forbid_unknown_fields=True):
-    """Runtime configuration for the copyright rule engine.
-
-    Attributes:
-        as_of_year: Reference year for age-sensitive predicates.
-            ``None`` means the engine uses the current calendar year at
-            call time so the moving wall advances naturally every
-            1 January. Tests and the ``--as-of`` CLI flag pin a specific
-            year for reproducibility. Validated to ``1923 <= year <=
-            2100`` when supplied.
-        enable_assumptions: When ``False`` the engine refuses to honor
-            inference predicates that would contribute an assumption,
-            forcing every rule to depend only on directly-observed
-            facts. Defaults to ``True``.
-    """
-
-    as_of_year: Annotated[int, Meta(ge=_AS_OF_MIN_YEAR, le=_AS_OF_MAX_YEAR)] | None = None
-    enable_assumptions: bool = True
 
 
 class IndexConfig(Struct, frozen=True, forbid_unknown_fields=True):
@@ -197,13 +122,9 @@ class PairingConfig(Struct, frozen=True, forbid_unknown_fields=True):
 
 
 __all__ = [
-    "CopyrightAssessmentConfig",
-    "CopyrightRule",
-    "CopyrightRuleSet",
     "FieldSpec",
     "IndexConfig",
     "MatchingConfig",
     "PairingConfig",
     "PairingSpec",
-    "PredicateCall",
 ]

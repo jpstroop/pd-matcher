@@ -29,7 +29,6 @@ from shutil import rmtree
 from time import perf_counter
 
 from msgspec import Struct
-from msgspec.msgpack import encode as msgpack_encode
 from structlog import get_logger
 from structlog.contextvars import bind_contextvars
 from structlog.contextvars import unbind_contextvars
@@ -61,8 +60,6 @@ _META_REG_COUNT_KEY = b"registrations_written"
 _META_REN_COUNT_KEY = b"renewals_written"
 _META_RENEWAL_JOINS_KEY = b"renewal_joins"
 _META_YEAR_BUCKETS_KEY = b"year_buckets"
-_META_REG_YEAR_COUNTS_KEY = b"reg_year_counts"
-_META_REN_YEAR_COUNTS_KEY = b"ren_year_counts"
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _PARSER_FINGERPRINT_FILES: tuple[Path, ...] = (
@@ -91,10 +88,9 @@ class _IngestResult(Struct, frozen=True, forbid_unknown_fields=True):
 
 
 class _RenewalIngestResult(Struct, frozen=True, forbid_unknown_fields=True):
-    """Counts and per-year histogram collected during the renewal ingest pass."""
+    """Counts collected during the renewal ingest pass."""
 
     written: int
-    year_counts: dict[int, int]
 
 
 class BuildReport(Struct, frozen=True, forbid_unknown_fields=True):
@@ -235,18 +231,10 @@ def _ingest_renewals(
     store: NyplIndexStore,
     ren_dir: Path,
 ) -> _RenewalIngestResult:
-    """Stream renewals into ``ren_by_id`` and ``ren_by_oreg``; return counts.
-
-    Returns a :class:`_RenewalIngestResult` carrying the total renewals
-    written plus a per-year histogram keyed on the renewal-recording
-    year (``rdat.year``). The histogram drives
-    :class:`~pd_matcher.copyright.coverage.Coverage` derivation so the
-    rule engine knows when absence-of-renewal evidence is reliable.
-    """
+    """Stream renewals into ``ren_by_id`` and ``ren_by_oreg``; return counts."""
     bind_contextvars(phase="renewals")
     try:
         written = 0
-        year_counts: dict[int, int] = {}
         parser_stats = NyplRenParseStats()
         with store.write_transaction():
             for record in iter_nypl_ren_directory(ren_dir, stats=parser_stats):
@@ -254,16 +242,13 @@ def _ingest_renewals(
                 if record.oreg is not None and record.odat is not None:
                     join_key = make_renewal_key(record.oreg, record.odat)
                     store.ren_by_oreg.put(join_key, record.entry_id.encode("utf-8"))
-                if record.rdat is not None:
-                    year_counts[record.rdat.year] = year_counts.get(record.rdat.year, 0) + 1
                 written += 1
         _LOGGER.info(
             "index.renewals.ingested",
             count=written,
-            year_buckets=len(year_counts),
             years_rejected_out_of_range=parser_stats.years_rejected_out_of_range,
         )
-        return _RenewalIngestResult(written=written, year_counts=year_counts)
+        return _RenewalIngestResult(written=written)
     finally:
         unbind_contextvars("phase")
 
@@ -389,11 +374,6 @@ def _flush_token_index(
         unbind_contextvars("phase")
 
 
-def _encode_year_counts(counts: dict[int, int]) -> bytes:
-    """Serialise a ``{year: count}`` histogram to msgpack bytes."""
-    return msgpack_encode(counts)
-
-
 def _write_meta(
     store: NyplIndexStore,
     *,
@@ -404,8 +384,6 @@ def _write_meta(
     renewals: int,
     renewal_joins: int,
     year_buckets: int,
-    reg_year_counts: dict[int, int],
-    ren_year_counts: dict[int, int],
 ) -> None:
     """Persist the build metadata used by lookups and the info CLI."""
     bind_contextvars(phase="meta")
@@ -420,8 +398,6 @@ def _write_meta(
             store.meta.put(_META_REN_COUNT_KEY, str(renewals).encode("ascii"))
             store.meta.put(_META_RENEWAL_JOINS_KEY, str(renewal_joins).encode("ascii"))
             store.meta.put(_META_YEAR_BUCKETS_KEY, str(year_buckets).encode("ascii"))
-            store.meta.put(_META_REG_YEAR_COUNTS_KEY, _encode_year_counts(reg_year_counts))
-            store.meta.put(_META_REN_YEAR_COUNTS_KEY, _encode_year_counts(ren_year_counts))
         _LOGGER.info(
             "index.meta.written",
             schema_version=schema_version,
@@ -430,8 +406,6 @@ def _write_meta(
             renewals=renewals,
             renewal_joins=renewal_joins,
             year_buckets=year_buckets,
-            reg_year_buckets=len(reg_year_counts),
-            ren_year_buckets=len(ren_year_counts),
         )
     finally:
         unbind_contextvars("phase")
@@ -509,7 +483,6 @@ def build_index(
         _flush_token_index(
             store, store.publisher_index, ingest.publisher_postings, name="publisher"
         )
-        reg_year_counts = {year: len(uuids) for year, uuids in ingest.year_buckets.items()}
         _write_meta(
             store,
             schema_version=schema_version,
@@ -519,8 +492,6 @@ def build_index(
             renewals=renewals.written,
             renewal_joins=ingest.joins,
             year_buckets=bucket_count,
-            reg_year_counts=reg_year_counts,
-            ren_year_counts=renewals.year_counts,
         )
 
     duration = perf_counter() - start

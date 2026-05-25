@@ -90,8 +90,7 @@ _MIN_PLAUSIBLE_YEAR = 1700
 
 The CCE renewal corpus runs 1909-1991 in practice (with a 2005 hard
 cap); 1700 is well outside any plausible entry and only screens out
-parser garbage that would otherwise pollute the year histogram used by
-:func:`pd_matcher.copyright.coverage.coverage_from_year_counts`.
+parser garbage from the date columns.
 """
 
 _MAX_PLAUSIBLE_YEAR = 2100

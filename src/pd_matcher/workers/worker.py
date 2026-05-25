@@ -2,9 +2,8 @@
 
 Each spawned worker opens the LMDB index read-only on init, loads the
 IDF table and Platt calibrator (small msgpack files), and then runs a
-loop that dequeues encoded MARC batches, matches each record, runs the
-copyright rule engine, and pushes a :class:`WorkerOutput` blob onto the
-output queue.
+loop that dequeues encoded MARC batches, matches each record, and pushes
+a :class:`WorkerOutput` blob onto the output queue.
 
 LMDB read-only mode is the design's payoff: the mmap'd index file is
 shared across every worker via the OS page cache regardless of fork vs.
@@ -14,7 +13,6 @@ backing pages.
 """
 
 from collections.abc import Callable
-from datetime import date
 from pathlib import Path
 from time import monotonic
 
@@ -22,13 +20,8 @@ from structlog import get_logger
 from structlog.contextvars import bind_contextvars
 from structlog.contextvars import unbind_contextvars
 
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
-from pd_matcher.copyright.coverage import Coverage
-from pd_matcher.copyright.facts import build_facts
-from pd_matcher.copyright.rules import assess
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
@@ -65,11 +58,8 @@ def _process_record(
     calibrator: PlattCalibrator | None,
     combiner: WeightedMeanCombiner,
     pairings: CompiledPairings,
-    ruleset: CopyrightRuleSet,
-    assessment_config: CopyrightAssessmentConfig,
-    coverage: Coverage,
 ) -> WorkerOutput:
-    """Run match + copyright rules over one record and return the wire payload."""
+    """Run match over one record and return the wire payload."""
     match = match_record(
         marc,
         lookup=lookup,
@@ -82,22 +72,9 @@ def _process_record(
     matched_nypl = None
     if match.best is not None:
         matched_nypl = lookup.get_registration(match.best.nypl_uuid)
-    as_of_year = (
-        assessment_config.as_of_year
-        if assessment_config.as_of_year is not None
-        else date.today().year
-    )
-    facts = build_facts(marc, match, as_of_year=as_of_year, matched_nypl=matched_nypl)
-    assessment = assess(
-        facts,
-        ruleset,
-        coverage=coverage,
-        enable_assumptions=assessment_config.enable_assumptions,
-    )
     return WorkerOutput(
         marc=marc,
         match=match,
-        assessment=assessment,
         matched_nypl=matched_nypl,
     )
 
@@ -109,7 +86,6 @@ def _stats_event_for(output: WorkerOutput) -> bytes:
         confidence = output.match.best.combined.calibrated
     return encode_stats_event(
         RecordProcessed(
-            status=output.assessment.status,
             confidence=confidence,
             candidates_considered=output.match.candidates_considered,
         )
@@ -127,7 +103,6 @@ def _log_hit(worker_id: int, output: WorkerOutput) -> None:
         marc=output.marc.control_id,
         reg=reg,
         score=round(score, 4),
-        status=output.assessment.status.value,
     )
 
 
@@ -138,9 +113,6 @@ def run_worker_loop(
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
     pairings: CompiledPairings,
-    ruleset: CopyrightRuleSet,
-    assessment_config: CopyrightAssessmentConfig,
-    coverage: Coverage,
     input_get: Callable[[], bytes | None],
     output_put: Callable[[bytes], None],
     stats_put: Callable[[bytes], None],
@@ -157,8 +129,6 @@ def run_worker_loop(
         idf: Pre-built :class:`IdfTable`.
         calibrator: Optional Platt calibrator.
         pairings: Compiled field pairings shared across all records.
-        ruleset: Loaded :class:`CopyrightRuleSet`.
-        assessment_config: Runtime configuration for the rule engine.
         input_get: Zero-arg callable returning the next encoded batch
             blob, or ``None`` to signal the worker should stop. Usually
             ``input_queue.get``.
@@ -211,9 +181,6 @@ def run_worker_loop(
                     calibrator=calibrator,
                     combiner=combiner,
                     pairings=pairings,
-                    ruleset=ruleset,
-                    assessment_config=assessment_config,
-                    coverage=coverage,
                 )
                 output_put(encode_worker_output(output))
                 stats_put(_stats_event_for(output))
@@ -243,8 +210,6 @@ def worker_main(
     *,
     index_path: Path,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
@@ -264,16 +229,12 @@ def worker_main(
     """
     pairings = compile_pairings(pairing_config)
     with NyplIndexLookup(index_path) as lookup:
-        coverage = lookup.coverage()
         return run_worker_loop(
             lookup=lookup,
             config=matching_config,
             idf=idf,
             calibrator=calibrator,
             pairings=pairings,
-            ruleset=ruleset,
-            assessment_config=copyright_config,
-            coverage=coverage,
             input_get=input_get,
             output_put=output_put,
             stats_put=stats_put,

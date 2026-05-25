@@ -1,7 +1,6 @@
 """Typer entry point for the ground-truth acquisition tool."""
 
 from datetime import UTC
-from datetime import date
 from datetime import datetime
 from logging import INFO
 from logging import FileHandler
@@ -20,7 +19,6 @@ from typer import echo
 from pd_groundtruth.acquire import acquire
 from pd_groundtruth.acquire import default_min_year
 from pd_groundtruth.build_queue import build_queue
-from pd_groundtruth.build_queue import load_default_ruleset
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import append_entry
@@ -34,7 +32,6 @@ from pd_groundtruth.sampling import scale_budget
 from pd_groundtruth.vault_into_queue import vault_into_queue
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.models import MarcRecord
 
 app = Typer(add_completion=False, help="Acquire Princeton MARC ground-truth candidates.")
@@ -253,8 +250,6 @@ def build_queue_command(
         budget=resolved_budget,
         matching_config=_load_default_matching_config(),
         pairing_config=_load_default_pairing_config(),
-        ruleset=load_default_ruleset(),
-        copyright_config=CopyrightAssessmentConfig(as_of_year=date.today().year),
         seed=seed,
         workers=workers,
         sample_per_lang=sample_per_lang,

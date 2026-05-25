@@ -27,8 +27,6 @@ from time import monotonic
 from msgspec import Struct
 from structlog import get_logger
 
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.logging_config import configure_logging
@@ -61,7 +59,6 @@ class RunReport(Struct, frozen=True, forbid_unknown_fields=True):
     records_written: int
     records_enqueued: int
     duration_seconds: float
-    by_status: dict[str, int]
     interrupted: bool
 
 
@@ -82,8 +79,6 @@ def _spawn_workers(
     workers: int,
     index_path: Path,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
@@ -105,8 +100,6 @@ def _spawn_workers(
             kwargs={
                 "index_path": index_path,
                 "matching_config": matching_config,
-                "copyright_config": copyright_config,
-                "ruleset": ruleset,
                 "pairing_config": pairing_config,
                 "idf": idf,
                 "calibrator": calibrator,
@@ -130,8 +123,6 @@ def _worker_entry(
     *,
     index_path: Path,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
@@ -159,8 +150,6 @@ def _worker_entry(
     worker_main(
         index_path=index_path,
         matching_config=matching_config,
-        copyright_config=copyright_config,
-        ruleset=ruleset,
         pairing_config=pairing_config,
         idf=idf,
         calibrator=calibrator,
@@ -230,8 +219,6 @@ def run_match(
     index_path: Path,
     output_path: Path,
     matching_config: MatchingConfig,
-    copyright_config: CopyrightAssessmentConfig,
-    ruleset: CopyrightRuleSet,
     pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None = None,
@@ -264,8 +251,6 @@ def run_match(
         index_path: LMDB env directory produced by ``pd-matcher index build``.
         output_path: Destination CSV path.
         matching_config: Loaded :class:`MatchingConfig`.
-        copyright_config: Loaded :class:`CopyrightAssessmentConfig`.
-        ruleset: Loaded :class:`CopyrightRuleSet`.
         pairing_config: Loaded :class:`PairingConfig`; each worker compiles
             it into :class:`CompiledPairings` once at init.
         idf: Pre-built :class:`IdfTable` (workers load it once at init).
@@ -310,8 +295,6 @@ def run_match(
             workers=worker_count,
             index_path=index_path,
             matching_config=matching_config,
-            copyright_config=copyright_config,
-            ruleset=ruleset,
             pairing_config=pairing_config,
             idf=idf,
             calibrator=calibrator,
@@ -373,7 +356,6 @@ def run_match(
         records_written=snapshot.records_written,
         records_enqueued=records_enqueued,
         duration_seconds=duration,
-        by_status=snapshot.by_status,
         interrupted=interrupted,
     )
 

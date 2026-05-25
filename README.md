@@ -1,32 +1,36 @@
 # pd-matcher
 
-A command-line tool that scans large MARC XML catalogs against the U.S. Copyright Office's Catalog of Copyright Entries (CCE) — published by the Library of Congress and transcribed into XML/TSV by NYPL — and assigns each MARC record a public-domain status with a calibrated confidence score. Ships with the `pd-groundtruth` companion CLI used to build the human-labeled ground-truth corpus the matcher is calibrated against.
+A command-line tool that links Princeton's MARC catalog records to the U.S. Copyright Office's Catalog of Copyright Entries (CCE) — published by the Library of Congress and transcribed into XML/TSV by NYPL. Each MARC record is paired with its best-matching CCE registration (and any matching renewal) with a calibrated confidence score. Ships with the `pd-groundtruth` companion CLI used to build the human-labeled ground-truth corpus the matcher is calibrated against.
 
-Matches are produced from a pipeline of small, pure-function **scorers** that each return structured **Evidence**, combined into a weighted-mean score, then mapped to a probability by a **Platt-scaled calibrator** trained against the project's 19,970-row ground-truth set. A separate rule engine evaluates the **Cornell public-domain decision matrix** (Categories 2 and 3, the ones that apply to books) and produces a copyright status with a human-readable explanation of any pragmatic assumptions used.
+Matches are produced from a pipeline of small, pure-function **scorers** that each return structured **Evidence**, combined into a weighted-mean score, then mapped to a probability by a **Platt-scaled calibrator** trained against the project's ground-truth set.
 
-Output is a streaming CSV that mirrors the ground-truth schema, suitable for direct comparison and downstream analysis.
+Output is a streaming CSV: one row per MARC record, with the matched CCE registration's id, year, and per-field scores. Anyone who needs copyright status from this dataset can apply their own analysis to the verified linkage; this project does not make copyright determinations.
 
 ---
 
 ## Background
 
-`pd-matcher` determines whether a U.S.-published book is **in the public domain** by matching its MARC bibliographic record against the **U.S. Copyright Office's Catalog of Copyright Entries (CCE)**: roughly, a book published 1923–1977 is PD if it was either not registered for copyright, or registered but never renewed at the 28-year mark. Cornell's "Copyright Term and the Public Domain" chart codifies the full rule set.
+`pd-matcher` produces a **verified linkage** between Princeton's MARC bibliographic records and the **U.S. Copyright Office's Catalog of Copyright Entries (CCE)**: for each MARC record published in the window the CCE covers (1891–1977), the matcher finds the best-matching CCE registration (and any matching renewal) and emits one row per pair.
 
-The matcher's pipeline is fuzzy by necessity — titles get transcribed differently across the two corpora, authors get truncated, OCR garbles characters, and the CCE's renewal records are partial. To know how *good* the matcher's calls are (and to improve them), we need a labeled corpus: pairs of `(MARC record, CCE registration)` where a human has confirmed **match**, **no_match**, or **unsure**. That labeled corpus is the **ground truth**, and producing it is what the `pd-groundtruth` half of this project exists to do.
+The published artifact is the linkage table — `(MARC record, CCE registration, optional CCE renewal)` triples — not a public-domain list. Consumers who need PD status can apply whatever copyright reasoning they want to the linkage: Cornell's decision matrix, the URAA restoration rules, country-of-origin analysis, etc. That analysis belongs to the consumer, not to this project.
+
+The matcher's pipeline is fuzzy by necessity — titles get transcribed differently across the two corpora, authors get truncated, OCR garbles characters, and the CCE's renewal records are partial. To know how *good* the matcher's linkage calls are (and to improve them), we need a labeled corpus: pairs of `(MARC record, CCE registration)` where a human has confirmed **match**, **no_match**, or **unsure**. That labeled corpus is the **ground truth**, and producing it is what the `pd-groundtruth` half of this project exists to do.
+
+The one copyright-aware decision the project makes is at acquire time: records published ≤ `today.year − 95` are already PD by age regardless of registration/renewal status, so linking them carries no signal and they are filtered out before matching. Everything past that point is pure linkage.
 
 Who reads the labels:
 
-- **The matcher itself** — for calibrating score thresholds (where does confidence become reliable?) and measuring precision/recall on each release.
+- **The matcher itself** — for calibrating score thresholds (where does confidence become reliable?) and measuring linkage precision/recall on each release.
 - **The future learned scorer** — a gradient-boosted model that will replace the hand-tuned scoring weights. It needs both positive examples (matches) and hard negatives (high-scoring `no_match` pairs) to train.
-- **The published PD dataset** — a downstream artifact filtered from the vault (`verdict == "match"`), aimed at libraries, archives, and digitization programs that need to know which titles in their collections are PD.
+- **Downstream consumers** — anyone applying copyright reasoning to the published linkage dataset.
 
 ---
 
 ## References
 
-- **Cornell University Library — "Copyright Term and the Public Domain in the United States"**: <https://guides.library.cornell.edu/copyright/publicdomain>. The reference matrix the matcher's rule engine encodes.
-- **U.S. Copyright Office — Circular 23, "Copyright Office Records"**: <https://www.copyright.gov/circs/circ23.pdf>. Authoritative breakdown of which copyright records exist for which years and how to access them. Confirms that **December 31, 1977 is the last day of registrations under the 1909 Copyright Act** — the legal-regime boundary our `_CCE_MAX_YEAR = 1977` reflects. Records from January 1, 1978 onward are under the 1976 Act and live only in the online catalog at copyright.gov.
-- **Internet Archive — copyright records collection**: <https://archive.org/details/copyrightrecords>. OCR / scans of the same CCE volumes NYPL transcribed. Same source data, less structured form; doesn't extend our coverage. Useful as a human-readable cross-reference when investigating a specific record. Post-1977 records (under the 1976 Act) live only at <https://www.copyright.gov/>, in a different format entirely.
+- **U.S. Copyright Office — Circular 23, "Copyright Office Records"**: <https://www.copyright.gov/circs/circ23.pdf>. Authoritative breakdown of which copyright records exist for which years and how to access them. Confirms that **December 31, 1977 is the last day of registrations under the 1909 Copyright Act** — the upstream-coverage boundary the project's `_CCE_MAX_YEAR = 1977` reflects (the CCE itself ends there; records from 1978 onward live only in the 1976-Act catalog at copyright.gov, in a different format entirely).
+- **Internet Archive — copyright records collection**: <https://archive.org/details/copyrightrecords>. OCR / scans of the same CCE volumes NYPL transcribed. Same source data, less structured form; doesn't extend our coverage. Useful as a human-readable cross-reference when investigating a specific record.
+- **Cornell University Library — "Copyright Term and the Public Domain in the United States"**: <https://guides.library.cornell.edu/copyright/publicdomain>. Reference matrix for downstream consumers applying copyright reasoning to the linkage dataset; this project does not itself encode it.
 
 ---
 
@@ -38,8 +42,7 @@ Who reads the labels:
 | **CCE** | Catalog of Copyright Entries — the U.S. Copyright Office's published register of copyright registrations and renewals, 1891–1977. The matching authority for pre-1978 U.S. copyright status. |
 | **NYPL** | The New York Public Library transcribed the CCE volumes into structured XML/TSV. We consume their transcriptions, not the original LoC PDFs. |
 | **LMDB** | Lightning Memory-Mapped Database — the on-disk key-value store the matcher uses for its CCE index. Fast random reads across multiple worker processes; built once by `pd-matcher index build`. |
-| **Moving wall** | The lower bound on publication years we care about. Anything ≤ `today.year − 95` is already PD by age (no Cornell branch to evaluate), so the wall advances every January 1. As of 2026, the wall is 1931. |
-| **Cornell categories** | The Cornell "Copyright Term" chart's PD-status rows. The matcher cares mostly about **Category 2** (U.S. works published 1923–1977 without notice or registration) and **Category 3** (registered but not renewed). |
+| **Moving wall** | The lower bound on publication years the matcher cares about. Anything ≤ `today.year − 95` is already PD by age — there is no meaningful linkage signal to record — so it's filtered at acquire time, and the wall advances every January 1. As of 2026, the wall is 1931. |
 | **Confidence band** | A discrete bucket the matcher assigns to each score: `ge90` (≥ 0.90), `b80_90`, `b70_80`, `below` (< 0.70). Labels stratify across bands so we don't only label easy high-confidence pairs. |
 | **Stratified sample** | A sampling scheme that takes a *fixed* number of items from each `(language, band)` cell, instead of sampling proportionally. Spreads labeling effort across the score range and across all languages. |
 | **Pair** | One `(MARC record, CCE registration)` candidate to be labeled. The matcher proposes; the human disposes. |
@@ -139,14 +142,12 @@ pd-matcher match \
   --out results.csv \
   [--workers N] \
   [--year-window N] \
-  [--min-score F] \
-  [--as-of YYYY]
+  [--min-score F]
 ```
 
 - `--workers N` — number of worker processes. Defaults to `cpu_count - 1`. On a 32-core box, that's 31 matching processes plus one for the writer plus the producer and reporter in main.
 - `--year-window N` — overrides the matching config's year window (default 2). The matcher only considers CCE records published within `±N` years of the MARC record.
 - `--min-score F` — overrides the matching config's minimum calibrated score (default 0.70). Below this threshold a candidate is dropped from the result.
-- `--as-of YYYY` — reference *year* for the moving wall, defaults to the current year. Use this to reproduce historical runs or to test what enters PD on Jan 1 of a future year. Accepted range is 1923–2100.
 
 The match command streams: it never holds the whole MARC file in memory. Workers share the LMDB index via the OS page cache, so memory overhead grows with worker count only by a small fixed amount per process.
 
@@ -154,7 +155,7 @@ The match command streams: it never holds the whole MARC file in memory. Workers
 
 ### `pd-matcher eval`
 
-Run the matcher against the project's ground-truth set and produce precision / recall / F1 plus a per-status confusion matrix.
+Run the matcher against the project's ground-truth set and produce linkage precision / recall / F1.
 
 ```bash
 pd-matcher eval \
@@ -164,8 +165,7 @@ pd-matcher eval \
   [--limit N] \
   [--sample N [--seed S]] \
   [--year-window N] \
-  [--workers N] \
-  [--as-of YYYY]
+  [--workers N]
 ```
 
 - `--report PATH` — write the full `EvalReport` as JSON.
@@ -175,7 +175,7 @@ pd-matcher eval \
 - `--year-window N` — override the matching config's year window (default 2) for this eval run. Accepted range is 0–100. Useful when sweeping the window to study recall-at-window curves.
 - `--workers N` — number of worker processes (default `1`, single-process). With `N >= 2` the per-row work is fanned out across a `spawn` pool; each worker opens the LMDB index read-only (mmap-shared across workers) and reuses one IDF table per process. Accepted range is `1` to `cpu_count() * 2`. The single-process default keeps results bit-for-bit reproducible; opt into parallelism explicitly when sweeping configs over large samples.
 
-The eval reconstructs a `MarcRecord` from each ground-truth row, runs the full match + assessment pipeline, and compares the predicted best match's `match_source_id` against the ground-truth `match_source_id`.
+The eval reconstructs a `MarcRecord` from each ground-truth row, runs the matcher, and compares the predicted best match's `match_source_id` against the ground-truth `match_source_id`. Precision and recall measure linkage agreement only — no copyright reasoning is involved.
 
 ### `pd-matcher train-scorer`
 
@@ -191,7 +191,7 @@ Phase 9 placeholder. Will eventually train a LightGBM model on the per-Evidence 
 
 ## Output format
 
-The CSV mirrors `data/combined_ground_truth.csv` column-for-column, so any tool that consumes ground truth can consume `pd-matcher match` output:
+The CSV is a flat linkage row: MARC metadata on the left, matched CCE metadata on the right, with per-field and combined scores.
 
 | Column | Description |
 |---|---|
@@ -213,9 +213,8 @@ The CSV mirrors `data/combined_ground_truth.csv` column-for-column, so any tool 
 | `title_score` / `author_score` / `publisher_score` | per-field Evidence score, 0–100 |
 | `combined_score` | calibrated probability × 100 — *not* a raw weighted mean |
 | `year_difference` | signed (`marc_year - match_year`) |
-| `copyright_status` | one of 16 enum values from `CopyrightStatus` |
 
-When no candidate clears the threshold, the `match_*` columns are blank and `copyright_status` is typically `UNKNOWN_INSUFFICIENT_DATA` or, for older works, `PD_BY_AGE_PRE_95_YEARS`.
+When no candidate clears the threshold, the `match_*` columns are blank.
 
 ---
 
@@ -223,7 +222,7 @@ When no candidate clears the threshold, the `match_*` columns are blank and `cop
 
 Matching MARC records to CCE registrations is hard for non-obvious reasons. ISBNs barely existed during the CCE period. LCCNs are present in some MARC records but absent from the CCE side. Titles and authors drift between sources (transcription errors, abbreviation differences, embedded edition info, language conventions). The corpus is multilingual. Years drift by 1–2 between publication, registration, and renewal. A naïve "for every MARC record, score it against every CCE record" pass would be ~2.17M × millions = trillions of comparisons.
 
-The tool solves this in five layers:
+The tool solves this in four layers:
 
 **1. Blocking by year.** Every CCE record is indexed into a year bucket. For a MARC record published in 1955, the matcher only retrieves candidates with `reg_year ∈ [1953, 1957]`. The year window is configurable; default ±2.
 
@@ -231,11 +230,9 @@ The tool solves this in five layers:
 
 **3. Configurable field pairings.** Title, author, and publisher are transposable across the two sources (the work title stored as a series title, the publisher as the copyright claimant, the author present only in the 245 statement of responsibility). For each of these groups the matcher tries several `(MARC field, CCE field)` pairings and keeps the highest-scoring Evidence; the runners-up are preserved for audit. The pairing set is **configuration**, not code — see [`src/pd_matcher/config/defaults/field_pairings.yaml`](src/pd_matcher/config/defaults/field_pairings.yaml) and the [field-pairings study](docs/studies/field-pairings.md). Code surfaces raw subfields out of each record; a small closed vocabulary in YAML composes and pairs them, validated at load time.
 
-**4. Combination + calibration.** A weighted-mean combiner reduces the Evidence collection to a single raw score. A Platt-scaled logistic regression, trained against the project's 19,970-row ground-truth set, maps the raw score to a calibrated probability. A "75" in the published `combined_score` column means there's roughly a 75% chance the pair is a true match, not "I gave this 75 vibe points."
+**4. Combination + calibration.** A weighted-mean combiner reduces the Evidence collection to a single raw score. A Platt-scaled logistic regression, trained against the project's ground-truth set, maps the raw score to a calibrated probability. A "75" in the published `combined_score` column means there's roughly a 75% chance the pair is a true match, not "I gave this 75 vibe points."
 
-**5. Copyright assessment.** The matched record (plus the MARC record itself) is handed to a rule engine that codifies Cornell's public-domain decision matrix. A moving-wall short-circuit handles the easy case (anything more than 95 years old is PD by age). Otherwise the engine walks ordered rules covering Cornell's Category 2 (US-registered or US-published) and Category 3 (foreign-published) and returns a `CopyrightAssessment` with the matched rule name, the leaf status, and any pragmatic assumptions used.
-
-The matching pipeline is parallelized via Python's `multiprocessing` with the `spawn` start method. Workers share the LMDB index through the OS page cache (memory-mapped reads, zero-copy across processes). The producer streams MARC records from disk, batches them, and feeds workers via a bounded queue (backpressure). A single writer process consumes results and serializes the CSV. A reporter thread aggregates throughput, ETA, and per-status counts.
+The matching pipeline is parallelized via Python's `multiprocessing` with the `spawn` start method. Workers share the LMDB index through the OS page cache (memory-mapped reads, zero-copy across processes). The producer streams MARC records from disk, batches them, and feeds workers via a bounded queue (backpressure). A single writer process consumes results and serializes the CSV. A reporter thread aggregates throughput and ETA.
 
 Subfield values from MARC, NYPL registrations, and NYPL renewals are routed through [ftfy](https://ftfy.readthedocs.io/) at parse time to repair mojibake (``cafÃ©`` → ``café``, ``Â© 2020`` → ``© 2020``), strip stray BOMs, and remove bidirectional formatting marks that would otherwise split tokens. NYPL renewals (read as raw bytes) additionally have a Windows-1255 fallback decoder for any Hebrew content that fails strict UTF-8 — currently unused in the supplied corpus but present for future ingests. Per-parser counters (``MarcParseStats``, ``NyplRegParseStats``, ``NyplRenParseStats``) expose how many cells were repaired or routed through each fallback.
 
@@ -257,10 +254,9 @@ The `slow` pytest marker excludes one full-corpus integration test from the defa
 
 ## Configuration
 
-The matcher and the rule engine each ship with shippable-default YAML files:
+The matcher ships with shippable-default YAML files:
 
 - `src/pd_matcher/config/defaults/matching.yaml` — scorer weights, year window, min combined score, scorer selection.
-- `src/pd_matcher/config/defaults/copyright_rules.yaml` — ordered Cornell rules with predicate calls, status mappings, and assumption notes.
 - `src/pd_matcher/config/defaults/field_pairings.yaml` — the `(MARC field, CCE field)` pairings tried for the title, author, and publisher scorer groups, composed from raw subfields via a closed combine vocabulary. Documented inline; see the [field-pairings study](docs/studies/field-pairings.md).
 
 Both load through `src/pd_matcher/config/loader.py` against `msgspec.Struct` schemas in `src/pd_matcher/config/schemas.py`. Schema-violating YAML fails loudly at load time. Future work will let a user-provided YAML override or merge with the defaults; for now, edit the defaults directly if you need to tune.
@@ -376,7 +372,7 @@ pdm run pd-groundtruth review --db data/review.db
 
 Open <http://127.0.0.1:8000>. Ctrl-C stops the server; labels persist in the database, so you can stop and resume any time.
 
-**Each card** shows the MARC record (left) against the proposed CCE candidate (right), the per-field evidence bars, the overall score and confidence band, and the **renewal flag** — the public-domain tell (a registration that was *not* renewed is the signal we care about). Next to the renewal flag the card shows the **matcher's predicted Cornell status** (the Phase 5 rule engine's verdict for the pair) as a colored chip: green for any `PD_*` status, red for any `IN_COPYRIGHT_*` status, grey for unknown / unresolved. The chip is followed by an italicized `(estimate)` marker and a one-line footer caveat linking to the [US Copyright Office](https://www.copyright.gov/) — the prediction is a best-effort automated determination based on MARC vs CCE matching, not a legal opinion; consult copyright.gov for authoritative status. When a registration was renewed, a **renewal-details** sub-block also appears with the renewal date, the claimants as transcribed on the renewal (with a warning marker when they differ from the registration's claimants), any new-matter the renewal claimed, and the renewal's id / oreg as compact metadata. The CCE panel shows author place, claimant flag, edition, publication places, physical description, new-matter-claimed, copies, notes, copyright date, affidavit date, notice date, the LCCN (linked to lccn.loc.gov for cross-referencing), and any previous registration numbers — every field the parser was able to extract from the CCE source.
+**Each card** shows the MARC record (left) against the proposed CCE candidate (right), the per-field evidence bars, the overall score and confidence band, and the **renewal flag** — a registration that was *not* renewed is a useful downstream signal. When a registration was renewed, a **renewal-details** sub-block also appears with the renewal date, the claimants as transcribed on the renewal (with a warning marker when they differ from the registration's claimants), any new-matter the renewal claimed, and the renewal's id / oreg as compact metadata. The CCE panel shows author place, claimant flag, edition, publication places, physical description, new-matter-claimed, copies, notes, copyright date, affidavit date, notice date, the LCCN (linked to lccn.loc.gov for cross-referencing), and any previous registration numbers — every field the parser was able to extract from the CCE source.
 
 **Label with the keyboard.** The UI auto-advances to the next unlabeled pair, and every keypress writes to `review.db`:
 
@@ -443,7 +439,6 @@ review_pair (id PK, language, decade, score, band, source,
              cce_author_is_claimant, cce_copies, cce_aff_date, cce_desc,
              cce_notes, cce_new_matter_claimed, cce_copy_date,
              cce_notice_date, cce_lccn, cce_prev_regnums,
-             cce_predicted_status,
              cce_renewal_id, cce_renewal_oreg, cce_renewal_rdat,
              cce_renewal_author, cce_renewal_title,
              cce_renewal_claimants, cce_renewal_new_matter,

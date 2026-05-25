@@ -5,8 +5,6 @@ from csv import DictReader
 from itertools import count
 from pathlib import Path
 
-from pd_matcher.copyright.assessment import CopyrightAssessment
-from pd_matcher.copyright.status import CopyrightStatus
 from pd_matcher.match.result import MatchResult
 from pd_matcher.models import MarcRecord
 from pd_matcher.output.csv_writer import CsvResultWriter
@@ -20,12 +18,6 @@ from pd_matcher.workers.writer import writer_main
 
 def _make_payload(control_id: str) -> bytes:
     marc = MarcRecord(control_id=control_id, title="t", title_main="t", publication_year=1940)
-    assessment = CopyrightAssessment(
-        status=CopyrightStatus.UNKNOWN_INSUFFICIENT_DATA,
-        matched_rule_name=None,
-        explanation="",
-        assumptions=(),
-    )
     empty_match = MatchResult(
         marc_control_id=control_id,
         best=None,
@@ -35,7 +27,6 @@ def _make_payload(control_id: str) -> bytes:
     output = WorkerOutput(
         marc=marc,
         match=empty_match,
-        assessment=assessment,
         matched_nypl=None,
     )
     return encode_worker_output(output)
@@ -69,7 +60,6 @@ def test_writer_main_writes_csv_to_disk(tmp_path: Path) -> None:
     assert written == 3
     rows = list(DictReader(path.open(encoding="utf-8")))
     assert [row["marc_id"] for row in rows] == ["m-1", "m-2", "m-3"]
-    # The final heartbeat is always emitted, regardless of cadence.
     final = decode_stats_event(stats[-1])
     assert isinstance(final, WriterHeartbeat)
     assert final.records_written == 3
@@ -100,7 +90,6 @@ def test_run_writer_loop_emits_periodic_heartbeats(tmp_path: Path) -> None:
         decoded = decode_stats_event(blob)
         assert isinstance(decoded, WriterHeartbeat)
         heartbeats.append(decoded)
-    # Periodic emissions plus a final flush.
     assert len(heartbeats) >= 2
     assert heartbeats[-1].records_written == 3
 

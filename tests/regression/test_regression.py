@@ -17,7 +17,6 @@ from pytest import skip
 
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.eval.ground_truth import run_eval
 from pd_matcher.eval.regression import compare
@@ -51,13 +50,10 @@ def test_eval_meets_regression_baseline() -> None:
         scorer=base_matching.scorer,
     )
     pairing_config = _load_default_pairing_config()
-    copyright_config = CopyrightAssessmentConfig(as_of_year=baseline.params.as_of_year)
     report = run_eval(
         ground_truth_path=ground_truth_path,
         index_path=_INDEX_PATH,
-        as_of_year=baseline.params.as_of_year,
         matching_config=matching_config,
-        copyright_config=copyright_config,
         pairing_config=pairing_config,
         sample=baseline.params.sample,
         seed=baseline.params.seed,

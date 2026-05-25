@@ -9,7 +9,6 @@ focused on the writer + orchestration.
 """
 
 from collections.abc import Callable
-from datetime import date
 from logging import getLogger
 from pathlib import Path
 
@@ -22,46 +21,31 @@ from pd_groundtruth.vault_pair_resolver import ResolveSummary
 from pd_groundtruth.vault_pair_resolver import build_marc_index
 from pd_groundtruth.vault_pair_resolver import make_pair_scorer
 from pd_groundtruth.vault_pair_resolver import resolve_vault_pairs
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
-from pd_matcher.copyright.coverage import Coverage
-from pd_matcher.copyright.facts import build_facts
-from pd_matcher.copyright.rules import assess
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.result import CandidateMatch
-from pd_matcher.match.result import MatchResult
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 
 _LOGGER = getLogger(__name__)
 
 
-def _make_vault_pair_builder(
-    ruleset: CopyrightRuleSet,
-    copyright_config: CopyrightAssessmentConfig,
-    coverage: Coverage,
-) -> Callable[[MarcRecord, IndexedNyplRegRecord, CandidateMatch], PairInsert]:
+def _make_vault_pair_builder() -> Callable[
+    [MarcRecord, IndexedNyplRegRecord, CandidateMatch], PairInsert
+]:
     """Build a closure that projects scored vault pairs into ``PairInsert`` rows.
 
-    Closes over the active ruleset + assessment config + index coverage
-    so each pair's Cornell predicted status (Phase 5 rule engine) is
-    materialized at vault resolution time. Returning a closure keeps
+    Returning a closure keeps
     :func:`pd_groundtruth.vault_pair_resolver.resolve_vault_pairs` signature
-    unchanged.
+    unchanged and lets the builder import :func:`_build_pair_insert` lazily
+    to dodge the circular dependency on :mod:`pd_groundtruth.build_queue`.
     """
     from pd_groundtruth.build_queue import _build_pair_insert
     from pd_groundtruth.build_queue import _language_of
-
-    as_of_year = (
-        copyright_config.as_of_year
-        if copyright_config.as_of_year is not None
-        else date.today().year
-    )
 
     def _build(
         marc: MarcRecord,
@@ -69,19 +53,6 @@ def _make_vault_pair_builder(
         candidate: CandidateMatch,
     ) -> PairInsert:
         score = candidate.combined.calibrated
-        synthesized = MatchResult(
-            marc_control_id=marc.control_id,
-            best=candidate,
-            alternates=(),
-            candidates_considered=1,
-        )
-        facts = build_facts(marc, synthesized, as_of_year=as_of_year, matched_nypl=cce)
-        assessment = assess(
-            facts,
-            ruleset,
-            coverage=coverage,
-            enable_assumptions=copyright_config.enable_assumptions,
-        )
         return _build_pair_insert(
             marc,
             cce,
@@ -90,7 +61,6 @@ def _make_vault_pair_builder(
             score=score,
             band=band_of(score),
             source=SOURCE_BANDED,
-            predicted_status=assessment.status.name,
             evidence_sources=candidate.evidence_sources,
         )
 
@@ -104,8 +74,6 @@ def resolve_vault_for_build(
     index_path: Path,
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
-    ruleset: CopyrightRuleSet,
-    copyright_config: CopyrightAssessmentConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
 ) -> tuple[list[ResolvedVaultPair], ResolveSummary]:
@@ -137,7 +105,7 @@ def resolve_vault_for_build(
         calibrator=calibrator,
     )
     with NyplIndexLookup(index_path) as lookup:
-        build_pair = _make_vault_pair_builder(ruleset, copyright_config, lookup.coverage())
+        build_pair = _make_vault_pair_builder()
         resolved, summary = resolve_vault_pairs(
             vault=vault,
             marc_lookup=marc_by_id.get,

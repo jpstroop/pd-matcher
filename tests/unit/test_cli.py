@@ -12,7 +12,6 @@ from typer import BadParameter
 from typer.testing import CliRunner
 
 from pd_matcher.cli import _eval_workers_upper_bound
-from pd_matcher.cli import _parse_as_of
 from pd_matcher.cli import _resolve_log_file
 from pd_matcher.cli import _validate_eval_workers
 from pd_matcher.cli import _validate_sample
@@ -45,34 +44,18 @@ def _build_index(tmp_path: Path) -> Path:
     return out_path
 
 
-def _write_ground_truth(path: Path, as_of_year: int) -> None:
+def _write_ground_truth(path: Path) -> None:
     """Write a small ground-truth CSV using fields known to the tiny index."""
     header = (
-        "marc_id,marc_title_original,marc_title_normalized,marc_title_stemmed,"
-        "marc_author_original,marc_author_normalized,marc_author_stemmed,"
-        "marc_main_author_original,marc_main_author_normalized,marc_main_author_stemmed,"
-        "marc_publisher_original,marc_publisher_normalized,marc_publisher_stemmed,"
-        "marc_year,marc_lccn,marc_lccn_normalized,marc_country_code,marc_language_code,"
-        "match_type,match_title,match_title_normalized,match_author,match_author_normalized,"
-        "match_publisher,match_publisher_normalized,match_year,match_source_id,match_date,"
-        "title_score,author_score,publisher_score,combined_score,year_difference,"
-        "copyright_status"
+        "marc_id,marc_title_original,"
+        "marc_main_author_original,"
+        "marc_publisher_original,"
+        "marc_year,marc_country_code,marc_language_code,"
+        "match_source_id"
     )
-    row = (
-        f"marc-aaa,A study of widgets,a study of widgets,studi widget,"
-        f"by Smith,by smith,smith,Smith John,smith john,smith john,"
-        f"Acme Press,acme press,acme press,"
-        f"{as_of_year - 80},,,xxu,eng,"
-        f"registration,A study of widgets,a study of widgets,smith john,smith john,"
-        f"acme press,acme press,{as_of_year - 80},UUID-0001,1940,100,80,90,90.0,0,"
-        f"PD_REGISTERED_NOT_RENEWED\n"
-    )
-    bogus = (
-        "marc-bbb,Unrelated Title,unrelated title,unrelat titl,,"
-        ",,,,,,,,1955,,,xxu,eng,"
-        ",,,,,,,,,,,,,,GIBBERISH_LABEL\n"
-    )
-    path.write_text(header + "\n" + row + bogus, encoding="utf-8")
+    row = "marc-aaa,A study of widgets,Smith John,Acme Press,1940,xxu,eng,UUID-0001"
+    bogus = "marc-bbb,Unrelated Title,,,1955,xxu,eng,"
+    path.write_text(header + "\n" + row + "\n" + bogus + "\n", encoding="utf-8")
 
 
 def test_root_help_lists_subcommands() -> None:
@@ -119,7 +102,6 @@ def test_match_help_lists_options() -> None:
         "--workers",
         "--year-window",
         "--min-score",
-        "--as-of",
     ):
         assert flag in result.stdout
 
@@ -132,7 +114,6 @@ def test_eval_help_lists_options() -> None:
         "--ground-truth",
         "--index",
         "--report",
-        "--as-of",
         "--limit",
         "--sample",
         "--seed",
@@ -533,8 +514,6 @@ def test_match_runs_against_tiny_fixtures(tmp_path: Path) -> None:
             "2",
             "--min-score",
             "30.0",
-            "--as-of",
-            "2026",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -598,27 +577,6 @@ def test_match_with_default_workers(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
-def test_match_rejects_bad_as_of(tmp_path: Path) -> None:
-    """``match --as-of`` rejects non-integer values with exit 2 on stderr."""
-    index_path = _build_index(tmp_path)
-    result = _runner.invoke(
-        app,
-        [
-            "match",
-            "--marc",
-            str(_FIXTURES / "tiny.marcxml"),
-            "--index",
-            str(index_path),
-            "--out",
-            str(tmp_path / "out.csv"),
-            "--as-of",
-            "not-a-year",
-        ],
-    )
-    assert result.exit_code == 2
-    assert "four-digit year" in result.output
-
-
 def test_match_rejects_missing_marc(tmp_path: Path) -> None:
     """``match`` exits 1 when the MARC file is absent."""
     index_path = _build_index(tmp_path)
@@ -672,7 +630,6 @@ def test_match_reports_interrupted(
             records_written=1,
             records_enqueued=3,
             duration_seconds=0.01,
-            by_status={},
             interrupted=True,
         )
 
@@ -775,34 +732,6 @@ def test_match_surfaces_matching_config_error(
     assert "matching defaults" in result.output
 
 
-def test_match_surfaces_ruleset_error(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """A ConfigError during ruleset load surfaces as exit 1."""
-    index_path = _build_index(tmp_path)
-    from pd_matcher.config.loader import ConfigError
-
-    def _raise(_path: Path) -> object:
-        raise ConfigError("ruleset corrupt")
-
-    monkeypatch.setattr("pd_matcher.cli.load_copyright_rules", _raise)
-    result = _runner.invoke(
-        app,
-        [
-            "match",
-            "--marc",
-            str(_FIXTURES / "tiny.marcxml"),
-            "--index",
-            str(index_path),
-            "--out",
-            str(tmp_path / "out.csv"),
-        ],
-    )
-    assert result.exit_code == 1
-    assert "copyright rules" in result.output
-
-
 def test_match_surfaces_pairing_config_error(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -835,7 +764,7 @@ def test_eval_runs_against_tiny_index(tmp_path: Path) -> None:
     """``eval`` succeeds against the tiny index + a synthetic GT CSV."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     report_path = tmp_path / "report.json"
     result = _runner.invoke(
         app,
@@ -847,8 +776,6 @@ def test_eval_runs_against_tiny_index(tmp_path: Path) -> None:
             str(index_path),
             "--report",
             str(report_path),
-            "--as-of",
-            "2026",
             "--limit",
             "2",
         ],
@@ -864,7 +791,7 @@ def test_eval_without_report_does_not_write_file(tmp_path: Path) -> None:
     """When ``--report`` is omitted no JSON file is written."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -876,26 +803,6 @@ def test_eval_without_report_does_not_write_file(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
-
-
-def test_eval_rejects_bad_as_of(tmp_path: Path) -> None:
-    """``eval --as-of`` rejects non-integer values with exit 2."""
-    index_path = _build_index(tmp_path)
-    gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
-    result = _runner.invoke(
-        app,
-        [
-            "eval",
-            "--ground-truth",
-            str(gt_path),
-            "--index",
-            str(index_path),
-            "--as-of",
-            "bogus",
-        ],
-    )
-    assert result.exit_code == 2
 
 
 def test_eval_rejects_missing_ground_truth(tmp_path: Path) -> None:
@@ -918,7 +825,7 @@ def test_eval_rejects_missing_ground_truth(tmp_path: Path) -> None:
 def test_eval_rejects_missing_index(tmp_path: Path) -> None:
     """``eval`` exits 1 when ``--index`` does not exist."""
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -940,7 +847,7 @@ def test_eval_surfaces_matching_config_error(
     """A ConfigError during matching-defaults load surfaces as exit 1."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     from pd_matcher.config.loader import ConfigError
 
     def _raise() -> object:
@@ -968,7 +875,7 @@ def test_eval_surfaces_pairing_config_error(
     """A ConfigError during pairing-defaults load surfaces as exit 1."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     from pd_matcher.config.loader import ConfigError
 
     def _raise() -> object:
@@ -996,7 +903,7 @@ def test_eval_surfaces_run_eval_oserror(
     """An OSError from ``run_eval`` surfaces as exit 1."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
 
     def _raise(**_kwargs: object) -> object:
         raise OSError("io error")
@@ -1029,7 +936,7 @@ def test_eval_year_window_override_threads_through(
 
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     captured: dict[str, int] = {}
 
     def _fake_run_eval(**kwargs: object) -> EvalReport:
@@ -1044,7 +951,6 @@ def test_eval_year_window_override_threads_through(
             precision=0.0,
             recall=0.0,
             f1=0.0,
-            status_confusion={},
             elapsed_seconds=0.0,
         )
 
@@ -1069,7 +975,7 @@ def test_eval_accepts_year_window_zero(tmp_path: Path) -> None:
     """``eval --year-window 0`` is the lower bound and is accepted."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1089,7 +995,7 @@ def test_eval_accepts_year_window_five(tmp_path: Path) -> None:
     """``eval --year-window 5`` (typical override) is accepted."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1109,7 +1015,7 @@ def test_eval_accepts_year_window_upper_bound(tmp_path: Path) -> None:
     """``eval --year-window 100`` is the upper bound and is accepted."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1129,7 +1035,7 @@ def test_eval_rejects_year_window_below_zero(tmp_path: Path) -> None:
     """``eval --year-window -1`` is rejected with exit 2."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1150,7 +1056,7 @@ def test_eval_rejects_year_window_above_upper_bound(tmp_path: Path) -> None:
     """``eval --year-window 101`` is rejected with exit 2."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1171,7 +1077,7 @@ def test_eval_rejects_year_window_non_integer(tmp_path: Path) -> None:
     """``eval --year-window abc`` is rejected by typer's parser with exit 2."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1191,7 +1097,7 @@ def test_eval_accepts_sample(tmp_path: Path) -> None:
     """``eval --sample 100`` is accepted and runs to completion."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1211,7 +1117,7 @@ def test_eval_rejects_sample_zero(tmp_path: Path) -> None:
     """``eval --sample 0`` is rejected with exit 2."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1232,7 +1138,7 @@ def test_eval_rejects_sample_negative(tmp_path: Path) -> None:
     """``eval --sample -1`` is rejected with exit 2."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1253,7 +1159,7 @@ def test_eval_rejects_sample_non_integer(tmp_path: Path) -> None:
     """``eval --sample abc`` is rejected by typer's parser with exit 2."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1273,7 +1179,7 @@ def test_eval_accepts_seed(tmp_path: Path) -> None:
     """``eval --sample 100 --seed 42`` is accepted."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1295,7 +1201,7 @@ def test_eval_accepts_default_seed(tmp_path: Path) -> None:
     """Omitting ``--seed`` is fine; the default is used."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1315,7 +1221,7 @@ def test_eval_rejects_negative_seed(tmp_path: Path) -> None:
     """``--seed -1`` is rejected with exit 2 (non-negative integers only)."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1338,7 +1244,7 @@ def test_eval_rejects_sample_and_limit_together(tmp_path: Path) -> None:
     """``--sample`` and ``--limit`` are mutually exclusive."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1450,7 +1356,7 @@ def test_eval_workers_flag_threads_through(
 
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     captured: dict[str, int] = {}
 
     def _fake_run_eval(**kwargs: object) -> EvalReport:
@@ -1465,7 +1371,6 @@ def test_eval_workers_flag_threads_through(
             precision=0.0,
             recall=0.0,
             f1=0.0,
-            status_confusion={},
             elapsed_seconds=0.0,
         )
 
@@ -1495,7 +1400,7 @@ def test_eval_default_workers_is_one(
 
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     captured: dict[str, int] = {}
 
     def _fake_run_eval(**kwargs: object) -> EvalReport:
@@ -1510,7 +1415,6 @@ def test_eval_default_workers_is_one(
             precision=0.0,
             recall=0.0,
             f1=0.0,
-            status_confusion={},
             elapsed_seconds=0.0,
         )
 
@@ -1533,7 +1437,7 @@ def test_eval_rejects_workers_zero(tmp_path: Path) -> None:
     """``eval --workers 0`` is rejected with exit 2."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1554,7 +1458,7 @@ def test_eval_rejects_workers_above_upper_bound(tmp_path: Path) -> None:
     """``eval --workers <cpu_count*2 + 1>`` is rejected with exit 2."""
     index_path = _build_index(tmp_path)
     gt_path = tmp_path / "gt.csv"
-    _write_ground_truth(gt_path, 2026)
+    _write_ground_truth(gt_path)
     result = _runner.invoke(
         app,
         [
@@ -1594,66 +1498,6 @@ def test_root_callback_accepts_log_flags() -> None:
         ],
     )
     assert result.exit_code == 1
-
-
-def test_as_of_past_year_affects_moving_wall(tmp_path: Path) -> None:
-    """``--as-of`` in the deep past short-circuits the moving wall.
-
-    The moving wall (Phase 5) fires when ``pub_year < as_of_year - 95``.
-    Setting ``--as-of 1950`` makes the cutoff 1855 — no record in the
-    tiny fixtures qualifies — so no row carries
-    ``PD_BY_AGE_PRE_95_YEARS``. With ``--as-of 2100`` the cutoff is
-    2005, the parseable-year records all qualify, and at least one row
-    carries that status.
-    """
-    index_path = _build_index(tmp_path)
-    out_early = tmp_path / "early.csv"
-    early = _runner.invoke(
-        app,
-        [
-            "match",
-            "--marc",
-            str(_FIXTURES / "tiny.marcxml"),
-            "--index",
-            str(index_path),
-            "--out",
-            str(out_early),
-            "--workers",
-            "1",
-            "--min-score",
-            "1.0",
-            "--as-of",
-            "1950",
-        ],
-    )
-    assert early.exit_code == 0, early.output
-    with out_early.open(encoding="utf-8") as fp:
-        early_statuses = {row["copyright_status"] for row in DictReader(fp)}
-    assert "PD_BY_AGE_PRE_95_YEARS" not in early_statuses
-
-    out_late = tmp_path / "late.csv"
-    late = _runner.invoke(
-        app,
-        [
-            "match",
-            "--marc",
-            str(_FIXTURES / "tiny.marcxml"),
-            "--index",
-            str(index_path),
-            "--out",
-            str(out_late),
-            "--workers",
-            "1",
-            "--min-score",
-            "1.0",
-            "--as-of",
-            "2100",
-        ],
-    )
-    assert late.exit_code == 0, late.output
-    with out_late.open(encoding="utf-8") as fp:
-        late_statuses = {row["copyright_status"] for row in DictReader(fp)}
-    assert "PD_BY_AGE_PRE_95_YEARS" in late_statuses
 
 
 def test_resolve_log_file_returns_override_when_supplied(tmp_path: Path) -> None:
@@ -1697,39 +1541,3 @@ def test_match_writes_log_file_with_explicit_path(tmp_path: Path) -> None:
     assert target.exists()
     contents = target.read_text(encoding="utf-8")
     assert "match.pool.start" in contents or "match.pool.complete" in contents
-
-
-def test_parse_as_of_none_returns_current_year() -> None:
-    """``_parse_as_of(None)`` returns the current calendar year."""
-    from datetime import date as _date
-
-    assert _parse_as_of(None) == _date.today().year
-
-
-def test_parse_as_of_accepts_valid_year() -> None:
-    """``_parse_as_of('2026')`` returns the int ``2026``."""
-    assert _parse_as_of("2026") == 2026
-
-
-def test_parse_as_of_rejects_non_integer() -> None:
-    """Non-integer input raises :class:`typer.BadParameter`."""
-    with raises(BadParameter, match="four-digit year"):
-        _parse_as_of("not-a-number")
-
-
-def test_parse_as_of_rejects_below_lower_bound() -> None:
-    """Year below 1923 is rejected."""
-    with raises(BadParameter, match="between 1923 and 2100"):
-        _parse_as_of("1922")
-
-
-def test_parse_as_of_rejects_above_upper_bound() -> None:
-    """Year above 2100 is rejected."""
-    with raises(BadParameter, match="between 1923 and 2100"):
-        _parse_as_of("2101")
-
-
-def test_parse_as_of_rejects_typo_out_of_range() -> None:
-    """A five-digit typo like ``20270`` is rejected by the upper-bound check."""
-    with raises(BadParameter, match="between 1923 and 2100"):
-        _parse_as_of("20270")

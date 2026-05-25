@@ -7,7 +7,6 @@ from pathlib import Path
 from pytest import raises
 
 from pd_matcher.config.loader import ConfigError
-from pd_matcher.config.loader import load_copyright_rules
 from pd_matcher.config.loader import load_index_config
 from pd_matcher.config.loader import load_matching_config
 from pd_matcher.config.loader import load_pairing_config
@@ -28,15 +27,6 @@ def test_load_shipped_matching_defaults() -> None:
     assert cfg.year_window == 0
     assert cfg.min_combined_score == 70.0
     assert cfg.scorer == "weighted_mean"
-
-
-def test_load_shipped_copyright_rules_defaults() -> None:
-    """The packaged ``copyright_rules.yaml`` must validate cleanly."""
-    resource = files("pd_matcher.config.defaults") / "copyright_rules.yaml"
-    with as_file(resource) as path:
-        rs = load_copyright_rules(path)
-    assert rs.version == "1.0.0"
-    assert len(rs.rules) > 0
 
 
 def test_load_index_config_from_temp_yaml(tmp_path: Path) -> None:
@@ -79,22 +69,6 @@ def test_load_matching_config_raises_on_schema_violation(tmp_path: Path) -> None
         load_matching_config(bad)
 
 
-def test_load_copyright_rules_raises_on_schema_violation(tmp_path: Path) -> None:
-    """A schema-violating copyright YAML should raise :class:`ConfigError`."""
-    bad = tmp_path / "bad_rules.yaml"
-    bad.write_text("rules: []\n", encoding="utf-8")
-    with raises(ConfigError, match="Invalid copyright rule set"):
-        load_copyright_rules(bad)
-
-
-def test_load_copyright_rules_raises_on_malformed_yaml(tmp_path: Path) -> None:
-    """Bad YAML inside the copyright loader should be wrapped."""
-    bad = tmp_path / "bad.yaml"
-    bad.write_text("version: 1.0\nrules: [unterminated\n", encoding="utf-8")
-    with raises(ConfigError, match="Malformed YAML"):
-        load_copyright_rules(bad)
-
-
 def test_load_index_config_raises_on_schema_violation(tmp_path: Path) -> None:
     """A schema-violating index YAML should raise :class:`ConfigError`."""
     bad = tmp_path / "bad_index.yaml"
@@ -107,12 +81,6 @@ def test_load_index_config_raises_on_missing_file(tmp_path: Path) -> None:
     """A nonexistent path through ``load_index_config`` must raise."""
     with raises(ConfigError, match="Cannot read"):
         load_index_config(tmp_path / "missing.yaml")
-
-
-def test_load_copyright_rules_raises_on_missing_file(tmp_path: Path) -> None:
-    """A nonexistent path through ``load_copyright_rules`` must raise."""
-    with raises(ConfigError, match="Cannot read"):
-        load_copyright_rules(tmp_path / "missing.yaml")
 
 
 def test_load_shipped_pairing_defaults() -> None:

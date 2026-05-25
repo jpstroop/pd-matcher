@@ -20,7 +20,6 @@ def _params() -> BaselineParams:
         sample=1000,
         seed=42,
         year_window=0,
-        as_of_year=2026,
         ground_truth="combined_ground_truth.csv",
     )
 
@@ -51,7 +50,6 @@ def _report(*, precision: float, recall: float, f1: float = 0.0) -> EvalReport:
         precision=precision,
         recall=recall,
         f1=f1,
-        status_confusion={},
         elapsed_seconds=1.0,
     )
 
@@ -113,7 +111,7 @@ def test_load_baseline_happy(tmp_path: Path) -> None:
         """
         {
           "params": {"sample": 1000, "seed": 42, "year_window": 0,
-                     "as_of_year": 2026, "ground_truth": "combined_ground_truth.csv"},
+                     "ground_truth": "combined_ground_truth.csv"},
           "metrics": {"precision": 0.85, "recall": 0.78, "f1": 0.81},
           "counts": {"rows_evaluated": 1000, "rows_with_predicted_match": 914,
                      "rows_with_ground_truth_match": 1000, "rows_agreeing": 777},

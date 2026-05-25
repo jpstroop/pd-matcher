@@ -805,7 +805,7 @@ def test_iter_labeled_pairs_aggregates_multiple_reason_codes(tmp_path: Path) -> 
     assert rows[0].reason_codes == ("diff_work", "garbled")
 
 
-def test_round_trip_preserves_predicted_status_and_renewal_details(tmp_path: Path) -> None:
+def test_round_trip_preserves_renewal_details(tmp_path: Path) -> None:
     extended = PairInsert(
         language="eng",
         decade=1950,
@@ -827,7 +827,6 @@ def test_round_trip_preserves_predicted_status_and_renewal_details(tmp_path: Pat
         cce_was_renewed=True,
         cce_regnum="R12345",
         evidence_json="{}",
-        cce_predicted_status="PD_REGISTERED_NOT_RENEWED",
         cce_renewal_id="R200001",
         cce_renewal_oreg="A111111",
         cce_renewal_rdat="1968-05-15",
@@ -840,7 +839,6 @@ def test_round_trip_preserves_predicted_status_and_renewal_details(tmp_path: Pat
         db.insert_pair(extended)
         row = db.next_unlabeled()
     assert row is not None
-    assert row.cce_predicted_status == "PD_REGISTERED_NOT_RENEWED"
     assert row.cce_renewal_id == "R200001"
     assert row.cce_renewal_oreg == "A111111"
     assert row.cce_renewal_rdat == "1968-05-15"
@@ -850,12 +848,11 @@ def test_round_trip_preserves_predicted_status_and_renewal_details(tmp_path: Pat
     assert row.cce_renewal_new_matter == "added ch. 7"
 
 
-def test_predicted_status_and_renewal_details_default_to_null(tmp_path: Path) -> None:
+def test_renewal_details_default_to_null(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         db.insert_pair(_pair())
         row = db.next_unlabeled()
     assert row is not None
-    assert row.cce_predicted_status is None
     assert row.cce_renewal_id is None
     assert row.cce_renewal_oreg is None
     assert row.cce_renewal_rdat is None
@@ -865,7 +862,7 @@ def test_predicted_status_and_renewal_details_default_to_null(tmp_path: Path) ->
     assert row.cce_renewal_new_matter is None
 
 
-def test_init_schema_adds_predicted_status_and_renewal_columns_to_legacy_pair_table(
+def test_init_schema_adds_renewal_columns_to_legacy_pair_table(
     tmp_path: Path,
 ) -> None:
     from sqlite3 import connect as sqlite_connect
@@ -916,7 +913,6 @@ def test_init_schema_adds_predicted_status_and_renewal_columns_to_legacy_pair_ta
 
     with ReviewDb.connect(db_path) as db:
         columns = {row[1] for row in db._conn.execute("PRAGMA table_info(review_pair)")}
-        assert "cce_predicted_status" in columns
         assert "cce_renewal_id" in columns
         assert "cce_renewal_oreg" in columns
         assert "cce_renewal_rdat" in columns
@@ -926,7 +922,6 @@ def test_init_schema_adds_predicted_status_and_renewal_columns_to_legacy_pair_ta
         assert "cce_renewal_new_matter" in columns
         row = db.get_pair(1)
     assert row is not None
-    assert row.cce_predicted_status is None
     assert row.cce_renewal_id is None
     assert row.cce_renewal_new_matter is None
 

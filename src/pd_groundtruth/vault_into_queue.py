@@ -18,7 +18,6 @@ existing vault label with the original ``labeled_at``.
 """
 
 from collections.abc import Callable
-from datetime import date
 from logging import getLogger
 from pathlib import Path
 
@@ -27,7 +26,6 @@ from msgspec import Struct
 from pd_groundtruth.build_queue import _build_pair_insert
 from pd_groundtruth.build_queue import _language_of
 from pd_groundtruth.build_queue import _load_calibrator
-from pd_groundtruth.build_queue import load_default_ruleset
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.review_db import PairInsert
@@ -41,14 +39,8 @@ from pd_groundtruth.vault_pair_resolver import ScorePairFn
 from pd_groundtruth.vault_pair_resolver import build_marc_index
 from pd_groundtruth.vault_pair_resolver import make_pair_scorer
 from pd_groundtruth.vault_pair_resolver import resolve_vault_pairs
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.config.schemas import CopyrightRuleSet
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
-from pd_matcher.copyright.coverage import LEGACY_COVERAGE
-from pd_matcher.copyright.coverage import Coverage
-from pd_matcher.copyright.facts import build_facts
-from pd_matcher.copyright.rules import assess
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.idf import IdfTable
@@ -56,7 +48,6 @@ from pd_matcher.match.idf import load_or_build_idf
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.result import CandidateMatch
-from pd_matcher.match.result import MatchResult
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 
@@ -74,22 +65,8 @@ class BackfillSummary(Struct, frozen=True, forbid_unknown_fields=True):
     missing_in_index: int
 
 
-def _make_vault_pair_builder(
-    ruleset: CopyrightRuleSet,
-    copyright_config: CopyrightAssessmentConfig,
-    coverage: Coverage,
-) -> BuildPairFn:
-    """Build a closure that projects scored vault pairs into ``PairInsert`` rows.
-
-    The Cornell predicted-status (Phase 5 rule engine) is materialized at
-    backfill time so the persisted row carries the same predicted-status
-    chip the matcher-route writes — see jpstroop/pd-matcher#38.
-    """
-    as_of_year = (
-        copyright_config.as_of_year
-        if copyright_config.as_of_year is not None
-        else date.today().year
-    )
+def _default_build_pair() -> BuildPairFn:
+    """Build the default closure that projects scored vault pairs into rows."""
 
     def _build(
         marc: MarcRecord,
@@ -97,19 +74,6 @@ def _make_vault_pair_builder(
         candidate: CandidateMatch,
     ) -> PairInsert:
         score = candidate.combined.calibrated
-        synthesized = MatchResult(
-            marc_control_id=marc.control_id,
-            best=candidate,
-            alternates=(),
-            candidates_considered=1,
-        )
-        facts = build_facts(marc, synthesized, as_of_year=as_of_year, matched_nypl=cce)
-        assessment = assess(
-            facts,
-            ruleset,
-            coverage=coverage,
-            enable_assumptions=copyright_config.enable_assumptions,
-        )
         return _build_pair_insert(
             marc,
             cce,
@@ -118,7 +82,6 @@ def _make_vault_pair_builder(
             score=score,
             band=band_of(score),
             source=SOURCE_BANDED,
-            predicted_status=assessment.status.name,
             evidence_sources=candidate.evidence_sources,
         )
 
@@ -133,7 +96,6 @@ def run_backfill(
     cce_lookup: CceLookupFn,
     score_pair: ScorePairFn,
     build_pair: BuildPairFn | None = None,
-    coverage: Coverage = LEGACY_COVERAGE,
 ) -> BackfillSummary:
     """Open ``db_path``, compute the missing set, and backfill it.
 
@@ -149,20 +111,10 @@ def run_backfill(
         cce_lookup: ``nypl_uuid -> IndexedNyplRegRecord | None`` resolver.
         score_pair: ``(marc, cce) -> CandidateMatch`` scorer.
         build_pair: ``(marc, cce, candidate) -> PairInsert`` projection.
-            Defaults to a closure over the shipped ruleset and a default
-            :class:`CopyrightAssessmentConfig` so callers that have no
-            opinion about predicted-status still write one consistent with
-            the matcher route. Tests can inject a simpler builder.
+            Defaults to the standard projection; tests can inject a
+            simpler builder.
     """
-    project = (
-        build_pair
-        if build_pair is not None
-        else _make_vault_pair_builder(
-            load_default_ruleset(),
-            CopyrightAssessmentConfig(),
-            coverage,
-        )
-    )
+    project = build_pair if build_pair is not None else _default_build_pair()
     with ReviewDb.connect(db_path) as db:
         existing = db.pair_keys()
         missing = {key: entry for key, entry in vault.items() if key not in existing}
@@ -273,7 +225,6 @@ def vault_into_queue(
             marc_lookup=marc_by_id.get,
             cce_lookup=lookup.get_registration,
             score_pair=score_pair,
-            coverage=lookup.coverage(),
         )
 
 

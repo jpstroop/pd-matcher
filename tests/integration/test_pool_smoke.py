@@ -8,9 +8,7 @@ the resulting CSV has one row per MARC record in the fixture.
 from csv import DictReader
 from pathlib import Path
 
-from pd_matcher.config.loader import load_copyright_rules
 from pd_matcher.config.loader import load_pairing_config
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.index.builder import build_index
 from pd_matcher.index.lookup import NyplIndexLookup
@@ -19,14 +17,6 @@ from pd_matcher.parsers.marc import iter_marc_records
 from pd_matcher.workers import run_match
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-_DEFAULTS = (
-    Path(__file__).resolve().parents[2]
-    / "src"
-    / "pd_matcher"
-    / "config"
-    / "defaults"
-    / "copyright_rules.yaml"
-)
 _PAIRINGS = (
     Path(__file__).resolve().parents[2]
     / "src"
@@ -68,16 +58,12 @@ def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
         min_combined_score=30.0,
         scorer="weighted_mean",
     )
-    copyright_config = CopyrightAssessmentConfig(as_of_year=2026)
-    ruleset = load_copyright_rules(_DEFAULTS)
     pairing_config = load_pairing_config(_PAIRINGS)
     report = run_match(
         marc_path=marc_path,
         index_path=index_path,
         output_path=output_path,
         matching_config=config,
-        copyright_config=copyright_config,
-        ruleset=ruleset,
         pairing_config=pairing_config,
         idf=idf,
         workers=2,
@@ -91,4 +77,3 @@ def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
     assert report.records_enqueued == expected_records
     assert len(rows) == expected_records
     assert report.interrupted is False
-    assert sum(report.by_status.values()) == expected_records

@@ -1,12 +1,7 @@
 """Unit tests for the build-queue-side vault pair resolver glue."""
 
-from datetime import date
-
-from pd_groundtruth.build_queue import load_default_ruleset
 from pd_groundtruth.build_queue_vault import _make_vault_pair_builder
 from pd_groundtruth.sampling import SOURCE_BANDED
-from pd_matcher.config.schemas import CopyrightAssessmentConfig
-from pd_matcher.copyright.coverage import LEGACY_COVERAGE
 from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.result import CandidateMatch
@@ -54,9 +49,7 @@ def _candidate(score: float) -> CandidateMatch:
 
 
 def test_make_vault_pair_builder_projects_scored_candidate_into_pair_insert() -> None:
-    builder = _make_vault_pair_builder(
-        load_default_ruleset(), CopyrightAssessmentConfig(), LEGACY_COVERAGE
-    )
+    builder = _make_vault_pair_builder()
     pair = builder(_marc(), _cce(), _candidate(0.95))
     assert pair.marc_control_id == "ctrl-1"
     assert pair.nypl_uuid == "uuid-1"
@@ -64,26 +57,12 @@ def test_make_vault_pair_builder_projects_scored_candidate_into_pair_insert() ->
     assert pair.score == 0.95
     assert pair.band == "ge90"
     assert pair.source == SOURCE_BANDED
-    assert pair.cce_predicted_status is not None
 
 
-def test_make_vault_pair_builder_uses_today_when_copyright_year_unset() -> None:
-    builder = _make_vault_pair_builder(
-        load_default_ruleset(), CopyrightAssessmentConfig(), LEGACY_COVERAGE
-    )
+def test_make_vault_pair_builder_bands_below_when_score_under_threshold() -> None:
+    builder = _make_vault_pair_builder()
     pair = builder(_marc(), _cce(), _candidate(0.42))
     assert pair.band == "below"
-    assert pair.cce_predicted_status is not None
-
-
-def test_make_vault_pair_builder_honors_explicit_as_of_year() -> None:
-    builder = _make_vault_pair_builder(
-        load_default_ruleset(),
-        CopyrightAssessmentConfig(as_of_year=date.today().year - 50),
-        LEGACY_COVERAGE,
-    )
-    pair = builder(_marc(), _cce(), _candidate(0.95))
-    assert pair.cce_predicted_status is not None
 
 
 def test_resolve_vault_for_build_carries_field_annotations() -> None:
@@ -100,9 +79,7 @@ def test_resolve_vault_for_build_carries_field_annotations() -> None:
     from pd_groundtruth.review.field_annotations import FieldAnnotation
     from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
 
-    builder = _make_vault_pair_builder(
-        load_default_ruleset(), CopyrightAssessmentConfig(), LEGACY_COVERAGE
-    )
+    builder = _make_vault_pair_builder()
     pair = builder(_marc(), _cce(), _candidate(0.95))
     entry = VaultEntry(
         schema=SCHEMA_VERSION,

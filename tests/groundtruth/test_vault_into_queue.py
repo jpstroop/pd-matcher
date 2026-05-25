@@ -24,8 +24,6 @@ from pd_groundtruth.vault_into_queue import build_marc_index
 from pd_groundtruth.vault_into_queue import run_backfill
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
-from pd_matcher.copyright.coverage import LEGACY_COVERAGE
-from pd_matcher.copyright.coverage import Coverage
 from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.result import CandidateMatch
@@ -506,9 +504,6 @@ def test_vault_into_queue_end_to_end_against_fake_index(tmp_path: Path) -> None:
 
         def get_registration(self, uuid: str) -> IndexedNyplRegRecord | None:
             return cce_table.get(uuid)
-
-        def coverage(self) -> Coverage:
-            return LEGACY_COVERAGE
 
     with (
         patch.object(module_under_test, "NyplIndexLookup", lambda _path: _FakeLookup()),
