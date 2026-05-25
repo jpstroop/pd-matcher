@@ -12,6 +12,7 @@ from collections.abc import Callable
 from logging import getLogger
 from pathlib import Path
 
+from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.sampling import SOURCE_BANDED
@@ -67,6 +68,36 @@ def _make_vault_pair_builder() -> Callable[
     return _build
 
 
+def _load_vault_filtered(
+    vault_path: Path,
+    requeue_verdicts: frozenset[str],
+) -> dict[tuple[str, str], VaultEntry]:
+    """Return ``current_entries(vault_path)`` minus any verdict in ``requeue_verdicts``.
+
+    Drops entries whose verdict is in ``requeue_verdicts`` so those pairs
+    re-enter the labeling queue on rebuild. Each requeue verdict logs at INFO
+    with the dropped count (zero is logged too — re-queuing a verdict that
+    has no entries in the vault is a no-op, not an error).
+    """
+    raw = current_entries(vault_path)
+    if not requeue_verdicts:
+        return raw
+    dropped_by_verdict: dict[str, int] = dict.fromkeys(requeue_verdicts, 0)
+    filtered: dict[tuple[str, str], VaultEntry] = {}
+    for key, entry in raw.items():
+        if entry.verdict in requeue_verdicts:
+            dropped_by_verdict[entry.verdict] = dropped_by_verdict.get(entry.verdict, 0) + 1
+            continue
+        filtered[key] = entry
+    for verdict in sorted(requeue_verdicts):
+        _LOGGER.info(
+            "vault.requeue verdict=%s dropped=%d",
+            verdict,
+            dropped_by_verdict.get(verdict, 0),
+        )
+    return filtered
+
+
 def resolve_vault_for_build(
     *,
     vault_path: Path,
@@ -76,6 +107,7 @@ def resolve_vault_for_build(
     pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
+    requeue_verdicts: frozenset[str] = frozenset(),
 ) -> tuple[list[ResolvedVaultPair], ResolveSummary]:
     """Resolve every current vault entry into a ready-to-insert pair.
 
@@ -86,12 +118,17 @@ def resolve_vault_for_build(
     MARC is no longer in the pool or whose CCE is no longer in the index are
     skipped with a WARNING; the vault file itself is never modified.
 
+    When ``requeue_verdicts`` is non-empty, vault entries whose verdict
+    matches are *not* pre-applied — they re-enter the labeling queue as if
+    they had never been labeled. Default empty preserves today's behavior of
+    carrying every vault verdict forward.
+
     Returns:
         ``(resolved, summary)`` where ``resolved`` is empty for an empty or
         missing vault, and ``summary`` carries diagnostic counts that
         ``build_queue`` logs at the start of the run.
     """
-    vault = current_entries(vault_path)
+    vault = _load_vault_filtered(vault_path, requeue_verdicts)
     if not vault:
         _LOGGER.info("vault loaded: 0 entries; 0 MARC records resolved from pool; 0 missing")
         return [], ResolveSummary(resolved=0, missing_in_pool=0, missing_in_index=0)

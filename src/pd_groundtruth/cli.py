@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated
 
 from msgspec.json import decode as json_decode
+from typer import BadParameter
 from typer import Exit
 from typer import Option
 from typer import Typer
@@ -26,6 +27,9 @@ from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.review.server import serve
+from pd_groundtruth.review_db import VERDICT_MATCH
+from pd_groundtruth.review_db import VERDICT_NO_MATCH
+from pd_groundtruth.review_db import VERDICT_UNSURE
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import default_budget
 from pd_groundtruth.sampling import scale_budget
@@ -52,6 +56,9 @@ _DEFAULT_VAULT_PATH = Path("data/label_vault.jsonl")
 _LABELER = "jpstroop"
 _LOG_DIR_NAME = "logs"
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+_REQUEUE_VALID_VERDICTS: frozenset[str] = frozenset(
+    {VERDICT_MATCH, VERDICT_NO_MATCH, VERDICT_UNSURE}
+)
 
 
 def _utc_timestamp() -> str:
@@ -224,6 +231,16 @@ def build_queue_command(
             help="Append to a non-empty --out database (today's silent behavior, now opt-in).",
         ),
     ] = False,
+    requeue: Annotated[
+        list[str] | None,
+        Option(
+            "--requeue",
+            help=(
+                "Skip pre-applying vault entries with this verdict so the pair re-enters "
+                "the queue. Repeatable. Valid: match, no_match, unsure."
+            ),
+        ),
+    ] = None,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
@@ -233,6 +250,13 @@ def build_queue_command(
     if rebuild and append:
         echo("--rebuild and --append are mutually exclusive.", err=True)
         raise Exit(code=2)
+    requeue_values = frozenset(requeue or ())
+    invalid = sorted(requeue_values - _REQUEUE_VALID_VERDICTS)
+    if invalid:
+        raise BadParameter(
+            f"--requeue: invalid verdict(s) {invalid}; "
+            f"valid values are {sorted(_REQUEUE_VALID_VERDICTS)}"
+        )
     existing = _existing_pair_count(out)
     if existing > 0 and not rebuild and not append:
         echo(
@@ -258,6 +282,7 @@ def build_queue_command(
         sample_per_lang=sample_per_lang,
         verbosity=verbose,
         log_file=resolved_log_file,
+        requeue_verdicts=requeue_values,
     )
     strata = " ".join(f"{label}={count}" for label, count in sorted(summary.stratum_counts.items()))
     echo(

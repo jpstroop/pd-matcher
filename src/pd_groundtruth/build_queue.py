@@ -38,9 +38,9 @@ from msgspec import Struct
 from msgspec.json import encode as json_encode
 from msgspec.structs import replace
 
+from pd_groundtruth.build_queue_vault import _load_vault_filtered
 from pd_groundtruth.build_queue_vault import resolve_vault_for_build
 from pd_groundtruth.label_vault import VaultEntry
-from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.progress import render_kept_suffix
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
@@ -424,10 +424,11 @@ class StratifyingWriterFactory(Struct, frozen=True, forbid_unknown_fields=True):
     seed: int
     vault_path: Path
     vault_pairs: tuple[ResolvedVaultPair, ...] = ()
+    requeue_verdicts: frozenset[str] = frozenset()
 
     def __call__(self, _output_path: Path) -> StratifyingResultWriter:
         """Construct the writer; ``_output_path`` is unused by design."""
-        vault = current_entries(self.vault_path)
+        vault = _load_vault_filtered(self.vault_path, self.requeue_verdicts)
         return StratifyingResultWriter(
             db_path=self.db_path,
             budget=self.budget,
@@ -527,6 +528,7 @@ def build_queue(
     sample_per_lang: int,
     verbosity: int = 0,
     log_file: Path | None = None,
+    requeue_verdicts: frozenset[str] = frozenset(),
 ) -> BuildSummary:
     """Build the stratified review queue and persist it to ``out_path``.
 
@@ -561,6 +563,10 @@ def build_queue(
         verbosity: Forwarded to ``run_match`` (``-v`` worker heartbeats).
         log_file: Optional log file path forwarded to ``run_match`` so spawn
             workers append their log lines to the same file as the parent.
+        requeue_verdicts: Vault verdicts to *not* pre-apply on rebuild. Each
+            matching vault entry is dropped from the resolver's input and the
+            writer-process vault re-read so the pair re-enters the labeling
+            queue. Default empty preserves carry-forward of every verdict.
 
     Returns:
         A populated :class:`BuildSummary`.
@@ -580,6 +586,7 @@ def build_queue(
         pairing_config=pairing_config,
         idf=idf,
         calibrator=calibrator,
+        requeue_verdicts=requeue_verdicts,
     )
     exclude_ids = frozenset(resolved.pair.marc_control_id for resolved in resolved_vault_pairs)
 
@@ -604,6 +611,7 @@ def build_queue(
             seed=seed,
             vault_path=vault_path,
             vault_pairs=tuple(resolved_vault_pairs),
+            requeue_verdicts=requeue_verdicts,
         )
         _LOGGER.info("matching start: total=%d workers=%d", manifest.total_records, workers)
         report = run_match(

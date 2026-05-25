@@ -1044,6 +1044,78 @@ def test_load_calibrator_reads_file_when_present(tmp_path: Path) -> None:
     assert loaded == saved
 
 
+def test_build_queue_threads_requeue_verdicts_to_resolver_and_factory(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """``requeue_verdicts`` reaches the resolver and the writer factory."""
+    pool = tmp_path / "pool"
+    (pool / "eng").mkdir(parents=True)
+    _write_shard(pool / "eng" / "shard_1.xml", "id-1", "T1")
+
+    monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
+
+    captured_resolver: dict[str, object] = {}
+
+    def _fake_resolve(**kwargs: object) -> tuple[list[ResolvedVaultPair], ResolveSummary]:
+        captured_resolver.update(kwargs)
+        return [], ResolveSummary(resolved=0, missing_in_pool=0, missing_in_index=0)
+
+    monkeypatch.setattr(bq, "resolve_vault_for_build", _fake_resolve)
+
+    captured_factories: list[StratifyingWriterFactory] = []
+
+    def _fake_run_match(**kwargs: object) -> RunReport:
+        factory = kwargs["writer_factory"]
+        assert isinstance(factory, StratifyingWriterFactory)
+        captured_factories.append(factory)
+        return RunReport(
+            records_processed=0,
+            records_written=0,
+            records_enqueued=0,
+            duration_seconds=0.0,
+            interrupted=False,
+        )
+
+    monkeypatch.setattr(bq, "run_match", _fake_run_match)
+
+    build_queue(
+        pool=pool,
+        index_path=tmp_path / "idx" / "nypl.lmdb",
+        out_path=tmp_path / "review.db",
+        vault_path=tmp_path / "vault.jsonl",
+        budget=BudgetModel(caps={("eng", "ge90"): 1}),
+        matching_config=_MATCHING_CONFIG,
+        pairing_config=_PAIRING_CONFIG,
+        seed=1,
+        workers=1,
+        sample_per_lang=10,
+        requeue_verdicts=frozenset({"unsure"}),
+    )
+    assert captured_resolver["requeue_verdicts"] == frozenset({"unsure"})
+    assert len(captured_factories) == 1
+    assert captured_factories[0].requeue_verdicts == frozenset({"unsure"})
+
+
+def test_factory_call_applies_requeue_filter_to_vault_reread(tmp_path: Path) -> None:
+    """The factory's writer-process vault re-read honors ``requeue_verdicts``."""
+    from pd_groundtruth.label_vault import append_entry
+
+    vault_path = tmp_path / "vault.jsonl"
+    append_entry(vault_path, _vault_entry("ctrl-keep", "uuid-keep", verdict="match"))
+    append_entry(vault_path, _vault_entry("ctrl-drop", "uuid-drop", verdict="unsure"))
+    factory = StratifyingWriterFactory(
+        db_path=tmp_path / "review.db",
+        budget=BudgetModel(caps={}),
+        seed=7,
+        vault_path=vault_path,
+        requeue_verdicts=frozenset({"unsure"}),
+    )
+    writer = factory(tmp_path / "ignored.csv")
+    assert ("ctrl-keep", "uuid-keep") in writer._vault
+    assert ("ctrl-drop", "uuid-drop") not in writer._vault
+
+
 def test_build_queue_cleans_up_prepared_dir(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     pool = tmp_path / "pool"
     (pool / "eng").mkdir(parents=True)
