@@ -177,6 +177,9 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 verdict=verdict,
                 note=clean_note,
                 labeled_at=result.labeled_at,
+                cce_regnum=pair.cce_regnum,
+                cce_renewal_id=pair.cce_renewal_id,
+                cce_renewal_oreg=pair.cce_renewal_oreg,
             )
         return _redirect_to_next(filters)
 
@@ -260,6 +263,9 @@ def _append_vault_entry(
     verdict: str,
     note: str | None,
     labeled_at: str,
+    cce_regnum: str | None,
+    cce_renewal_id: str | None,
+    cce_renewal_oreg: str | None,
 ) -> None:
     """Append one verdict to the vault, swallowing and logging any I/O failure.
 
@@ -279,6 +285,9 @@ def _append_vault_entry(
             labeled_at=labeled_at,
             labeler=_LABELER,
             marc_identifiers=extract_marc_identifiers(marc),
+            cce_regnum=cce_regnum,
+            cce_renewal_id=cce_renewal_id,
+            cce_renewal_oreg=cce_renewal_oreg,
         )
         append_entry(vault_path, entry)
     except Exception:

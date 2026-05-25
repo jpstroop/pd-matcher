@@ -26,6 +26,9 @@ def _entry(
     lccn: str | None = "40012345",
     oclc: str | None = "00012345",
     isbns: tuple[str, ...] = ("9780000000000",),
+    cce_regnum: str | None = "A12345",
+    cce_renewal_id: str | None = "R67890",
+    cce_renewal_oreg: str | None = "A12345",
 ) -> VaultEntry:
     return VaultEntry(
         schema=SCHEMA_VERSION,
@@ -36,6 +39,9 @@ def _entry(
         labeled_at=labeled_at,
         labeler=labeler,
         marc_identifiers=MarcIdentifiers(lccn=lccn, oclc=oclc, isbns=isbns),
+        cce_regnum=cce_regnum,
+        cce_renewal_id=cce_renewal_id,
+        cce_renewal_oreg=cce_renewal_oreg,
     )
 
 
@@ -89,7 +95,7 @@ def test_iter_entries_raises_on_malformed_json(tmp_path: Path) -> None:
 def test_iter_entries_rejects_unknown_fields(tmp_path: Path) -> None:
     path = tmp_path / "vault.jsonl"
     path.write_text(
-        '{"schema":3,"marc_control_id":"a","nypl_uuid":"u","verdict":"match",'
+        '{"schema":4,"marc_control_id":"a","nypl_uuid":"u","verdict":"match",'
         '"note":null,"labeled_at":"2026-01-01T00:00:00+00:00",'
         '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]},'
         '"extra":"surprise"}\n',
@@ -157,9 +163,9 @@ def test_extract_marc_identifiers_handles_missing_identifiers() -> None:
     assert identifiers.isbns == ()
 
 
-def test_schema_version_is_three() -> None:
-    """New vault writes use schema 3 (drops ``reasons``/``field_annotations``)."""
-    assert SCHEMA_VERSION == 3
+def test_schema_version_is_four() -> None:
+    """New vault writes use schema 4 (adds flat CCE-side identifier fields)."""
+    assert SCHEMA_VERSION == 4
 
 
 def test_legacy_schema_entries_with_old_fields_reject_decode(tmp_path: Path) -> None:
@@ -177,3 +183,50 @@ def test_legacy_schema_entries_with_old_fields_reject_decode(tmp_path: Path) -> 
     )
     with raises(Exception, match=r"reasons|field_annotations"):
         list(iter_entries(path))
+
+
+def test_round_trip_preserves_cce_identifier_fields(tmp_path: Path) -> None:
+    """All three new CCE-side identifier fields survive encode/decode intact."""
+    path = tmp_path / "vault.jsonl"
+    entry = _entry(
+        cce_regnum="A555",
+        cce_renewal_id="R999",
+        cce_renewal_oreg="A555",
+    )
+    append_entry(path, entry)
+    [read_back] = list(iter_entries(path))
+    assert read_back.cce_regnum == "A555"
+    assert read_back.cce_renewal_id == "R999"
+    assert read_back.cce_renewal_oreg == "A555"
+    assert read_back == entry
+
+
+def test_round_trip_preserves_nulls_for_unrenewed_registration(tmp_path: Path) -> None:
+    """A reg with no renewal serializes ``cce_renewal_id``/``cce_renewal_oreg`` as null."""
+    path = tmp_path / "vault.jsonl"
+    entry = _entry(
+        cce_regnum="A111",
+        cce_renewal_id=None,
+        cce_renewal_oreg=None,
+    )
+    append_entry(path, entry)
+    [read_back] = list(iter_entries(path))
+    assert read_back.cce_regnum == "A111"
+    assert read_back.cce_renewal_id is None
+    assert read_back.cce_renewal_oreg is None
+
+
+def test_schema_3_entry_decodes_with_none_for_new_cce_fields(tmp_path: Path) -> None:
+    """Forward-compat: a schema-3 line (no CCE fields) decodes with ``None`` defaults."""
+    path = tmp_path / "vault.jsonl"
+    path.write_text(
+        '{"schema":3,"marc_control_id":"a","nypl_uuid":"u","verdict":"match",'
+        '"note":null,"labeled_at":"2026-01-01T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]}}\n',
+        encoding="utf-8",
+    )
+    [entry] = list(iter_entries(path))
+    assert entry.cce_regnum is None
+    assert entry.cce_renewal_id is None
+    assert entry.cce_renewal_oreg is None
+    assert entry.schema == 3

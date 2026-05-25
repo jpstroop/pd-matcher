@@ -409,10 +409,28 @@ def test_label_appends_to_vault(client: TestClient, vault_path: Path) -> None:
     assert entry.nypl_uuid == "u-eng-1"
     assert entry.verdict == "match"
     assert entry.labeler == "jpstroop"
-    assert entry.schema == 3
+    assert entry.schema == 4
     assert entry.marc_identifiers.lccn == "40012345"
     assert entry.marc_identifiers.oclc == "0001"
     assert entry.marc_identifiers.isbns == ("9780000000000",)
+    assert entry.cce_regnum == "R12345"
+    assert entry.cce_renewal_id == "R200001"
+    assert entry.cce_renewal_oreg == "A111111"
+
+
+def test_label_appends_cce_fields_with_nulls_when_no_renewal(
+    no_renewal_details_client: TestClient, vault_path: Path
+) -> None:
+    response = no_renewal_details_client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    [entry] = list(iter_entries(vault_path))
+    assert entry.cce_regnum == "R12345"
+    assert entry.cce_renewal_id is None
+    assert entry.cce_renewal_oreg is None
 
 
 def test_label_appends_one_line_per_post(client: TestClient, vault_path: Path) -> None:

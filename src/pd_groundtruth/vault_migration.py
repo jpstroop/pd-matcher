@@ -1,28 +1,37 @@
-"""One-shot migration of label-vault JSONL from schema 2 to schema 3.
+"""One-shot migrations for the label-vault JSONL across schema bumps.
 
-Schema 3 drops the structured ``reasons`` and ``field_annotations`` fields in
-favor of a single free-text ``note``. The migration preserves the historical
-signal by folding any pre-schema-3 reason codes / field annotations into the
-note text as ``[reasons: ...]`` and ``[annotations: field:judgment, ...]``
-prefixes so downstream readers of accumulated notes can still see what the
-labeler flagged. The original file is archived to ``<vault>.pre-v3`` before
-the migrated content overwrites the canonical path.
+Two migrations live here:
 
-Run idempotently: an already-migrated vault (every line at ``schema=3``)
-passes through unchanged, no archive is created, and the report shows zero
-folds.
+* :func:`migrate_vault_v3` folds the pre-schema-3 ``reasons`` /
+  ``field_annotations`` structured signals into the free-text ``note``,
+  archiving the original to ``<vault>.pre-v3`` before rewriting.
+* :func:`migrate_vault_v4` backfills the three flat top-level CCE-side
+  identifier fields (``cce_regnum``, ``cce_renewal_id``, ``cce_renewal_oreg``)
+  introduced by schema 4 by looking each entry's ``nypl_uuid`` up in the CCE
+  index and copying the values across. The pre-migration vault lives in git
+  history; no on-disk ``.pre-v4`` archive is written.
+
+Both migrations run idempotently: a vault already entirely at the target
+schema passes through untouched and the report shows zero changes.
 """
 
+from collections.abc import Callable
 from collections.abc import Iterator
+from os import replace as os_replace
 from pathlib import Path
 from shutil import copyfile
+from tempfile import NamedTemporaryFile
 
 from msgspec import Struct
 from msgspec.json import decode as json_decode
 from msgspec.json import encode as json_encode
 
 from pd_groundtruth.label_vault import SCHEMA_VERSION
+from pd_matcher.models import IndexedNyplRegRecord
 
+CceLookupFn = Callable[[str], IndexedNyplRegRecord | None]
+
+_SCHEMA_V3: int = 3
 _ARCHIVE_SUFFIX: str = ".pre-v3"
 
 
@@ -33,6 +42,19 @@ class MigrationReport(Struct, frozen=True, forbid_unknown_fields=True):
     reasons_folded: int
     annotations_folded: int
     archive_path: Path | None
+
+
+class MigrationReportV4(Struct, frozen=True, forbid_unknown_fields=True):
+    """Counts emitted by :func:`migrate_vault_v4` for the CLI to print.
+
+    ``orphaned`` counts entries whose ``nypl_uuid`` no longer resolves in the
+    CCE index (data drift): those entries still get bumped to ``schema=4`` but
+    keep ``None`` for the three new CCE-side identifier fields.
+    """
+
+    total_entries: int
+    enriched: int
+    orphaned: int
 
 
 def _iter_raw_entries(path: Path) -> Iterator[dict[str, object]]:
@@ -47,6 +69,12 @@ def _iter_raw_entries(path: Path) -> Iterator[dict[str, object]]:
             if not stripped:
                 continue
             yield json_decode(stripped, type=dict[str, object])
+
+
+def _schema_at_least(raw: dict[str, object], minimum: int) -> bool:
+    """Return ``True`` when ``raw['schema']`` is an int ``>= minimum``."""
+    schema = raw.get("schema")
+    return isinstance(schema, int) and schema >= minimum
 
 
 def _fold_reasons(note: str | None, reasons: list[str]) -> tuple[str | None, bool]:
@@ -93,10 +121,10 @@ def _migrate_entry(raw: dict[str, object]) -> tuple[dict[str, object], bool, boo
     """Return the schema-3 form of one raw entry plus fold flags.
 
     ``(new_dict, reasons_folded, annotations_folded)``. An entry already at
-    schema 3 passes through untouched and both flags are ``False``.
+    schema 3 or later passes through untouched and both flags are ``False``.
     """
     schema = raw.get("schema")
-    if schema == SCHEMA_VERSION:
+    if isinstance(schema, int) and schema >= _SCHEMA_V3:
         return raw, False, False
     note_raw = raw.get("note")
     note: str | None = note_raw if isinstance(note_raw, str) else None
@@ -117,7 +145,7 @@ def _migrate_entry(raw: dict[str, object]) -> tuple[dict[str, object], bool, boo
         for key, value in raw.items()
         if key not in {"reasons", "field_annotations", "note", "schema"}
     }
-    migrated["schema"] = SCHEMA_VERSION
+    migrated["schema"] = _SCHEMA_V3
     migrated["note"] = note
     return migrated, reasons_folded, annotations_folded
 
@@ -139,7 +167,7 @@ def migrate_vault_v3(vault_path: Path) -> MigrationReport:
             archive_path=None,
         )
     raw_entries = list(_iter_raw_entries(vault_path))
-    if all(entry.get("schema") == SCHEMA_VERSION for entry in raw_entries):
+    if all(_schema_at_least(entry, _SCHEMA_V3) for entry in raw_entries):
         return MigrationReport(
             total_entries=len(raw_entries),
             reasons_folded=0,
@@ -166,7 +194,88 @@ def migrate_vault_v3(vault_path: Path) -> MigrationReport:
     )
 
 
+def _atomic_write_jsonl(path: Path, entries: list[dict[str, object]]) -> None:
+    """Write ``entries`` (one JSON dict per line) to ``path`` atomically.
+
+    Streams to a temp file in the same directory then ``os.replace`` swaps it
+    into place so concurrent readers see either the old or the new content,
+    never a truncated half-write.
+    """
+    payload = b"".join(json_encode(entry) + b"\n" for entry in entries)
+    with NamedTemporaryFile(
+        mode="wb",
+        dir=path.parent,
+        prefix=path.name,
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        handle.write(payload)
+        temp_path = Path(handle.name)
+    os_replace(temp_path, path)
+
+
+def migrate_vault_v4(
+    vault_path: Path,
+    cce_lookup: CceLookupFn,
+) -> MigrationReportV4:
+    """Backfill the schema-4 CCE-side identifier fields in place.
+
+    Reads each line raw (bypassing the typed decode), looks ``nypl_uuid`` up
+    via ``cce_lookup`` to obtain an :class:`IndexedNyplRegRecord`, copies its
+    ``regnum`` / ``renewal_id`` / ``renewal_oreg`` onto the entry, and bumps
+    the ``schema`` field to 4. Entries whose ``nypl_uuid`` no longer resolves
+    in the index (data drift) keep ``None`` for the three new fields but still
+    get ``schema=4``; they are counted in :attr:`MigrationReportV4.orphaned`.
+
+    The pre-migration vault is preserved in git history rather than on disk
+    (no ``.pre-v4`` archive is created). The write itself is atomic: a temp
+    file in the same directory is renamed over the canonical path.
+
+    A missing or empty vault returns a zero-count report and creates no file.
+    A vault already entirely at schema 4 is a no-op: no rewrite.
+
+    Args:
+        vault_path: The JSONL label vault to migrate.
+        cce_lookup: ``nypl_uuid -> IndexedNyplRegRecord | None`` resolver,
+            typically :meth:`pd_matcher.index.lookup.NyplIndexLookup.get_registration`.
+            Injected so tests can drive the migration without standing up a
+            real LMDB env.
+    """
+    if not vault_path.exists() or vault_path.stat().st_size == 0:
+        return MigrationReportV4(total_entries=0, enriched=0, orphaned=0)
+    raw_entries = list(_iter_raw_entries(vault_path))
+    if all(_schema_at_least(entry, SCHEMA_VERSION) for entry in raw_entries):
+        return MigrationReportV4(total_entries=len(raw_entries), enriched=0, orphaned=0)
+    enriched = 0
+    orphaned = 0
+    migrated_entries: list[dict[str, object]] = []
+    for raw in raw_entries:
+        nypl_uuid = raw.get("nypl_uuid")
+        record = cce_lookup(nypl_uuid) if isinstance(nypl_uuid, str) else None
+        if record is None:
+            orphaned += 1
+            raw["cce_regnum"] = None
+            raw["cce_renewal_id"] = None
+            raw["cce_renewal_oreg"] = None
+        else:
+            enriched += 1
+            raw["cce_regnum"] = record.regnum
+            raw["cce_renewal_id"] = record.renewal_id
+            raw["cce_renewal_oreg"] = record.renewal_oreg
+        raw["schema"] = SCHEMA_VERSION
+        migrated_entries.append(raw)
+    _atomic_write_jsonl(vault_path, migrated_entries)
+    return MigrationReportV4(
+        total_entries=len(raw_entries),
+        enriched=enriched,
+        orphaned=orphaned,
+    )
+
+
 __all__ = [
+    "CceLookupFn",
     "MigrationReport",
+    "MigrationReportV4",
     "migrate_vault_v3",
+    "migrate_vault_v4",
 ]

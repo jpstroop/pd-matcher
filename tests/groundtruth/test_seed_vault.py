@@ -74,6 +74,9 @@ def test_seed_vault_dumps_all_current_labels(tmp_path: Path) -> None:
     assert latest[("ctrl-a", "uuid-a")].marc_identifiers.lccn == "40012345"
     assert latest[("ctrl-a", "uuid-a")].marc_identifiers.oclc == "0001"
     assert latest[("ctrl-a", "uuid-a")].marc_identifiers.isbns == ("9780000000000",)
+    assert latest[("ctrl-a", "uuid-a")].cce_regnum == "R1"
+    assert latest[("ctrl-a", "uuid-a")].cce_renewal_id is None
+    assert latest[("ctrl-a", "uuid-a")].cce_renewal_oreg is None
 
 
 def test_seed_vault_is_idempotent(tmp_path: Path) -> None:
