@@ -829,13 +829,34 @@ def test_pair_route_no_current_class_when_unlabeled(client: TestClient) -> None:
     assert " current" not in response.text
 
 
-def test_pair_route_forward_link_absent_when_no_later_labeled(client: TestClient) -> None:
+def test_pair_route_forward_link_targets_queue_head_when_no_later_labeled(
+    client: TestClient,
+) -> None:
     client.post(
         "/label",
         data={"pair_id": "1", "verdict": "match"},
         follow_redirects=False,
     )
     response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert 'id="forward-link"' in response.text
+    assert 'href="/pair/2"' in response.text
+
+
+def test_pair_route_forward_link_absent_when_queue_drained_and_no_later_labeled(
+    client: TestClient,
+) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match"},
+        follow_redirects=False,
+    )
+    client.post(
+        "/label",
+        data={"pair_id": "2", "verdict": "match"},
+        follow_redirects=False,
+    )
+    response = client.get("/pair/2")
     assert response.status_code == 200
     assert 'id="forward-link"' not in response.text
 
@@ -926,3 +947,64 @@ def test_card_keybinding_handler_includes_forward_keys(client: TestClient) -> No
     assert response.status_code == 200
     assert 'case "f": case "ArrowRight":' in response.text
     assert "goForward()" in response.text
+
+
+@fixture
+def forward_nav_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    """Five pairs; only ids 1 and 5 labeled — queue head sits between them.
+
+    This is the production repro: a labeled pair (1) with a much-later
+    labeled pair (5) and an unlabeled queue head (2) in between. ``f`` from
+    /pair/1 must land on the queue head (2), not jump to 5.
+    """
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        for i in range(1, 6):
+            db.insert_pair(_pair(language="eng", control_id=f"fwd-{i}", nypl_uuid=f"u-fwd-{i}"))
+        db.add_label(1, "match")
+        db.add_label(5, "match")
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def test_pair_route_forward_link_prefers_queue_head_over_far_labeled(
+    forward_nav_client: TestClient,
+) -> None:
+    response = forward_nav_client.get("/pair/1")
+    assert response.status_code == 200
+    assert 'id="forward-link"' in response.text
+    assert 'href="/pair/2"' in response.text
+    assert 'href="/pair/5"' not in response.text
+
+
+def test_pair_route_forward_link_uses_next_labeled_when_current_is_queue_head(
+    forward_nav_client: TestClient,
+) -> None:
+    response = forward_nav_client.get("/pair/2")
+    assert response.status_code == 200
+    assert 'id="forward-link"' in response.text
+    assert 'href="/pair/5"' in response.text
+
+
+def test_pair_route_forward_link_skips_queue_head_when_past_it(
+    forward_nav_client: TestClient,
+) -> None:
+    forward_nav_client.post(
+        "/label",
+        data={"pair_id": "3", "verdict": "match"},
+        follow_redirects=False,
+    )
+    response = forward_nav_client.get("/pair/3")
+    assert response.status_code == 200
+    assert 'id="forward-link"' in response.text
+    assert 'href="/pair/5"' in response.text
+    assert 'href="/pair/2"' not in response.text
+
+
+def test_pair_route_forward_link_absent_when_no_later_labeled_or_queue_head(
+    forward_nav_client: TestClient,
+) -> None:
+    response = forward_nav_client.get("/pair/5")
+    assert response.status_code == 200
+    assert 'id="forward-link"' not in response.text

@@ -44,6 +44,7 @@ from pd_groundtruth.review.filters import parse_label_filters
 from pd_groundtruth.review.view import build_card
 from pd_groundtruth.review.view import build_labeled_row
 from pd_groundtruth.review_db import ReviewDb
+from pd_groundtruth.review_db import ReviewPairRow
 from pd_matcher.models import MarcRecord
 
 _LOGGER = getLogger(__name__)
@@ -75,6 +76,31 @@ def _redirect_to_next(filters: ReviewFilters) -> RedirectResponse:
     query = filters.query_string()
     location = f"/?{query}" if query else "/"
     return RedirectResponse(url=location, status_code=303)
+
+
+def _forward_target(
+    forward_labeled: ReviewPairRow | None,
+    queue_head: ReviewPairRow | None,
+    pair_id: int,
+) -> ReviewPairRow | None:
+    """Pick the nearer of the next-labeled pair and the unlabeled queue head.
+
+    With a vault of thousands of labels accumulated across sessions,
+    ``next_labeled`` alone walks forward into ancient labeled pairs and skips
+    over the current queue head — exactly where the reviewer wants to return
+    after stepping back through their recent work. The queue head is only
+    eligible when its id strictly exceeds ``pair_id`` (so a labeled pair
+    clicked in from ``/labels`` that already sits past the queue head walks
+    through labeled pairs only, never jumping backward to the queue head).
+    """
+    candidates: list[ReviewPairRow] = []
+    if forward_labeled is not None:
+        candidates.append(forward_labeled)
+    if queue_head is not None and queue_head.id > pair_id:
+        candidates.append(queue_head)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda row: row.id)
 
 
 def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> FastAPI:
@@ -138,8 +164,12 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
             row = db.get_pair(pair_id)
             counts = db.progress()
             back = db.previous_labeled(before=pair_id, language=filters.language, band=filters.band)
-            forward = db.next_labeled(after=pair_id, language=filters.language, band=filters.band)
+            forward_labeled = db.next_labeled(
+                after=pair_id, language=filters.language, band=filters.band
+            )
+            queue_head = db.next_unlabeled(language=filters.language, band=filters.band)
             current_label = db.get_current_label(pair_id)
+        forward = _forward_target(forward_labeled, queue_head, pair_id)
         back_id = None if back is None else back.id
         forward_id = None if forward is None else forward.id
         if row is None:
