@@ -224,6 +224,26 @@ def evidence_source_client(tmp_path: Path, vault_path: Path) -> Iterator[TestCli
 
 
 @fixture
+def nav_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    """Five pairs with one pre-labeled so ``/pair/5`` is reachable as a jump.
+
+    Cookie-based navigation tests need a way to demonstrate the "jump"
+    transition where the visited pair is *not* adjacent to the cursor in the
+    trail. Having pair 5 pre-labeled lets a test walk 1→2→3 by submitting
+    verdicts and then jump to 5 via direct URL, exercising the truncate-
+    forward branch of :func:`nav_history.advance`.
+    """
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        for i in range(1, 6):
+            db.insert_pair(_pair(language="eng", control_id=f"n-{i}", nypl_uuid=f"u-n-{i}"))
+        db.add_label(5, "match")
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
 def labels_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
     db_path = tmp_path / "review.db"
     with ReviewDb.connect(db_path) as db:
@@ -312,27 +332,31 @@ def test_stats_route_omits_reason_and_annotation_sections(client: TestClient) ->
     assert "Field annotations" not in response.text
 
 
-def test_index_hides_back_link_before_any_label(client: TestClient) -> None:
+def test_first_get_sets_nav_cookie_with_no_back_or_forward(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert 'id="back-link"' not in response.text
+    assert 'id="forward-link"' not in response.text
+    assert "pdm_nav" in response.cookies
 
 
-def test_back_link_targets_last_labeled_pair(client: TestClient) -> None:
+def test_back_link_targets_previously_viewed_pair_after_label(client: TestClient) -> None:
+    client.get("/")
     client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
     nxt = client.get("/")
     assert 'id="back-link"' in nxt.text
     assert "/pair/1" in nxt.text
 
 
-def test_back_link_preserves_filter(client: TestClient) -> None:
-    client.post(
+def test_back_link_preserves_filter(skip_client: TestClient) -> None:
+    skip_client.get("/", params={"language": "eng"})
+    skip_client.post(
         "/label",
-        data={"pair_id": "2", "verdict": "match", "language": "fre"},
+        data={"pair_id": "1", "verdict": "match", "language": "eng"},
         follow_redirects=False,
     )
-    nxt = client.get("/", params={"language": "fre"})
-    assert "/pair/2?language=fre" in nxt.text
+    nxt = skip_client.get("/", params={"language": "eng"})
+    assert "/pair/1?language=eng" in nxt.text
 
 
 def test_card_links_marc_control_id_to_princeton_catalog(client: TestClient) -> None:
@@ -829,182 +853,140 @@ def test_pair_route_no_current_class_when_unlabeled(client: TestClient) -> None:
     assert " current" not in response.text
 
 
-def test_pair_route_forward_link_targets_queue_head_when_no_later_labeled(
-    client: TestClient,
-) -> None:
-    client.post(
-        "/label",
-        data={"pair_id": "1", "verdict": "match"},
-        follow_redirects=False,
-    )
-    response = client.get("/pair/1")
-    assert response.status_code == 200
-    assert 'id="forward-link"' in response.text
-    assert 'href="/pair/2"' in response.text
+def test_forward_link_appears_after_back_step_through_history(client: TestClient) -> None:
+    client.get("/")
+    client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    client.get("/")
+    back = client.get("/pair/1")
+    assert back.status_code == 200
+    assert 'id="forward-link"' in back.text
+    assert 'href="/pair/2"' in back.text
 
 
-def test_pair_route_forward_link_absent_when_queue_drained_and_no_later_labeled(
-    client: TestClient,
-) -> None:
-    client.post(
-        "/label",
-        data={"pair_id": "1", "verdict": "match"},
-        follow_redirects=False,
-    )
-    client.post(
-        "/label",
-        data={"pair_id": "2", "verdict": "match"},
-        follow_redirects=False,
-    )
-    response = client.get("/pair/2")
-    assert response.status_code == 200
-    assert 'id="forward-link"' not in response.text
+def test_forward_link_absent_at_session_tail(client: TestClient) -> None:
+    client.get("/")
+    client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    tail = client.get("/")
+    assert 'id="forward-link"' not in tail.text
 
 
-def test_pair_route_forward_link_targets_next_labeled_pair(client: TestClient) -> None:
-    client.post(
-        "/label",
-        data={"pair_id": "1", "verdict": "match"},
-        follow_redirects=False,
-    )
-    client.post(
-        "/label",
-        data={"pair_id": "2", "verdict": "match"},
-        follow_redirects=False,
-    )
-    response = client.get("/pair/1")
-    assert response.status_code == 200
-    assert 'id="forward-link"' in response.text
-    assert 'href="/pair/2"' in response.text
-
-
-def test_pair_route_forward_link_preserves_filter(client: TestClient) -> None:
-    client.post(
+def test_forward_link_preserves_filter(skip_client: TestClient) -> None:
+    skip_client.get("/", params={"language": "eng"})
+    skip_client.post(
         "/label",
         data={"pair_id": "1", "verdict": "match", "language": "eng"},
         follow_redirects=False,
     )
-    client.post(
-        "/label",
-        data={"pair_id": "2", "verdict": "match", "language": "fre"},
-        follow_redirects=False,
-    )
-    response = client.get("/pair/1")
-    assert response.status_code == 200
-    assert 'id="forward-link"' in response.text
-    assert 'href="/pair/2"' in response.text
+    skip_client.get("/", params={"language": "eng"})
+    back = skip_client.get("/pair/1", params={"language": "eng"})
+    assert 'id="forward-link"' in back.text
+    assert 'href="/pair/2?language=eng"' in back.text
 
 
-def test_index_no_forward_link(client: TestClient) -> None:
-    client.post(
-        "/label",
-        data={"pair_id": "1", "verdict": "match"},
-        follow_redirects=False,
-    )
+def test_index_no_forward_link_at_session_head(client: TestClient) -> None:
+    client.get("/")
+    client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
     response = client.get("/")
     assert response.status_code == 200
     assert 'id="forward-link"' not in response.text
 
 
-def test_pair_route_back_link_stable_across_relabel(skip_client: TestClient) -> None:
+def test_back_link_stable_across_relabel(skip_client: TestClient) -> None:
+    skip_client.get("/")
     skip_client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    skip_client.get("/")
     skip_client.post("/label", data={"pair_id": "2", "verdict": "match"}, follow_redirects=False)
+    skip_client.get("/")
     skip_client.post("/label", data={"pair_id": "1", "verdict": "no_match"}, follow_redirects=False)
-    response = skip_client.get("/pair/2")
+    response = skip_client.get("/pair/3")
     assert response.status_code == 200
     assert 'id="back-link"' in response.text
-    assert "/pair/1" in response.text
+    assert 'href="/pair/2' in response.text
 
 
 def test_card_keybinding_hint_mentions_forward_when_available(client: TestClient) -> None:
-    client.post(
-        "/label",
-        data={"pair_id": "1", "verdict": "match"},
-        follow_redirects=False,
-    )
-    client.post(
-        "/label",
-        data={"pair_id": "2", "verdict": "match"},
-        follow_redirects=False,
-    )
+    client.get("/")
+    client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    client.get("/")
     response = client.get("/pair/1")
     assert response.status_code == 200
     assert ">f</strong>" in response.text
 
 
 def test_card_keybinding_handler_includes_forward_keys(client: TestClient) -> None:
-    client.post(
-        "/label",
-        data={"pair_id": "1", "verdict": "match"},
-        follow_redirects=False,
-    )
-    client.post(
-        "/label",
-        data={"pair_id": "2", "verdict": "match"},
-        follow_redirects=False,
-    )
+    client.get("/")
+    client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    client.get("/")
     response = client.get("/pair/1")
     assert response.status_code == 200
     assert 'case "f": case "ArrowRight":' in response.text
     assert "goForward()" in response.text
 
 
-@fixture
-def forward_nav_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
-    """Five pairs; only ids 1 and 5 labeled — queue head sits between them.
-
-    This is the production repro: a labeled pair (1) with a much-later
-    labeled pair (5) and an unlabeled queue head (2) in between. ``f`` from
-    /pair/1 must land on the queue head (2), not jump to 5.
-    """
-    db_path = tmp_path / "review.db"
-    with ReviewDb.connect(db_path) as db:
-        for i in range(1, 6):
-            db.insert_pair(_pair(language="eng", control_id=f"fwd-{i}", nypl_uuid=f"u-fwd-{i}"))
-        db.add_label(1, "match")
-        db.add_label(5, "match")
-    app = create_app(db_path, vault_path)
-    with TestClient(app) as test_client:
-        yield test_client
+def test_back_then_forward_round_trip(skip_client: TestClient) -> None:
+    skip_client.get("/")
+    skip_client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    skip_client.get("/")
+    skip_client.post("/label", data={"pair_id": "2", "verdict": "match"}, follow_redirects=False)
+    skip_client.get("/")
+    back = skip_client.get("/pair/2")
+    assert 'id="back-link"' in back.text
+    assert 'href="/pair/1' in back.text
+    assert 'id="forward-link"' in back.text
+    assert 'href="/pair/3' in back.text
+    forward = skip_client.get("/pair/3")
+    assert 'id="forward-link"' not in forward.text
+    assert 'id="back-link"' in forward.text
+    assert 'href="/pair/2' in forward.text
 
 
-def test_pair_route_forward_link_prefers_queue_head_over_far_labeled(
-    forward_nav_client: TestClient,
-) -> None:
-    response = forward_nav_client.get("/pair/1")
+def test_jump_truncates_forward_branch(nav_client: TestClient) -> None:
+    nav_client.get("/")
+    nav_client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    nav_client.get("/")
+    nav_client.post("/label", data={"pair_id": "2", "verdict": "match"}, follow_redirects=False)
+    nav_client.get("/")
+    back = nav_client.get("/pair/2")
+    assert 'id="forward-link"' in back.text
+    assert 'href="/pair/3' in back.text
+    jump = nav_client.get("/pair/5")
+    assert 'id="forward-link"' not in jump.text
+    assert 'id="back-link"' in jump.text
+    assert 'href="/pair/2' in jump.text
+
+
+def test_refresh_does_not_grow_trail(client: TestClient) -> None:
+    client.get("/")
+    first = client.get("/")
+    second = client.get("/")
+    assert 'id="back-link"' not in first.text
+    assert 'id="back-link"' not in second.text
+
+
+def test_empty_queue_back_link_sourced_from_cookie(client: TestClient) -> None:
+    client.get("/")
+    client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    client.get("/")
+    client.post("/label", data={"pair_id": "2", "verdict": "match"}, follow_redirects=False)
+    response = client.get("/")
     assert response.status_code == 200
-    assert 'id="forward-link"' in response.text
-    assert 'href="/pair/2"' in response.text
-    assert 'href="/pair/5"' not in response.text
+    assert "All done" in response.text
+    assert 'id="back-link"' in response.text
+    assert "/pair/1" in response.text
 
 
-def test_pair_route_forward_link_uses_next_labeled_when_current_is_queue_head(
-    forward_nav_client: TestClient,
-) -> None:
-    response = forward_nav_client.get("/pair/2")
+def test_malformed_cookie_falls_back_to_empty_history(client: TestClient) -> None:
+    client.cookies.set("pdm_nav", "not-json")
+    response = client.get("/")
     assert response.status_code == 200
-    assert 'id="forward-link"' in response.text
-    assert 'href="/pair/5"' in response.text
+    assert 'id="back-link"' not in response.text
 
 
-def test_pair_route_forward_link_skips_queue_head_when_past_it(
-    forward_nav_client: TestClient,
-) -> None:
-    forward_nav_client.post(
-        "/label",
-        data={"pair_id": "3", "verdict": "match"},
-        follow_redirects=False,
-    )
-    response = forward_nav_client.get("/pair/3")
-    assert response.status_code == 200
-    assert 'id="forward-link"' in response.text
-    assert 'href="/pair/5"' in response.text
-    assert 'href="/pair/2"' not in response.text
-
-
-def test_pair_route_forward_link_absent_when_no_later_labeled_or_queue_head(
-    forward_nav_client: TestClient,
-) -> None:
-    response = forward_nav_client.get("/pair/5")
-    assert response.status_code == 200
-    assert 'id="forward-link"' not in response.text
+def test_nav_cookie_is_session_cookie_no_max_age_or_expires(client: TestClient) -> None:
+    response = client.get("/")
+    set_cookie = response.headers.get("set-cookie", "").lower()
+    assert "pdm_nav=" in set_cookie
+    assert "max-age" not in set_cookie
+    assert "expires" not in set_cookie
+    assert "httponly" in set_cookie
+    assert "samesite=strict" in set_cookie
