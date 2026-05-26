@@ -564,18 +564,19 @@ class ReviewDb:
         language: str | None = None,
         band: str | None = None,
     ) -> ReviewPairRow | None:
-        """Return the labeled pair to step *back* to from the current view.
+        """Return the labeled pair with the highest id strictly less than ``before``.
 
-        Labeled pairs are ordered by the autoincrement id of their latest
-        ``label`` row (monotonic action order, so a re-label moves a pair to the
-        front). With ``before=None`` this returns the most recently labeled pair
-        — the one you just acted on before landing on the next queue card. With
-        ``before`` set to a pair id, it returns the labeled pair acted on
-        immediately before that pair, so the back button chains backward through
-        history. Optional ``language`` / ``band`` keep navigation inside an
-        active filter. Returns ``None`` when there is nothing earlier to revisit.
+        Labeled pairs are ordered by ``review_pair.id`` (queue order) so the
+        back chain is stable across re-labels — re-labeling a pair does not
+        shuffle it to the front. With ``before=None`` this returns the
+        highest-id labeled pair overall (the head of the history walk from the
+        current queue position). With ``before`` set to a pair id it returns
+        the labeled pair immediately before that pair in queue order, so the
+        back button chains backward deterministically. Optional ``language`` /
+        ``band`` keep navigation inside an active filter. Returns ``None`` when
+        there is nothing earlier to revisit.
         """
-        clauses: list[str] = []
+        clauses: list[str] = ["rp.id IN (SELECT DISTINCT pair_id FROM label)"]
         params: list[str | int] = []
         if language is not None:
             clauses.append("rp.language = ?")
@@ -584,24 +585,102 @@ class ReviewDb:
             clauses.append("rp.band = ?")
             params.append(band)
         if before is not None:
-            clauses.append("la.last_id < (SELECT MAX(id) FROM label WHERE pair_id = ?)")
+            clauses.append("rp.id < ?")
             params.append(before)
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        where = " AND ".join(clauses)
         row = self._conn.execute(
-            f"""
-            SELECT rp.*
-            FROM review_pair rp
-            JOIN (SELECT pair_id, MAX(id) AS last_id FROM label GROUP BY pair_id) la
-              ON la.pair_id = rp.id
-            {where}
-            ORDER BY la.last_id DESC
-            LIMIT 1
-            """,
+            f"SELECT rp.* FROM review_pair rp WHERE {where} ORDER BY rp.id DESC LIMIT 1",
             params,
         ).fetchone()
         if row is None:
             return None
         return _row_to_pair(row)
+
+    def next_labeled(
+        self,
+        *,
+        after: int,
+        language: str | None = None,
+        band: str | None = None,
+    ) -> ReviewPairRow | None:
+        """Return the labeled pair with the lowest id strictly greater than ``after``.
+
+        Symmetric to :meth:`previous_labeled`: used by the forward (``f``) link
+        to walk forward through history without re-labeling. Optional
+        ``language`` / ``band`` keep navigation inside an active filter.
+        Returns ``None`` when ``after`` is at or beyond the most recently
+        labeled pair — the template then suppresses the forward link.
+        """
+        clauses: list[str] = [
+            "rp.id IN (SELECT DISTINCT pair_id FROM label)",
+            "rp.id > ?",
+        ]
+        params: list[str | int] = [after]
+        if language is not None:
+            clauses.append("rp.language = ?")
+            params.append(language)
+        if band is not None:
+            clauses.append("rp.band = ?")
+            params.append(band)
+        where = " AND ".join(clauses)
+        row = self._conn.execute(
+            f"SELECT rp.* FROM review_pair rp WHERE {where} ORDER BY rp.id ASC LIMIT 1",
+            params,
+        ).fetchone()
+        if row is None:
+            return None
+        return _row_to_pair(row)
+
+    def get_current_label(self, pair_id: int) -> CurrentLabelRow | None:
+        """Return the latest verdict + note for ``pair_id``, or ``None`` if unlabeled.
+
+        Single-row variant of :meth:`iter_current_labels` used by the review
+        card to pre-fill the note textarea and visually mark the current
+        verdict button when revisiting an already-labeled pair. The "current"
+        label is the one with ``MAX(id)`` per ``pair_id`` (the monotonic action
+        order used elsewhere), so re-labels are reflected immediately.
+        """
+        row = self._conn.execute(
+            """
+            SELECT
+                rp.id AS pair_id,
+                rp.marc_control_id AS marc_control_id,
+                rp.nypl_uuid AS nypl_uuid,
+                rp.marc_json AS marc_json,
+                rp.cce_regnum AS cce_regnum,
+                rp.cce_renewal_id AS cce_renewal_id,
+                rp.cce_renewal_oreg AS cce_renewal_oreg,
+                cur.verdict AS verdict,
+                cur.note AS note,
+                cur.labeled_at AS labeled_at
+            FROM review_pair rp
+            JOIN (
+                SELECT l.id, l.pair_id, l.verdict, l.note, l.labeled_at
+                FROM label l
+                JOIN (
+                    SELECT pair_id, MAX(id) AS max_id FROM label WHERE pair_id = ? GROUP BY pair_id
+                ) latest
+                  ON l.pair_id = latest.pair_id AND l.id = latest.max_id
+            ) cur
+              ON cur.pair_id = rp.id
+            WHERE rp.id = ?
+            """,
+            (pair_id, pair_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return CurrentLabelRow(
+            pair_id=row["pair_id"],
+            marc_control_id=row["marc_control_id"],
+            nypl_uuid=row["nypl_uuid"],
+            marc_json=row["marc_json"],
+            verdict=row["verdict"],
+            note=row["note"],
+            labeled_at=row["labeled_at"],
+            cce_regnum=row["cce_regnum"],
+            cce_renewal_id=row["cce_renewal_id"],
+            cce_renewal_oreg=row["cce_renewal_oreg"],
+        )
 
     def progress(self) -> ProgressCounts:
         """Return a running tally of labeling progress across the queue.
