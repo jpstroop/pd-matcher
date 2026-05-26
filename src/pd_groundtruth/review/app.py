@@ -59,6 +59,7 @@ _LABELER: str = "jpstroop"
 _SKIP_QUERY: list[int] = Query([])
 _LANGUAGE_CHOICES: tuple[str, ...] = ("eng", "fre", "ger", "spa", "ita")
 _VERDICT_CHOICES: tuple[str, ...] = ("match", "no_match", "unsure")
+_SORT_CHOICES: tuple[tuple[str, str], ...] = (("desc", "newest first"), ("asc", "oldest first"))
 _LABELS_PAGE_SIZE: int = 100
 
 
@@ -219,9 +220,10 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
         verdict: str | None = None,
         language: str | None = None,
         q: str | None = None,
+        sort: str | None = None,
         page: int = 1,
     ) -> HTMLResponse:
-        label_filters = parse_label_filters(verdict, language, q)
+        label_filters = parse_label_filters(verdict, language, q, sort)
         current_page = max(page, 1)
         with ReviewDb.connect(_db_path(request)) as db:
             counts = db.progress()
@@ -249,6 +251,7 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 "page_size": _LABELS_PAGE_SIZE,
                 "language_choices": _LANGUAGE_CHOICES,
                 "verdict_choices": _VERDICT_CHOICES,
+                "sort_choices": _SORT_CHOICES,
                 "query_string": label_filters_query_string(label_filters),
                 "query_string_for": lambda drop=None: label_filters_query_string(
                     label_filters, drop=drop

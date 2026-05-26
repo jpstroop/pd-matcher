@@ -136,17 +136,26 @@ class LabeledPairRow(Struct, frozen=True, forbid_unknown_fields=True):
     labeled_at: str
 
 
-class LabelFilters(Struct, frozen=True, forbid_unknown_fields=True):
-    """Narrowing filters for :meth:`ReviewDb.iter_labeled_pairs`.
+SORT_DESC: str = "desc"
+SORT_ASC: str = "asc"
 
-    All fields AND together; an unset field imposes no constraint. ``q`` is a
-    case-insensitive substring matched against ``marc_title``, ``cce_title``,
-    and ``marc_control_id``.
+_VALID_SORTS: frozenset[str] = frozenset({SORT_DESC, SORT_ASC})
+
+
+class LabelFilters(Struct, frozen=True, forbid_unknown_fields=True):
+    """Narrowing filters and ordering for :meth:`ReviewDb.iter_labeled_pairs`.
+
+    The narrowing fields (``verdict``, ``language``, ``q``) AND together; an
+    unset field imposes no constraint. ``q`` is a case-insensitive substring
+    matched against ``marc_title``, ``cce_title``, and ``marc_control_id``.
+    ``sort`` selects the ``labeled_at`` ordering: ``"desc"`` (default) puts the
+    most recently labeled pair first, ``"asc"`` puts the oldest first.
     """
 
     verdict: str | None = None
     language: str | None = None
     q: str | None = None
+    sort: str = SORT_DESC
 
 
 _NO_LABEL_FILTERS: LabelFilters = LabelFilters()
@@ -796,14 +805,21 @@ class ReviewDb:
 
         The "current" label is the latest by ``MAX(id)`` per ``pair_id``
         (matching :meth:`iter_current_labels` / :meth:`progress`). Rows are
-        ordered ``labeled_at DESC`` so the most recently labeled pair appears
-        first, then sliced by ``page_size`` / ``page`` (1-indexed).
+        ordered by ``labeled_at`` in the direction selected by
+        ``filters.sort`` — ``"desc"`` (default) puts the most recently labeled
+        pair first, ``"asc"`` puts the oldest first — then sliced by
+        ``page_size`` / ``page`` (1-indexed). The ``rp.id`` tie-breaker
+        mirrors the primary direction so equal timestamps stay in a stable,
+        ordering-consistent order across both sorts.
         """
         if page < 1:
             raise ValueError(f"page must be >= 1, got {page}")
         if page_size < 1:
             raise ValueError(f"page_size must be >= 1, got {page_size}")
+        if filters.sort not in _VALID_SORTS:
+            raise ValueError(f"invalid sort {filters.sort!r}")
         offset = (page - 1) * page_size
+        direction = "DESC" if filters.sort == SORT_DESC else "ASC"
         sql, params = self._labeled_pairs_query(
             filters=filters,
             select=(
@@ -812,7 +828,7 @@ class ReviewDb:
                 "rp.cce_title AS cce_title, l.verdict AS verdict, "
                 "l.note AS note, l.labeled_at AS labeled_at"
             ),
-            order_limit="ORDER BY l.labeled_at DESC, rp.id LIMIT ? OFFSET ?",
+            order_limit=f"ORDER BY l.labeled_at {direction}, rp.id {direction} LIMIT ? OFFSET ?",
         )
         params = (*params, page_size, offset)
         rows = self._conn.execute(sql, params).fetchall()
@@ -869,6 +885,8 @@ class ReviewDb:
 
 
 __all__ = [
+    "SORT_ASC",
+    "SORT_DESC",
     "VERDICT_MATCH",
     "VERDICT_NO_MATCH",
     "VERDICT_UNSURE",
