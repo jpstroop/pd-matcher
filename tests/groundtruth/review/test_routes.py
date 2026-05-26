@@ -270,6 +270,26 @@ def pagination_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
         yield test_client
 
 
+@fixture
+def sorted_labels_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    """Three labeled pairs with known, well-separated ``labeled_at`` timestamps.
+
+    Used to assert table ordering across both ``sort=desc`` (the default,
+    newest-first) and ``sort=asc`` without relying on wall-clock ordering.
+    """
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        oldest = db.insert_pair(_pair(language="eng", control_id="old", nypl_uuid="u-old"))
+        middle = db.insert_pair(_pair(language="eng", control_id="mid", nypl_uuid="u-mid"))
+        newest = db.insert_pair(_pair(language="eng", control_id="new", nypl_uuid="u-new"))
+        db.insert_existing_label(oldest, "match", "2024-01-01T00:00:00+00:00")
+        db.insert_existing_label(middle, "match", "2024-06-01T00:00:00+00:00")
+        db.insert_existing_label(newest, "match", "2024-12-01T00:00:00+00:00")
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
 def test_index_renders_a_card(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
@@ -647,6 +667,95 @@ def test_labels_route_nav_link_present_on_other_pages(client: TestClient) -> Non
     assert 'href="/labels"' in response.text
 
 
+def _labels_table_pair_ids(html: str) -> list[str]:
+    """Extract the ordered pair-link hrefs from a ``/labels`` table body."""
+    body = html.split("<tbody>")[1].split("</tbody>")[0]
+    parts: list[str] = []
+    for chunk in body.split('href="/pair/')[1:]:
+        parts.append(chunk.split('"', 1)[0])
+    return parts
+
+
+def test_labels_route_default_sort_is_desc(sorted_labels_client: TestClient) -> None:
+    response = sorted_labels_client.get("/labels")
+    assert response.status_code == 200
+    assert _labels_table_pair_ids(response.text) == ["3", "2", "1"]
+
+
+def test_labels_route_sort_asc_reorders_oldest_first(sorted_labels_client: TestClient) -> None:
+    response = sorted_labels_client.get("/labels", params={"sort": "asc"})
+    assert response.status_code == 200
+    assert _labels_table_pair_ids(response.text) == ["1", "2", "3"]
+
+
+def test_labels_route_garbage_sort_falls_back_to_default(
+    sorted_labels_client: TestClient,
+) -> None:
+    response = sorted_labels_client.get("/labels", params={"sort": "garbage"})
+    assert response.status_code == 200
+    assert _labels_table_pair_ids(response.text) == ["3", "2", "1"]
+
+
+def test_labels_route_explicit_desc_renders_without_error(
+    sorted_labels_client: TestClient,
+) -> None:
+    response = sorted_labels_client.get("/labels", params={"sort": "desc"})
+    assert response.status_code == 200
+    assert _labels_table_pair_ids(response.text) == ["3", "2", "1"]
+
+
+def test_labels_route_renders_sort_select_with_asc_selected(
+    sorted_labels_client: TestClient,
+) -> None:
+    response = sorted_labels_client.get("/labels", params={"sort": "asc"})
+    assert response.status_code == 200
+    assert '<select name="sort">' in response.text
+    assert '<option value="asc" selected>' in response.text
+    assert '<option value="desc">' in response.text
+
+
+def test_labels_route_renders_sort_select_with_desc_selected_by_default(
+    sorted_labels_client: TestClient,
+) -> None:
+    response = sorted_labels_client.get("/labels")
+    assert response.status_code == 200
+    assert '<option value="desc" selected>' in response.text
+    assert '<option value="asc">' in response.text
+
+
+def test_labels_route_sort_preserved_in_pagination_links(
+    pagination_client: TestClient,
+) -> None:
+    response = pagination_client.get("/labels", params={"sort": "asc"})
+    assert response.status_code == 200
+    assert "sort=asc" in response.text
+    assert "page=2" in response.text
+
+
+def test_labels_route_clear_filters_link_preserves_non_default_sort(
+    labels_client: TestClient,
+) -> None:
+    response = labels_client.get("/labels", params={"verdict": "match", "sort": "asc"})
+    assert response.status_code == 200
+    assert 'href="/labels?sort=asc">Clear filters</a>' in response.text
+
+
+def test_labels_route_clear_filters_link_omits_default_sort(
+    labels_client: TestClient,
+) -> None:
+    response = labels_client.get("/labels", params={"verdict": "match"})
+    assert response.status_code == 200
+    assert 'href="/labels">Clear filters</a>' in response.text
+
+
+def test_labels_route_sort_alone_is_not_active_filter(
+    sorted_labels_client: TestClient,
+) -> None:
+    response = sorted_labels_client.get("/labels", params={"sort": "asc"})
+    assert response.status_code == 200
+    assert "Clear filters" not in response.text
+
+
 def test_card_renders_extended_cce_fields(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
@@ -980,6 +1089,37 @@ def test_malformed_cookie_falls_back_to_empty_history(client: TestClient) -> Non
     response = client.get("/")
     assert response.status_code == 200
     assert 'id="back-link"' not in response.text
+
+
+def test_back_and_forward_share_a_flex_nav_row(skip_client: TestClient) -> None:
+    """Both nav links sit in a single ``.nav-row`` flex container."""
+    skip_client.get("/")
+    skip_client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    skip_client.get("/")
+    skip_client.post("/label", data={"pair_id": "2", "verdict": "match"}, follow_redirects=False)
+    skip_client.get("/")
+    response = skip_client.get("/pair/2")
+    assert response.status_code == 200
+    assert '<div class="nav-row">' in response.text
+    nav_block = response.text.split('<div class="nav-row">')[1].split("</div>", 1)[0]
+    assert 'id="back-link"' in nav_block
+    assert 'id="forward-link"' in nav_block
+
+
+def test_nav_row_omitted_when_neither_back_nor_forward(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert '<div class="nav-row">' not in response.text
+
+
+def test_nav_row_present_with_only_back_link(client: TestClient) -> None:
+    client.get("/")
+    client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    response = client.get("/")
+    assert response.status_code == 200
+    assert '<div class="nav-row">' in response.text
+    assert 'id="back-link"' in response.text
+    assert 'id="forward-link"' not in response.text
 
 
 def test_nav_cookie_is_session_cookie_no_max_age_or_expires(client: TestClient) -> None:

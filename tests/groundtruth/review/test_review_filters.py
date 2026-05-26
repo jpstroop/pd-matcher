@@ -4,6 +4,8 @@ from pd_groundtruth.review.filters import label_filters_active
 from pd_groundtruth.review.filters import label_filters_query_string
 from pd_groundtruth.review.filters import parse_filters
 from pd_groundtruth.review.filters import parse_label_filters
+from pd_groundtruth.review_db import SORT_ASC
+from pd_groundtruth.review_db import SORT_DESC
 
 
 def test_parse_filters_passes_through_set_values() -> None:
@@ -108,3 +110,56 @@ def test_label_filters_query_string_drop_excludes_one_key() -> None:
     filters = parse_label_filters("match", "eng", None)
     assert label_filters_query_string(filters, drop="verdict") == "language=eng"
     assert label_filters_query_string(filters, drop="language") == "verdict=match"
+
+
+def test_parse_label_filters_defaults_sort_to_desc() -> None:
+    assert parse_label_filters(None, None, None).sort == SORT_DESC
+    assert parse_label_filters(None, None, None, None).sort == SORT_DESC
+
+
+def test_parse_label_filters_accepts_asc() -> None:
+    assert parse_label_filters(None, None, None, "asc").sort == SORT_ASC
+
+
+def test_parse_label_filters_accepts_explicit_desc() -> None:
+    assert parse_label_filters(None, None, None, "desc").sort == SORT_DESC
+
+
+def test_parse_label_filters_strips_whitespace_around_sort() -> None:
+    assert parse_label_filters(None, None, None, "  asc ").sort == SORT_ASC
+
+
+def test_parse_label_filters_garbage_sort_falls_back_to_default() -> None:
+    assert parse_label_filters(None, None, None, "garbage").sort == SORT_DESC
+    assert parse_label_filters(None, None, None, "").sort == SORT_DESC
+    assert parse_label_filters(None, None, None, "   ").sort == SORT_DESC
+
+
+def test_label_filters_query_string_omits_sort_when_default() -> None:
+    filters = parse_label_filters(None, None, None, "desc")
+    assert label_filters_query_string(filters) == ""
+
+
+def test_label_filters_query_string_includes_sort_when_non_default() -> None:
+    filters = parse_label_filters(None, None, None, "asc")
+    assert label_filters_query_string(filters) == "sort=asc"
+
+
+def test_label_filters_query_string_appends_sort_after_filters() -> None:
+    filters = parse_label_filters("match", "eng", "acme", "asc")
+    qs = label_filters_query_string(filters)
+    assert "verdict=match" in qs
+    assert "language=eng" in qs
+    assert "q=acme" in qs
+    assert "sort=asc" in qs
+
+
+def test_label_filters_query_string_preserves_sort_when_dropping_a_filter() -> None:
+    filters = parse_label_filters("match", "eng", None, "asc")
+    assert "sort=asc" in label_filters_query_string(filters, drop="verdict")
+    assert "sort=asc" in label_filters_query_string(filters, drop="language")
+
+
+def test_label_filters_active_ignores_sort() -> None:
+    assert not label_filters_active(parse_label_filters(None, None, None, "asc"))
+    assert not label_filters_active(parse_label_filters(None, None, None, "desc"))
