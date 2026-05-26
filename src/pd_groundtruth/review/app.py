@@ -108,7 +108,8 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 exclude_pair_ids=filters.skip_ids,
             )
             counts = db.progress()
-            back = db.previous_labeled(language=filters.language, band=filters.band)
+            before = row.id if row is not None else None
+            back = db.previous_labeled(before=before, language=filters.language, band=filters.band)
         back_id = None if back is None else back.id
         if row is None:
             return templates.TemplateResponse(
@@ -124,6 +125,7 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 "filters": filters,
                 "counts": counts,
                 "back_id": back_id,
+                "forward_id": None,
             },
         )
 
@@ -136,7 +138,10 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
             row = db.get_pair(pair_id)
             counts = db.progress()
             back = db.previous_labeled(before=pair_id, language=filters.language, band=filters.band)
+            forward = db.next_labeled(after=pair_id, language=filters.language, band=filters.band)
+            current_label = db.get_current_label(pair_id)
         back_id = None if back is None else back.id
+        forward_id = None if forward is None else forward.id
         if row is None:
             return templates.TemplateResponse(
                 request,
@@ -148,10 +153,11 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
             request,
             "card.html",
             {
-                "card": build_card(row),
+                "card": build_card(row, current_label=current_label),
                 "filters": filters,
                 "counts": counts,
                 "back_id": back_id,
+                "forward_id": forward_id,
             },
         )
 

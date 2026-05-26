@@ -21,6 +21,7 @@ from msgspec import Struct
 from msgspec.json import decode as json_decode
 
 from pd_groundtruth.review.relative_time import format_relative
+from pd_groundtruth.review_db import CurrentLabelRow
 from pd_groundtruth.review_db import LabeledPairRow
 from pd_groundtruth.review_db import ReviewPairRow
 from pd_matcher.models import MarcRecord
@@ -124,6 +125,9 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     cce_has_renewal_details: bool
 
     evidence: tuple[EvidenceBar, ...]
+
+    note: str | None
+    current_verdict: str | None
 
 
 def render_renewal_label(was_renewed: int | None) -> str:
@@ -326,12 +330,19 @@ def _has_renewal_details(row: ReviewPairRow) -> bool:
     )
 
 
-def build_card(row: ReviewPairRow) -> ReviewCard:
+def build_card(
+    row: ReviewPairRow,
+    current_label: CurrentLabelRow | None = None,
+) -> ReviewCard:
     """Project a persisted :class:`ReviewPairRow` into a :class:`ReviewCard`.
 
     Decodes the lossless ``marc_json`` blob into a :class:`MarcRecord` to
     expose full MARC subfields, decodes ``evidence_json`` into ordered
     :class:`EvidenceBar` readings, and renders the renewal flag as a label.
+    When ``current_label`` is supplied (i.e. the pair has already been
+    labeled), its ``note`` and ``verdict`` are projected onto the card so the
+    template can pre-fill the textarea and visually mark the current verdict
+    button.
     """
     marc: MarcRecord = json_decode(row.marc_json, type=MarcRecord)
     return ReviewCard(
@@ -397,6 +408,8 @@ def build_card(row: ReviewPairRow) -> ReviewCard:
         ),
         cce_has_renewal_details=_has_renewal_details(row),
         evidence=_build_evidence(row.evidence_json, row.evidence_sources_json),
+        note=current_label.note if current_label is not None else None,
+        current_verdict=current_label.verdict if current_label is not None else None,
     )
 
 

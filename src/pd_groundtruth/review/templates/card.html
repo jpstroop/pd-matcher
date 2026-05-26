@@ -5,6 +5,11 @@
   <a id="back-link" href="/pair/{{ back_id }}{% if filters.query_string() %}?{{ filters.query_string() }}{% endif %}">&larr; Back (b)</a>
 </nav>
 {% endif %}
+{% if forward_id is not none %}
+<nav class="nav-forward">
+  <a id="forward-link" href="/pair/{{ forward_id }}{% if filters.query_string() %}?{{ filters.query_string() }}{% endif %}">Forward (f) &rarr;</a>
+</nav>
+{% endif %}
 
 <form id="label-form" method="post" action="/label">
   <input type="hidden" name="pair_id" value="{{ card.pair_id }}">
@@ -14,14 +19,14 @@
 
   <div class="action-bar">
     <div class="actions">
-      <button type="button" class="match" data-verdict="match">Match (y)</button>
-      <button type="button" class="no" data-verdict="no_match">No match (n)</button>
-      <button type="button" class="unsure" data-verdict="unsure">Unsure (u)</button>
+      <button type="button" class="match{% if card.current_verdict == 'match' %} current{% endif %}" data-verdict="match">Match (y)</button>
+      <button type="button" class="no{% if card.current_verdict == 'no_match' %} current{% endif %}" data-verdict="no_match">No match (n)</button>
+      <button type="button" class="unsure{% if card.current_verdict == 'unsure' %} current{% endif %}" data-verdict="unsure">Unsure (u)</button>
       <button type="button" class="skip" data-verdict="">Skip (s / space)</button>
     </div>
     <div class="note-block">
       <textarea name="note" id="note-field" rows="2" autocomplete="off"
-                placeholder="Note (optional) — capture anything notable about this pair"></textarea>
+                placeholder="Note (optional) — capture anything notable about this pair">{{ card.note or "" }}</textarea>
     </div>
   </div>
 
@@ -118,7 +123,7 @@
   </section>
 
 </form>
-<p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}. The note field captures whatever you think is worth flagging about the pair; accumulated notes will be analyzed later to surface patterns.</p>
+<p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}{% if forward_id is not none %} · <strong>f</strong> or <strong>&rarr;</strong> forward{% endif %}. The note field captures whatever you think is worth flagging about the pair; accumulated notes will be analyzed later to surface patterns.</p>
 
 <script>
 (function () {
@@ -128,6 +133,7 @@
   const nextUrl = "/{% if filters.query_string() %}?{{ filters.query_string() | safe }}{% endif %}";
   const skipUrl = "/{% set qs = filters.next_query_string(additional_skip_id=card.pair_id) %}{% if qs %}?{{ qs | safe }}{% endif %}";
   const backLink = document.getElementById("back-link");
+  const forwardLink = document.getElementById("forward-link");
 
   function submitVerdict(verdict) {
     if (!verdict) { window.location.href = skipUrl; return; }
@@ -137,6 +143,10 @@
 
   function goBack() {
     if (backLink) { window.location.href = backLink.href; }
+  }
+
+  function goForward() {
+    if (forwardLink) { window.location.href = forwardLink.href; }
   }
 
   document.querySelectorAll(".actions button").forEach(function (btn) {
@@ -152,6 +162,7 @@
       case "u": e.preventDefault(); submitVerdict("unsure"); break;
       case "s": case " ": e.preventDefault(); submitVerdict(""); break;
       case "b": case "ArrowLeft": e.preventDefault(); goBack(); break;
+      case "f": case "ArrowRight": e.preventDefault(); goForward(); break;
     }
   });
 })();

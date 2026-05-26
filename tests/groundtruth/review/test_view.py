@@ -19,6 +19,7 @@ from pd_groundtruth.review.view import build_labeled_row
 from pd_groundtruth.review.view import parse_evidence
 from pd_groundtruth.review.view import parse_evidence_sources
 from pd_groundtruth.review.view import render_renewal_label
+from pd_groundtruth.review_db import CurrentLabelRow
 from pd_groundtruth.review_db import LabeledPairRow
 from pd_groundtruth.review_db import ReviewPairRow
 from pd_matcher.models import MarcRecord
@@ -736,3 +737,44 @@ def test_build_card_renewal_claimants_no_diff_signal_when_either_side_blank() ->
         )
     )
     assert card.cce_renewal_claimants_differ is False
+
+
+def _current_label(
+    *,
+    pair_id: int = 7,
+    verdict: str = "match",
+    note: str | None = "looks right",
+) -> CurrentLabelRow:
+    return CurrentLabelRow(
+        pair_id=pair_id,
+        marc_control_id="ctrl-1",
+        nypl_uuid="uuid-9",
+        marc_json="{}",
+        verdict=verdict,
+        note=note,
+        labeled_at="2026-05-23T11:30:00+00:00",
+    )
+
+
+def test_build_card_note_and_verdict_default_none_when_no_current_label() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.note is None
+    assert card.current_verdict is None
+
+
+def test_build_card_projects_current_label_note_and_verdict() -> None:
+    card = build_card(
+        _row(_marc(), evidence_json="{}"),
+        current_label=_current_label(verdict="no_match", note="title collision"),
+    )
+    assert card.note == "title collision"
+    assert card.current_verdict == "no_match"
+
+
+def test_build_card_current_label_with_no_note_propagates_none() -> None:
+    card = build_card(
+        _row(_marc(), evidence_json="{}"),
+        current_label=_current_label(verdict="unsure", note=None),
+    )
+    assert card.note is None
+    assert card.current_verdict == "unsure"

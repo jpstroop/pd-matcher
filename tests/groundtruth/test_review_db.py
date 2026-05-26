@@ -451,7 +451,7 @@ def test_previous_labeled_none_when_nothing_labeled(tmp_path: Path) -> None:
         assert db.previous_labeled() is None
 
 
-def test_previous_labeled_returns_most_recent_action(tmp_path: Path) -> None:
+def test_previous_labeled_before_none_returns_highest_labeled_id(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
         second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
@@ -474,7 +474,7 @@ def test_previous_labeled_chains_backward_with_before(tmp_path: Path) -> None:
         assert db.previous_labeled(before=first) is None
 
 
-def test_previous_labeled_follows_relabel_to_front(tmp_path: Path) -> None:
+def test_previous_labeled_stable_across_relabels(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
         second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
@@ -483,7 +483,22 @@ def test_previous_labeled_follows_relabel_to_front(tmp_path: Path) -> None:
         db.add_label(first, VERDICT_UNSURE)
         back = db.previous_labeled()
         assert back is not None
-        assert back.id == first
+        assert back.id == second
+        step_back = db.previous_labeled(before=second)
+        assert step_back is not None
+        assert step_back.id == first
+
+
+def test_previous_labeled_skips_unlabeled_pairs_between(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        third = db.insert_pair(_pair(control_id="c", nypl_uuid="u-c"))
+        db.add_label(first, VERDICT_MATCH)
+        db.add_label(third, VERDICT_MATCH)
+        step_back = db.previous_labeled(before=third)
+        assert step_back is not None
+        assert step_back.id == first
 
 
 def test_previous_labeled_respects_language_filter(tmp_path: Path) -> None:
@@ -506,6 +521,106 @@ def test_previous_labeled_respects_band_filter(tmp_path: Path) -> None:
         back = db.previous_labeled(band="below")
         assert back is not None
         assert back.id == below
+
+
+def test_next_labeled_returns_lowest_labeled_id_above_after(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        third = db.insert_pair(_pair(control_id="c", nypl_uuid="u-c"))
+        db.add_label(first, VERDICT_MATCH)
+        db.add_label(second, VERDICT_NO_MATCH)
+        db.add_label(third, VERDICT_UNSURE)
+        forward = db.next_labeled(after=first)
+        assert forward is not None
+        assert forward.id == second
+
+
+def test_next_labeled_none_when_after_is_at_or_beyond_last_labeled(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        db.add_label(first, VERDICT_MATCH)
+        db.add_label(second, VERDICT_NO_MATCH)
+        assert db.next_labeled(after=second) is None
+        assert db.next_labeled(after=9999) is None
+
+
+def test_next_labeled_skips_unlabeled_pairs_between(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        third = db.insert_pair(_pair(control_id="c", nypl_uuid="u-c"))
+        db.add_label(first, VERDICT_MATCH)
+        db.add_label(third, VERDICT_MATCH)
+        forward = db.next_labeled(after=first)
+        assert forward is not None
+        assert forward.id == third
+
+
+def test_next_labeled_respects_language_filter(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        eng_a = db.insert_pair(_pair(language="eng", control_id="a", nypl_uuid="u-a"))
+        fre = db.insert_pair(_pair(language="fre", control_id="b", nypl_uuid="u-b"))
+        eng_c = db.insert_pair(_pair(language="eng", control_id="c", nypl_uuid="u-c"))
+        db.add_label(eng_a, VERDICT_MATCH)
+        db.add_label(fre, VERDICT_MATCH)
+        db.add_label(eng_c, VERDICT_MATCH)
+        forward = db.next_labeled(after=eng_a, language="eng")
+        assert forward is not None
+        assert forward.id == eng_c
+
+
+def test_next_labeled_respects_band_filter(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        below_a = db.insert_pair(_pair(band="below", control_id="a", nypl_uuid="u-a"))
+        ge90 = db.insert_pair(_pair(band="ge90", control_id="b", nypl_uuid="u-b"))
+        below_c = db.insert_pair(_pair(band="below", control_id="c", nypl_uuid="u-c"))
+        db.add_label(below_a, VERDICT_MATCH)
+        db.add_label(ge90, VERDICT_MATCH)
+        db.add_label(below_c, VERDICT_MATCH)
+        forward = db.next_labeled(after=below_a, band="below")
+        assert forward is not None
+        assert forward.id == below_c
+
+
+def test_get_current_label_returns_none_for_unlabeled_pair(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        assert db.get_current_label(pair_id) is None
+
+
+def test_get_current_label_returns_none_for_missing_pair(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        assert db.get_current_label(9999) is None
+
+
+def test_get_current_label_returns_latest_verdict_and_note(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        db.add_label(pair_id, VERDICT_MATCH, note="first take")
+        db.add_label(pair_id, VERDICT_NO_MATCH, note="changed my mind")
+        current = db.get_current_label(pair_id)
+    assert current is not None
+    assert current.verdict == VERDICT_NO_MATCH
+    assert current.note == "changed my mind"
+    assert current.pair_id == pair_id
+    assert current.marc_control_id == "a"
+    assert current.nypl_uuid == "u-a"
+
+
+def test_get_current_label_isolated_to_requested_pair_id(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        a = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        b = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        db.add_label(a, VERDICT_MATCH, note="for a")
+        db.add_label(b, VERDICT_NO_MATCH, note="for b")
+        current_a = db.get_current_label(a)
+        current_b = db.get_current_label(b)
+    assert current_a is not None
+    assert current_a.note == "for a"
+    assert current_b is not None
+    assert current_b.note == "for b"
 
 
 def _raise_after_insert(db_path: Path) -> None:
