@@ -44,6 +44,9 @@
     .nav-back { margin-bottom: .8rem; }
     .nav-back a { color: var(--accent); text-decoration: none; font-size: .9rem; }
     .nav-back a:hover { text-decoration: underline; }
+    .nav-forward { margin-bottom: .8rem; text-align: right; }
+    .nav-forward a { color: var(--accent); text-decoration: none; font-size: .9rem; }
+    .nav-forward a:hover { text-decoration: underline; }
     .meta { display: flex; gap: .8rem; flex-wrap: wrap; align-items: center;
             margin-bottom: .6rem; color: var(--muted); font-size: .85rem; }
     .ids { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;
@@ -77,6 +80,10 @@
     .actions button.no { color: var(--no); }
     .actions button.unsure { color: var(--unsure); }
     .actions button.skip { color: var(--muted); }
+    .actions button.current { border-width: 2px; background: #eef1ff; box-shadow: inset 0 0 0 1px var(--accent); }
+    .actions button.match.current { border-color: var(--match); box-shadow: inset 0 0 0 1px var(--match); background: #e9f6ec; }
+    .actions button.no.current { border-color: var(--no); box-shadow: inset 0 0 0 1px var(--no); background: #fdecea; }
+    .actions button.unsure.current { border-color: var(--unsure); box-shadow: inset 0 0 0 1px var(--unsure); background: #fff3cd; }
     .note-block { margin-top: .6rem; }
     .note-block textarea { width: 100%; padding: .65rem .8rem; font-size: .95rem;
                             border: 1px solid var(--line); border-radius: 10px;
