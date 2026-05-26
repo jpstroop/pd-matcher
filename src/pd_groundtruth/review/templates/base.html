@@ -41,12 +41,12 @@
     .renewal-meta code { background: #eef1ff; color: var(--accent);
                           padding: 0 .35rem; border-radius: 4px; }
     .claimants-diff { color: var(--unsure); font-weight: 700; cursor: help; }
-    .nav-back { margin-bottom: .8rem; }
-    .nav-back a { color: var(--accent); text-decoration: none; font-size: .9rem; }
-    .nav-back a:hover { text-decoration: underline; }
-    .nav-forward { margin-bottom: .8rem; text-align: right; }
-    .nav-forward a { color: var(--accent); text-decoration: none; font-size: .9rem; }
-    .nav-forward a:hover { text-decoration: underline; }
+    .nav-row { display: flex; justify-content: space-between; align-items: center;
+               margin-bottom: .8rem; min-height: 1.25rem; }
+    .nav-row a { color: var(--accent); text-decoration: none; font-size: .9rem; }
+    .nav-row a:hover { text-decoration: underline; }
+    .nav-back { margin-right: auto; }
+    .nav-forward { margin-left: auto; }
     .meta { display: flex; gap: .8rem; flex-wrap: wrap; align-items: center;
             margin-bottom: .6rem; color: var(--muted); font-size: .85rem; }
     .ids { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;

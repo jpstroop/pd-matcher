@@ -1,14 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
-{% if back_id is not none %}
-<nav class="nav-back">
-  <a id="back-link" href="/pair/{{ back_id }}{% if filters.query_string() %}?{{ filters.query_string() }}{% endif %}">&larr; Back (b)</a>
-</nav>
-{% endif %}
-{% if forward_id is not none %}
-<nav class="nav-forward">
-  <a id="forward-link" href="/pair/{{ forward_id }}{% if filters.query_string() %}?{{ filters.query_string() }}{% endif %}">Forward (f) &rarr;</a>
-</nav>
+{% if back_id is not none or forward_id is not none %}
+<div class="nav-row">
+  {% if back_id is not none %}
+  <span class="nav-back">
+    <a id="back-link" href="/pair/{{ back_id }}{% if filters.query_string() %}?{{ filters.query_string() }}{% endif %}">&larr; Back (b)</a>
+  </span>
+  {% endif %}
+  {% if forward_id is not none %}
+  <span class="nav-forward">
+    <a id="forward-link" href="/pair/{{ forward_id }}{% if filters.query_string() %}?{{ filters.query_string() }}{% endif %}">Forward (f) &rarr;</a>
+  </span>
+  {% endif %}
+</div>
 {% endif %}
 
 <form id="label-form" method="post" action="/label">
