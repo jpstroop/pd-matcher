@@ -10,7 +10,7 @@
         {% if label_filters.language %}· lang={{ label_filters.language }}{% endif %}
         {% if label_filters.q %}· q={{ label_filters.q }}{% endif %}
       </span>
-      · <a href="/labels">Clear filters</a>
+      · <a href="/labels{% if label_filters.sort != 'desc' %}?sort={{ label_filters.sort }}{% endif %}">Clear filters</a>
     {% else %}
       Showing {{ filtered_total }} label{{ "" if filtered_total == 1 else "s" }}
     {% endif %}
@@ -38,6 +38,14 @@
     <label>
       <span>search</span>
       <input type="text" name="q" value="{{ label_filters.q or '' }}" placeholder="title or control id" autocomplete="off">
+    </label>
+    <label>
+      <span>sort</span>
+      <select name="sort">
+        {% for choice, choice_label in sort_choices %}
+        <option value="{{ choice }}"{% if label_filters.sort == choice %} selected{% endif %}>{{ choice_label }}</option>
+        {% endfor %}
+      </select>
     </label>
     <button type="submit">Filter</button>
   </form>

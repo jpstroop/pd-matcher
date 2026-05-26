@@ -4,6 +4,8 @@ from pathlib import Path
 
 from pytest import raises
 
+from pd_groundtruth.review_db import SORT_ASC
+from pd_groundtruth.review_db import SORT_DESC
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
 from pd_groundtruth.review_db import VERDICT_UNSURE
@@ -640,6 +642,64 @@ def test_iter_labeled_pairs_rejects_invalid_page_args(tmp_path: Path) -> None:
             db.iter_labeled_pairs(page=0)
         with raises(ValueError, match="page_size must be >= 1"):
             db.iter_labeled_pairs(page_size=0)
+
+
+def test_iter_labeled_pairs_default_sort_is_descending(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        oldest = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        middle = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        newest = db.insert_pair(_pair(control_id="c", nypl_uuid="u-c"))
+        db.insert_existing_label(oldest, VERDICT_MATCH, "2024-01-01T00:00:00+00:00")
+        db.insert_existing_label(middle, VERDICT_MATCH, "2024-06-01T00:00:00+00:00")
+        db.insert_existing_label(newest, VERDICT_MATCH, "2024-12-01T00:00:00+00:00")
+        rows = db.iter_labeled_pairs()
+    assert [row.pair_id for row in rows] == [newest, middle, oldest]
+
+
+def test_iter_labeled_pairs_sort_asc_returns_oldest_first(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        oldest = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        middle = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        newest = db.insert_pair(_pair(control_id="c", nypl_uuid="u-c"))
+        db.insert_existing_label(oldest, VERDICT_MATCH, "2024-01-01T00:00:00+00:00")
+        db.insert_existing_label(middle, VERDICT_MATCH, "2024-06-01T00:00:00+00:00")
+        db.insert_existing_label(newest, VERDICT_MATCH, "2024-12-01T00:00:00+00:00")
+        rows = db.iter_labeled_pairs(LabelFilters(sort=SORT_ASC))
+    assert [row.pair_id for row in rows] == [oldest, middle, newest]
+
+
+def test_iter_labeled_pairs_sort_desc_explicit_matches_default(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        a = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        b = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        db.insert_existing_label(a, VERDICT_MATCH, "2024-01-01T00:00:00+00:00")
+        db.insert_existing_label(b, VERDICT_MATCH, "2024-12-01T00:00:00+00:00")
+        default_rows = db.iter_labeled_pairs()
+        explicit_rows = db.iter_labeled_pairs(LabelFilters(sort=SORT_DESC))
+    assert [row.pair_id for row in default_rows] == [row.pair_id for row in explicit_rows]
+
+
+def test_iter_labeled_pairs_sort_breaks_ties_by_pair_id(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        second = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        third = db.insert_pair(_pair(control_id="c", nypl_uuid="u-c"))
+        shared = "2024-06-01T00:00:00+00:00"
+        db.insert_existing_label(first, VERDICT_MATCH, shared)
+        db.insert_existing_label(second, VERDICT_MATCH, shared)
+        db.insert_existing_label(third, VERDICT_MATCH, shared)
+        desc = db.iter_labeled_pairs()
+        asc = db.iter_labeled_pairs(LabelFilters(sort=SORT_ASC))
+    assert [row.pair_id for row in desc] == [third, second, first]
+    assert [row.pair_id for row in asc] == [first, second, third]
+
+
+def test_iter_labeled_pairs_rejects_invalid_sort(tmp_path: Path) -> None:
+    with (
+        ReviewDb.connect(tmp_path / "review.db") as db,
+        raises(ValueError, match="invalid sort"),
+    ):
+        db.iter_labeled_pairs(LabelFilters(sort="sideways"))
 
 
 def test_count_labeled_pairs_matches_iter_results_across_filters(tmp_path: Path) -> None:

@@ -18,7 +18,12 @@ from urllib.parse import urlencode
 
 from msgspec import Struct
 
+from pd_groundtruth.review_db import SORT_ASC
+from pd_groundtruth.review_db import SORT_DESC
 from pd_groundtruth.review_db import LabelFilters
+
+_DEFAULT_SORT: str = SORT_DESC
+_VALID_SORTS: frozenset[str] = frozenset({SORT_DESC, SORT_ASC})
 
 
 class ReviewFilters(Struct, frozen=True, forbid_unknown_fields=True):
@@ -105,21 +110,40 @@ def parse_filters(
     )
 
 
+def _clean_sort(value: str | None) -> str:
+    """Clamp a raw ``sort`` value to a valid choice, falling back to the default.
+
+    Whitespace is stripped and unknown strings (or ``None``) collapse to the
+    default descending sort — keeps a stray ``?sort=garbage`` from breaking the
+    page or stripping the URL of an intentional order.
+    """
+    if value is None:
+        return _DEFAULT_SORT
+    stripped = value.strip()
+    if stripped in _VALID_SORTS:
+        return stripped
+    return _DEFAULT_SORT
+
+
 def parse_label_filters(
     verdict: str | None,
     language: str | None,
     q: str | None,
+    sort: str | None = None,
 ) -> LabelFilters:
     """Normalize raw ``/labels`` query values into typed :class:`LabelFilters`.
 
     Whitespace is stripped and empty strings become ``None`` so that a form
     that submits ``verdict=`` does not over-narrow the row set. ``q`` is kept
-    in its raw case here; the DB layer lower-cases it for matching.
+    in its raw case here; the DB layer lower-cases it for matching. ``sort``
+    is clamped to ``"asc"`` / ``"desc"`` with garbage falling back to the
+    default (``"desc"``) so a stray query parameter cannot break the page.
     """
     return LabelFilters(
         verdict=_clean(verdict),
         language=_clean(language),
         q=_clean(q),
+        sort=_clean_sort(sort),
     )
 
 
@@ -128,7 +152,10 @@ def label_filters_query_string(filters: LabelFilters, *, drop: str | None = None
 
     Pass ``drop`` to omit one filter key from the rendered string — used by
     the per-filter "clear" links in the page header so each link removes only
-    the filter it represents while preserving the rest.
+    the filter it represents while preserving the rest. ``sort`` is omitted
+    when it equals the default to keep canonical URLs short, but is always
+    preserved (even when ``drop`` is passed) so per-filter clears do not also
+    reset the order.
     """
     params: list[tuple[str, str]] = []
     if filters.verdict is not None and drop != "verdict":
@@ -137,11 +164,18 @@ def label_filters_query_string(filters: LabelFilters, *, drop: str | None = None
         params.append(("language", filters.language))
     if filters.q is not None and drop != "q":
         params.append(("q", filters.q))
+    if filters.sort != _DEFAULT_SORT:
+        params.append(("sort", filters.sort))
     return urlencode(params)
 
 
 def label_filters_active(filters: LabelFilters) -> bool:
-    """Return ``True`` when any of the label filters is set."""
+    """Return ``True`` when any narrowing label filter is set.
+
+    ``sort`` is an ordering, not a narrowing filter, so it does not flip this
+    flag — the "Showing N of M / Clear filters" header stays accurate when the
+    user only changed the order.
+    """
     return any(value is not None for value in (filters.verdict, filters.language, filters.q))
 
 
