@@ -36,6 +36,7 @@ from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import append_entry
 from pd_groundtruth.label_vault import extract_marc_identifiers
+from pd_groundtruth.review import nav_history
 from pd_groundtruth.review.filters import ReviewFilters
 from pd_groundtruth.review.filters import label_filters_active
 from pd_groundtruth.review.filters import label_filters_query_string
@@ -43,6 +44,8 @@ from pd_groundtruth.review.filters import parse_filters
 from pd_groundtruth.review.filters import parse_label_filters
 from pd_groundtruth.review.view import build_card
 from pd_groundtruth.review.view import build_labeled_row
+from pd_groundtruth.review_db import CurrentLabelRow
+from pd_groundtruth.review_db import ProgressCounts
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.review_db import ReviewPairRow
 from pd_matcher.models import MarcRecord
@@ -78,31 +81,6 @@ def _redirect_to_next(filters: ReviewFilters) -> RedirectResponse:
     return RedirectResponse(url=location, status_code=303)
 
 
-def _forward_target(
-    forward_labeled: ReviewPairRow | None,
-    queue_head: ReviewPairRow | None,
-    pair_id: int,
-) -> ReviewPairRow | None:
-    """Pick the nearer of the next-labeled pair and the unlabeled queue head.
-
-    With a vault of thousands of labels accumulated across sessions,
-    ``next_labeled`` alone walks forward into ancient labeled pairs and skips
-    over the current queue head — exactly where the reviewer wants to return
-    after stepping back through their recent work. The queue head is only
-    eligible when its id strictly exceeds ``pair_id`` (so a labeled pair
-    clicked in from ``/labels`` that already sits past the queue head walks
-    through labeled pairs only, never jumping backward to the queue head).
-    """
-    candidates: list[ReviewPairRow] = []
-    if forward_labeled is not None:
-        candidates.append(forward_labeled)
-    if queue_head is not None and queue_head.id > pair_id:
-        candidates.append(queue_head)
-    if not candidates:
-        return None
-    return min(candidates, key=lambda row: row.id)
-
-
 def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> FastAPI:
     """Create the review FastAPI app, optionally binding paths now.
 
@@ -119,6 +97,30 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
     if vault_path is not None:
         set_vault_path(app, vault_path)
 
+    def _render_card(
+        request: Request,
+        row: ReviewPairRow,
+        counts: ProgressCounts,
+        filters: ReviewFilters,
+        current_label: CurrentLabelRow | None,
+    ) -> HTMLResponse:
+        """Render one card, threading the cookie nav history through context."""
+        history = nav_history.read_history(request)
+        history = nav_history.advance(history, row.id)
+        response = templates.TemplateResponse(
+            request,
+            "card.html",
+            {
+                "card": build_card(row, current_label=current_label),
+                "filters": filters,
+                "counts": counts,
+                "back_id": nav_history.back_id(history),
+                "forward_id": nav_history.forward_id(history),
+            },
+        )
+        nav_history.write_history(response, history)
+        return response
+
     @app.get("/", response_class=HTMLResponse)
     def index(
         request: Request,
@@ -134,26 +136,20 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 exclude_pair_ids=filters.skip_ids,
             )
             counts = db.progress()
-            before = row.id if row is not None else None
-            back = db.previous_labeled(before=before, language=filters.language, band=filters.band)
-        back_id = None if back is None else back.id
         if row is None:
-            return templates.TemplateResponse(
+            history = nav_history.read_history(request)
+            response = templates.TemplateResponse(
                 request,
                 "empty.html",
-                {"filters": filters, "counts": counts, "back_id": back_id},
+                {
+                    "filters": filters,
+                    "counts": counts,
+                    "back_id": nav_history.back_id(history),
+                },
             )
-        return templates.TemplateResponse(
-            request,
-            "card.html",
-            {
-                "card": build_card(row),
-                "filters": filters,
-                "counts": counts,
-                "back_id": back_id,
-                "forward_id": None,
-            },
-        )
+            nav_history.write_history(response, history)
+            return response
+        return _render_card(request, row, counts, filters, current_label=None)
 
     @app.get("/pair/{pair_id}", response_class=HTMLResponse)
     def pair(
@@ -163,15 +159,7 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
         with ReviewDb.connect(_db_path(request)) as db:
             row = db.get_pair(pair_id)
             counts = db.progress()
-            back = db.previous_labeled(before=pair_id, language=filters.language, band=filters.band)
-            forward_labeled = db.next_labeled(
-                after=pair_id, language=filters.language, band=filters.band
-            )
-            queue_head = db.next_unlabeled(language=filters.language, band=filters.band)
-            current_label = db.get_current_label(pair_id)
-        forward = _forward_target(forward_labeled, queue_head, pair_id)
-        back_id = None if back is None else back.id
-        forward_id = None if forward is None else forward.id
+            current_label = db.get_current_label(pair_id) if row is not None else None
         if row is None:
             return templates.TemplateResponse(
                 request,
@@ -179,17 +167,7 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 {"filters": filters, "counts": counts, "pair_id": pair_id},
                 status_code=404,
             )
-        return templates.TemplateResponse(
-            request,
-            "card.html",
-            {
-                "card": build_card(row, current_label=current_label),
-                "filters": filters,
-                "counts": counts,
-                "back_id": back_id,
-                "forward_id": forward_id,
-            },
-        )
+        return _render_card(request, row, counts, filters, current_label)
 
     @app.post("/label")
     def label(
