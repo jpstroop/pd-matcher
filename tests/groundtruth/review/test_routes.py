@@ -752,3 +752,177 @@ def test_card_omits_evidence_source_breadcrumb_when_absent(client: TestClient) -
     assert response.status_code == 200
     assert "(via " not in response.text
     assert 'class="ev-source"' not in response.text
+
+
+def test_pair_route_pre_fills_note_textarea_from_current_label(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "no_match", "note": "title collision"},
+        follow_redirects=False,
+    )
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert "title collision</textarea>" in response.text
+
+
+def test_pair_route_renders_empty_textarea_when_no_current_label(client: TestClient) -> None:
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert "></textarea>" in response.text
+
+
+def test_pair_route_pre_fills_latest_note_after_relabel(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match", "note": "first take"},
+        follow_redirects=False,
+    )
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "no_match", "note": "second take"},
+        follow_redirects=False,
+    )
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert "second take</textarea>" in response.text
+    assert "first take</textarea>" not in response.text
+
+
+def test_pair_route_marks_current_verdict_button(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "no_match"},
+        follow_redirects=False,
+    )
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert 'class="no current"' in response.text
+    assert 'class="match"' in response.text
+    assert 'class="unsure"' in response.text
+
+
+def test_pair_route_marks_match_current_verdict_button(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match"},
+        follow_redirects=False,
+    )
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert 'class="match current"' in response.text
+
+
+def test_pair_route_marks_unsure_current_verdict_button(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "unsure"},
+        follow_redirects=False,
+    )
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert 'class="unsure current"' in response.text
+
+
+def test_pair_route_no_current_class_when_unlabeled(client: TestClient) -> None:
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert " current" not in response.text
+
+
+def test_pair_route_forward_link_absent_when_no_later_labeled(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match"},
+        follow_redirects=False,
+    )
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert 'id="forward-link"' not in response.text
+
+
+def test_pair_route_forward_link_targets_next_labeled_pair(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match"},
+        follow_redirects=False,
+    )
+    client.post(
+        "/label",
+        data={"pair_id": "2", "verdict": "match"},
+        follow_redirects=False,
+    )
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert 'id="forward-link"' in response.text
+    assert 'href="/pair/2"' in response.text
+
+
+def test_pair_route_forward_link_preserves_filter(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match", "language": "eng"},
+        follow_redirects=False,
+    )
+    client.post(
+        "/label",
+        data={"pair_id": "2", "verdict": "match", "language": "fre"},
+        follow_redirects=False,
+    )
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert 'id="forward-link"' in response.text
+    assert 'href="/pair/2"' in response.text
+
+
+def test_index_no_forward_link(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match"},
+        follow_redirects=False,
+    )
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'id="forward-link"' not in response.text
+
+
+def test_pair_route_back_link_stable_across_relabel(skip_client: TestClient) -> None:
+    skip_client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    skip_client.post("/label", data={"pair_id": "2", "verdict": "match"}, follow_redirects=False)
+    skip_client.post("/label", data={"pair_id": "1", "verdict": "no_match"}, follow_redirects=False)
+    response = skip_client.get("/pair/2")
+    assert response.status_code == 200
+    assert 'id="back-link"' in response.text
+    assert "/pair/1" in response.text
+
+
+def test_card_keybinding_hint_mentions_forward_when_available(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match"},
+        follow_redirects=False,
+    )
+    client.post(
+        "/label",
+        data={"pair_id": "2", "verdict": "match"},
+        follow_redirects=False,
+    )
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert ">f</strong>" in response.text
+
+
+def test_card_keybinding_handler_includes_forward_keys(client: TestClient) -> None:
+    client.post(
+        "/label",
+        data={"pair_id": "1", "verdict": "match"},
+        follow_redirects=False,
+    )
+    client.post(
+        "/label",
+        data={"pair_id": "2", "verdict": "match"},
+        follow_redirects=False,
+    )
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert 'case "f": case "ArrowRight":' in response.text
+    assert "goForward()" in response.text
