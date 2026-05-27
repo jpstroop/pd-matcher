@@ -41,6 +41,7 @@ def _pair(
     lccn: str | None = "40012345",
     oclc: str | None = "0001",
     isbns: tuple[str, ...] = ("9780000000000",),
+    cce_desc: str = "vi, 200 p.",
 ) -> PairInsert:
     marc = MarcRecord(
         control_id=control_id,
@@ -88,7 +89,7 @@ def _pair(
         cce_author_is_claimant=True,
         cce_copies="2c.",
         cce_aff_date="1953-06-01",
-        cce_desc="vi, 200 p.",
+        cce_desc=cce_desc,
         cce_notes="first note\nsecond note",
         cce_new_matter_claimed="added chapter 5",
         cce_copy_date="1953-04-01",
@@ -144,6 +145,23 @@ def ebook_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
                 control_id="eng-ebook-1",
                 nypl_uuid="u-eng-ebook-1",
                 extent="1 online resource (xxi, 406 p.)",
+            )
+        )
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
+def translation_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="eng-tr-1",
+                nypl_uuid="u-eng-tr-1",
+                cce_desc="312 p. tr. from the French",
             )
         )
     app = create_app(db_path, vault_path)
@@ -435,6 +453,19 @@ def test_ebook_badge_absent_for_physical_pairs(client: TestClient) -> None:
     assert response.status_code == 200
     assert "E-book reprint" not in response.text
     assert '<span class="badge-ebook">' not in response.text
+
+
+def test_translation_badge_renders_when_cue_present(translation_client: TestClient) -> None:
+    response = translation_client.get("/")
+    assert response.status_code == 200
+    assert '<span class="badge-translation">Translation</span>' in response.text
+
+
+def test_translation_badge_absent_for_non_translation_pairs(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Translation" not in response.text
+    assert '<span class="badge-translation">' not in response.text
 
 
 def test_label_appends_to_vault(client: TestClient, vault_path: Path) -> None:

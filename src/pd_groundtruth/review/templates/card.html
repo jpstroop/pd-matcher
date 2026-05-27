@@ -75,6 +75,7 @@
     <section class="panel">
       <h2>CCE (Copyright Office)</h2>
       {% if card.cce_title %}<div class="field"><div class="k">title</div><div class="v title">{{ card.cce_title }}</div></div>{% endif %}
+      {% if card.cce_is_translation %}<div class="field"><span class="badge-translation">Translation</span></div>{% endif %}
       {% if card.cce_author %}<div class="field"><div class="k">author</div><div class="v">{{ card.cce_author }}</div></div>{% endif %}
       {% if card.cce_author_place %}<div class="field"><div class="k">author place</div><div class="v">{{ card.cce_author_place }}</div></div>{% endif %}
       {% if card.author_is_claimant_label %}<div class="field"><span class="badge-claimant">{{ card.author_is_claimant_label }}</span></div>{% endif %}

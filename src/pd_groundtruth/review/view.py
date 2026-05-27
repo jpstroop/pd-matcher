@@ -24,6 +24,7 @@ from pd_groundtruth.review.relative_time import format_relative
 from pd_groundtruth.review_db import CurrentLabelRow
 from pd_groundtruth.review_db import LabeledPairRow
 from pd_groundtruth.review_db import ReviewPairRow
+from pd_matcher.match.signals.translation import any_value_matches
 from pd_matcher.models import MarcRecord
 
 _TITLE_TRUNCATE: int = 60
@@ -123,6 +124,7 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     cce_renewal_new_matter: str | None
     cce_renewal_claimants_differ: bool
     cce_has_renewal_details: bool
+    cce_is_translation: bool
 
     evidence: tuple[EvidenceBar, ...]
 
@@ -308,6 +310,22 @@ def _renewal_claimants_differ(registration: str | None, renewal: str | None) -> 
     return registration.strip().lower() != renewal.strip().lower()
 
 
+def _is_translation_row(row: ReviewPairRow) -> bool:
+    """Return ``True`` when the row's CCE text fields carry a translation cue.
+
+    Mirrors :func:`pd_matcher.match.signals.translation.is_translation_signal`
+    but reads the pre-flattened strings the review DB persists, so the badge
+    surfaces the same signal the matcher uses to downweight the author
+    scorer.
+    """
+    return any_value_matches(
+        row.cce_desc,
+        row.cce_notes,
+        row.cce_new_matter_claimed,
+        row.cce_renewal_new_matter,
+    )
+
+
 def _has_renewal_details(row: ReviewPairRow) -> bool:
     """Return ``True`` when any persisted ``cce_renewal_*`` field is populated.
 
@@ -407,6 +425,7 @@ def build_card(
             row.cce_claimants, row.cce_renewal_claimants
         ),
         cce_has_renewal_details=_has_renewal_details(row),
+        cce_is_translation=_is_translation_row(row),
         evidence=_build_evidence(row.evidence_json, row.evidence_sources_json),
         note=current_label.note if current_label is not None else None,
         current_verdict=current_label.verdict if current_label is not None else None,

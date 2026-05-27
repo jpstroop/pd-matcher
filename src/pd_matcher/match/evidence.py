@@ -31,6 +31,12 @@ class Evidence(Struct, frozen=True, forbid_unknown_fields=True):
             ``P(true match)``.
         features: Named numeric sub-features useful for debugging and for
             Phase 9's learned combiner.
+        weight_multiplier: Per-Evidence multiplier applied on top of the
+            scorer's configured weight in the combiner numerator AND
+            denominator. Defaults to ``1.0`` (no effect). Lets cross
+            -cutting signals (e.g. translation-aware author downweight)
+            adjust one scorer's contribution to the weighted mean
+            without inventing a new scorer or weight.
     """
 
     scorer: str
@@ -39,6 +45,7 @@ class Evidence(Struct, frozen=True, forbid_unknown_fields=True):
     skipped: bool
     decisive: bool
     features: tuple[tuple[str, float], ...]
+    weight_multiplier: float = 1.0
 
     @property
     def normalized(self) -> float:

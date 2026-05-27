@@ -10,10 +10,12 @@ from pd_matcher.index.builder import build_index
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
+from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import build_idf_table
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
+from pd_matcher.match.pipeline import _with_multiplier
 from pd_matcher.match.pipeline import match_record
 from pd_matcher.models import MarcRecord
 
@@ -420,6 +422,83 @@ def test_match_record_source_reflects_winning_pairing_when_cross_pairing_wins(
         i for i, ev in enumerate(result.best.evidence) if ev.scorer == "title.token_set"
     )
     assert result.best.evidence_sources[title_index] == ("backup", "t")
+
+
+def test_with_multiplier_preserves_evidence_fields_and_sets_weight() -> None:
+    """``_with_multiplier`` returns a copy with the requested multiplier."""
+    original = Evidence(
+        scorer="name.author",
+        score=42.0,
+        max=100.0,
+        skipped=False,
+        decisive=False,
+        features=(("k", 1.0),),
+    )
+    updated = _with_multiplier(original, 0.5)
+    assert updated.scorer == original.scorer
+    assert updated.score == original.score
+    assert updated.max == original.max
+    assert updated.skipped is original.skipped
+    assert updated.decisive is original.decisive
+    assert updated.features == original.features
+    assert updated.weight_multiplier == 0.5
+
+
+def test_match_record_downweights_author_for_translation_candidate(
+    tmp_path: Path, compiled_pairings: CompiledPairings
+) -> None:
+    """A CCE entry whose desc flags translation gets author downweighted to 0.5.
+
+    Builds a tiny one-record index with a ``<desc>`` containing
+    ``"translated from the French"``. The translation signal fires, and the
+    resulting author Evidence on the winning candidate carries
+    ``weight_multiplier=0.5`` (set by the pipeline before combining).
+    """
+    reg_dir = tmp_path / "reg"
+    ren_dir = tmp_path / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "tr_reg.xml").write_text(
+        (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<copyrightEntries>\n"
+            '  <copyrightEntry regnum="A111111" id="UUID-TR-1">'
+            "<author><authorName>Translator, Jane</authorName></author>"
+            "<title>Translated work.</title>"
+            '<regDate date="1955-01-01">Jan. 1, 1955</regDate>'
+            '<publisher><pubName claimant="yes">House</pubName>'
+            "<pubPlace>NYC</pubPlace></publisher>"
+            "<desc>312 p. Translated from the French.</desc>"
+            "</copyrightEntry>\n"
+            "</copyrightEntries>\n"
+        ),
+        encoding="utf-8",
+    )
+    (ren_dir / "empty.tsv").write_text("", encoding="utf-8")
+    out_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    with NyplIndexLookup(out_path) as lookup:
+        idf = _idf(lookup)
+        config = _config(min_score=0.0)
+        marc = MarcRecord(
+            control_id="m",
+            title="Translated work",
+            title_main="Translated work",
+            main_author="Original, Pierre",
+            publication_year=1955,
+        )
+        result = match_record(
+            marc,
+            lookup=lookup,
+            config=config,
+            idf=idf,
+            calibrator=None,
+            combiner=WeightedMeanCombiner(config=config),
+            pairings=compiled_pairings,
+        )
+    assert result.best is not None
+    author_evidence = next(ev for ev in result.best.evidence if ev.scorer == "name.author")
+    assert author_evidence.weight_multiplier == 0.5
 
 
 def test_match_record_author_via_sor_pairing_recovers_match(

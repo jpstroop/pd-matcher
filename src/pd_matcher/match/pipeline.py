@@ -39,6 +39,7 @@ from pd_matcher.match.scorers.name import score_author
 from pd_matcher.match.scorers.name import score_publisher
 from pd_matcher.match.scorers.title import score_title
 from pd_matcher.match.scorers.year import score_year
+from pd_matcher.match.signals.translation import is_translation_signal
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 from pd_matcher.normalize.stemming import stemmer_for
@@ -46,6 +47,7 @@ from pd_matcher.normalize.stopwords import load_stopwords
 
 _DEFAULT_LANGUAGE: str = "eng"
 _FIXED_SOURCE: tuple[str, str] = ("", "")
+_TRANSLATION_AUTHOR_MULTIPLIER: float = 0.5
 
 
 def _build_context(marc: MarcRecord, idf: IdfTable, config: MatchingConfig) -> ScorerContext:
@@ -74,6 +76,20 @@ def _select_best(evidences: Sequence[Evidence]) -> tuple[int, Evidence, tuple[Ev
 
 
 _GroupScorer = Callable[[str | None, str | None, ScorerContext], Evidence]
+
+
+def _with_multiplier(evidence: Evidence, multiplier: float) -> Evidence:
+    """Return a copy of ``evidence`` with ``weight_multiplier`` set."""
+    return Evidence(
+        scorer=evidence.scorer,
+        score=evidence.score,
+        max=evidence.max,
+        skipped=evidence.skipped,
+        decisive=evidence.decisive,
+        features=evidence.features,
+        weight_multiplier=multiplier,
+    )
+
 
 _GROUP_SCORERS: dict[str, _GroupScorer] = {
     "title": score_title,
@@ -131,7 +147,12 @@ def _score_candidate(
     sources.append(_FIXED_SOURCE)
 
     _score_group(pairings.title, marc, candidate, ctx, winning, losing, sources)
+    author_index = len(winning)
     _score_group(pairings.author, marc, candidate, ctx, winning, losing, sources)
+    if author_index < len(winning) and is_translation_signal(candidate):
+        winning[author_index] = _with_multiplier(
+            winning[author_index], _TRANSLATION_AUTHOR_MULTIPLIER
+        )
     _score_group(pairings.publisher, marc, candidate, ctx, winning, losing, sources)
 
     winning.append(score_year(marc.publication_year, candidate.reg_year, ctx))

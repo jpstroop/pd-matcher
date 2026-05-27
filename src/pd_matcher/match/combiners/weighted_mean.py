@@ -41,7 +41,15 @@ class WeightedMeanCombiner(Struct, frozen=True, forbid_unknown_fields=True):
         }
 
     def combine(self, evidence: Sequence[Evidence]) -> CombinedScore:
-        """Combine ``evidence`` into a :class:`CombinedScore`."""
+        """Combine ``evidence`` into a :class:`CombinedScore`.
+
+        Each Evidence's effective weight in the mean is the configured
+        scorer weight multiplied by :attr:`Evidence.weight_multiplier`
+        (default ``1.0``). The multiplier is applied symmetrically to
+        the numerator and denominator so that downweighting one scorer
+        on a specific pairing does not deflate the mean — it just
+        reduces that scorer's share of it.
+        """
         weights = self._weights()
         numerator = 0.0
         denominator = 0.0
@@ -51,8 +59,11 @@ class WeightedMeanCombiner(Struct, frozen=True, forbid_unknown_fields=True):
             weight = weights.get(item.scorer)
             if weight is None or weight <= 0.0:
                 continue
-            numerator += weight * item.normalized
-            denominator += weight
+            effective_weight = weight * item.weight_multiplier
+            if effective_weight <= 0.0:
+                continue
+            numerator += effective_weight * item.normalized
+            denominator += effective_weight
         raw = (numerator / denominator) * _RAW_MAX if denominator > 0.0 else 0.0
         return CombinedScore(raw=raw, calibrated=raw / _RAW_MAX)
 

@@ -267,6 +267,42 @@ def test_build_card_online_resource_match_is_case_insensitive() -> None:
         assert card.marc_is_online_resource is True, extent
 
 
+def test_build_card_flags_translation_from_desc() -> None:
+    """``cce_is_translation`` fires when the CCE desc carries a translation cue."""
+    card = build_card(_row(_marc(), evidence_json="{}", cce_desc="312 p. tr. from the French"))
+    assert card.cce_is_translation is True
+
+
+def test_build_card_flags_translation_from_notes() -> None:
+    """``cce_is_translation`` fires when notes carry a translation cue."""
+    card = build_card(
+        _row(_marc(), evidence_json="{}", cce_notes="Original in German\nEnglish translation")
+    )
+    assert card.cce_is_translation is True
+
+
+def test_build_card_flags_translation_from_new_matter_claimed() -> None:
+    """``cce_is_translation`` fires from ``cce_new_matter_claimed``."""
+    card = build_card(
+        _row(_marc(), evidence_json="{}", cce_new_matter_claimed="English translation")
+    )
+    assert card.cce_is_translation is True
+
+
+def test_build_card_flags_translation_from_renewal_new_matter() -> None:
+    """``cce_is_translation`` fires from ``cce_renewal_new_matter``."""
+    card = build_card(
+        _row(_marc(), evidence_json="{}", cce_renewal_new_matter="translated from the Russian")
+    )
+    assert card.cce_is_translation is True
+
+
+def test_build_card_does_not_flag_unrelated_text() -> None:
+    """A CCE record with no translation cues yields ``cce_is_translation=False``."""
+    card = build_card(_row(_marc(), evidence_json="{}", cce_desc="312 p. illus."))
+    assert card.cce_is_translation is False
+
+
 def test_author_is_claimant_label_maps_truthy_only() -> None:
     assert author_is_claimant_label(1) == CLAIMANT_LABEL
     assert author_is_claimant_label(0) is None

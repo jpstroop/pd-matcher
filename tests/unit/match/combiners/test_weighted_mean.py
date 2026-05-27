@@ -17,6 +17,7 @@ def _ev(
     *,
     skipped: bool = False,
     decisive: bool = False,
+    weight_multiplier: float = 1.0,
 ) -> Evidence:
     return Evidence(
         scorer=scorer,
@@ -25,6 +26,7 @@ def _ev(
         skipped=skipped,
         decisive=decisive,
         features=(),
+        weight_multiplier=weight_multiplier,
     )
 
 
@@ -173,4 +175,54 @@ def test_weighted_mean_ignores_unknown_scorer(matching_config: MatchingConfig) -
             _ev("mystery.scorer", 0.0),
         )
     )
+    assert combined.raw == 100.0
+
+
+def test_weight_multiplier_default_one_preserves_old_behaviour(
+    matching_config: MatchingConfig,
+) -> None:
+    """An Evidence with the default ``weight_multiplier=1.0`` is unchanged."""
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 100.0, weight_multiplier=1.0),
+            _ev("name.author", 0.0, weight_multiplier=1.0),
+        )
+    )
+    cfg = matching_config
+    expected = (cfg.title_weight * 1.0) / (cfg.title_weight + cfg.author_weight) * 100.0
+    assert combined.raw == expected
+
+
+def test_weight_multiplier_halves_author_share(matching_config: MatchingConfig) -> None:
+    """A ``weight_multiplier=0.5`` on the author halves its share of the mean.
+
+    With title=100 (multiplier 1.0) and author=0 (multiplier 0.5), the
+    effective weights are title_weight and 0.5*author_weight; the author
+    contributes proportionally less to the denominator, so the combined
+    score is pulled toward the title's 100 (relative to the unscaled case).
+    """
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 100.0),
+            _ev("name.author", 0.0, weight_multiplier=0.5),
+        )
+    )
+    cfg = matching_config
+    effective_author = cfg.author_weight * 0.5
+    expected = (cfg.title_weight * 1.0) / (cfg.title_weight + effective_author) * 100.0
+    assert combined.raw == expected
+
+
+def test_weight_multiplier_zero_drops_evidence(matching_config: MatchingConfig) -> None:
+    """An effective weight of zero excludes the Evidence entirely."""
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 100.0),
+            _ev("name.author", 0.0, weight_multiplier=0.0),
+        )
+    )
+    # The author Evidence is dropped, so the mean is title alone -> 100.
     assert combined.raw == 100.0
