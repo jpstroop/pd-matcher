@@ -59,6 +59,9 @@ CCE_FIELDS: dict[str, CceRawAccessor] = {
     "author_name": lambda nypl: _scalar(nypl.author_name),
     "publisher_names": lambda nypl: nypl.publisher_names,
     "claimants": lambda nypl: nypl.claimants,
+    "renewal_author": lambda nypl: _scalar(nypl.renewal_author),
+    "renewal_title": lambda nypl: _scalar(nypl.renewal_title),
+    "renewal_claimants": lambda nypl: _scalar(nypl.renewal_claimants),
 }
 
 

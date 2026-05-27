@@ -35,6 +35,9 @@ def _nypl(
     author_name: str | None = "CCE author",
     publisher_names: tuple[str, ...] = (),
     claimants: tuple[str, ...] = (),
+    renewal_author: str | None = None,
+    renewal_title: str | None = None,
+    renewal_claimants: str | None = None,
 ) -> IndexedNyplRegRecord:
     return IndexedNyplRegRecord(
         uuid="u",
@@ -43,6 +46,9 @@ def _nypl(
         author_name=author_name,
         publisher_names=publisher_names,
         claimants=claimants,
+        renewal_author=renewal_author,
+        renewal_title=renewal_title,
+        renewal_claimants=renewal_claimants,
     )
 
 
@@ -64,6 +70,60 @@ def test_marc_registry_passes_tuple_field_through() -> None:
 def test_cce_registry_passes_tuple_field_through() -> None:
     """A CCE list-valued raw field passes through unchanged."""
     assert CCE_FIELDS["publisher_names"](_nypl(publisher_names=("P1", "P2"))) == ("P1", "P2")
+
+
+def test_cce_registry_exposes_renewal_author() -> None:
+    """``renewal_author`` surfaces :attr:`IndexedNyplRegRecord.renewal_author`."""
+    assert CCE_FIELDS["renewal_author"](_nypl(renewal_author="RA")) == ("RA",)
+    assert CCE_FIELDS["renewal_author"](_nypl(renewal_author=None)) == ()
+
+
+def test_cce_registry_exposes_renewal_title() -> None:
+    """``renewal_title`` surfaces :attr:`IndexedNyplRegRecord.renewal_title`."""
+    assert CCE_FIELDS["renewal_title"](_nypl(renewal_title="RT")) == ("RT",)
+    assert CCE_FIELDS["renewal_title"](_nypl(renewal_title=None)) == ()
+
+
+def test_cce_registry_exposes_renewal_claimants() -> None:
+    """``renewal_claimants`` surfaces the renewal claimants string."""
+    assert CCE_FIELDS["renewal_claimants"](_nypl(renewal_claimants="RC1; RC2")) == ("RC1; RC2",)
+    assert CCE_FIELDS["renewal_claimants"](_nypl(renewal_claimants=None)) == ()
+
+
+def test_compile_renewal_author_pairing_uses_renewal_field() -> None:
+    """A pairing referencing ``renewal_author`` reads the renewal field."""
+    cfg = PairingConfig(
+        marc_fields={"ma": FieldSpec(fields=("main_author",), combine="first")},
+        cce_fields={"ra": FieldSpec(fields=("renewal_author",), combine="first")},
+        pairings=(PairingSpec(group="author", marc="ma", cce="ra"),),
+    )
+    compiled = compile_pairings(cfg)
+    cce_accessor = compiled.author[0].cce_accessor
+    assert cce_accessor(_nypl(renewal_author="Renewal Author")) == "Renewal Author"
+
+
+def test_compile_renewal_title_pairing_uses_renewal_field() -> None:
+    """A pairing referencing ``renewal_title`` reads the renewal field."""
+    cfg = PairingConfig(
+        marc_fields={"tf": FieldSpec(fields=("title",), combine="first")},
+        cce_fields={"rt": FieldSpec(fields=("renewal_title",), combine="first")},
+        pairings=(PairingSpec(group="title", marc="tf", cce="rt"),),
+    )
+    compiled = compile_pairings(cfg)
+    cce_accessor = compiled.title[0].cce_accessor
+    assert cce_accessor(_nypl(renewal_title="Renewal Title")) == "Renewal Title"
+
+
+def test_compile_renewal_claimants_pairing_uses_renewal_field() -> None:
+    """A pairing referencing ``renewal_claimants`` reads the renewal field."""
+    cfg = PairingConfig(
+        marc_fields={"ma": FieldSpec(fields=("main_author",), combine="first")},
+        cce_fields={"rc": FieldSpec(fields=("renewal_claimants",), combine="first")},
+        pairings=(PairingSpec(group="author", marc="ma", cce="rc"),),
+    )
+    compiled = compile_pairings(cfg)
+    cce_accessor = compiled.author[0].cce_accessor
+    assert cce_accessor(_nypl(renewal_claimants="X; Y")) == "X; Y"
 
 
 def test_combine_first_returns_first_non_empty() -> None:

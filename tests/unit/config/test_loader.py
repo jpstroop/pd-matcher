@@ -91,7 +91,7 @@ def test_load_shipped_pairing_defaults() -> None:
         cfg = load_pairing_config(path)
     assert "title_main" in cfg.marc_fields
     assert "publisher_names" in cfg.cce_fields
-    assert len(cfg.pairings) == 8
+    assert len(cfg.pairings) == 11
 
 
 def test_load_pairing_config_raises_on_schema_violation(tmp_path: Path) -> None:
