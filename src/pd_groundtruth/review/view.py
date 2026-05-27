@@ -26,6 +26,7 @@ from pd_groundtruth.review_db import LabeledPairRow
 from pd_groundtruth.review_db import ReviewPairRow
 from pd_matcher.match.signals.translation import any_value_matches
 from pd_matcher.models import MarcRecord
+from pd_matcher.normalize.lccn import canonical as canonical_lccn
 
 _TITLE_TRUNCATE: int = 60
 _ELLIPSIS: str = "…"
@@ -83,6 +84,7 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     marc_extent: str | None
     marc_series_titles: tuple[str, ...]
     marc_lccn: str | None
+    marc_lccn_canonical: str | None
     marc_isbns: tuple[str, ...]
     marc_oclc: str | None
     marc_oclc_url: str | None
@@ -112,6 +114,7 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     cce_copy_date: date | None
     cce_notice_date: date | None
     cce_lccn: str | None
+    cce_lccn_canonical: str | None
     cce_lccn_url: str | None
     cce_prev_regnums: tuple[str, ...]
 
@@ -181,16 +184,16 @@ def _split_prev_regnums(raw: str | None) -> tuple[str, ...]:
     return tuple(part for part in (chunk.strip() for chunk in raw.split(";")) if part)
 
 
-def _lccn_url(lccn: str | None) -> str | None:
-    """Return the public ``lccn.loc.gov`` URL for ``lccn`` or ``None`` when absent.
+def _lccn_url(lccn_canonical: str | None) -> str | None:
+    """Return the public ``lccn.loc.gov`` URL for ``lccn_canonical`` or ``None``.
 
-    The LCCN permalink service accepts both the 8-digit normalized form and
-    the human ``NN-NNNN`` form, so no normalization is required here — the
-    value is interpolated as stored.
+    The permalink service accepts both the 8-digit normalized form and the
+    human ``NN-NNNNNN`` form, but we always interpolate the canonical form so
+    the URL is stable regardless of how the source side stored its LCCN.
     """
-    if not lccn:
+    if not lccn_canonical:
         return None
-    return f"{_LCCN_BASE_URL}{lccn}"
+    return f"{_LCCN_BASE_URL}{lccn_canonical}"
 
 
 _OCLC_PREFIX_RE = re_compile(r"^(?:ocm|ocn|on)(?=\d)", IGNORECASE)
@@ -363,6 +366,7 @@ def build_card(
     button.
     """
     marc: MarcRecord = json_decode(row.marc_json, type=MarcRecord)
+    cce_lccn_canonical = canonical_lccn(row.cce_lccn)
     return ReviewCard(
         pair_id=row.id,
         language=row.language,
@@ -385,6 +389,7 @@ def build_card(
         marc_extent=marc.extent,
         marc_series_titles=marc.series_titles,
         marc_lccn=marc.lccn,
+        marc_lccn_canonical=canonical_lccn(marc.lccn),
         marc_isbns=marc.isbns,
         marc_oclc=marc.oclc,
         marc_oclc_url=_oclc_url(marc.oclc),
@@ -412,7 +417,8 @@ def build_card(
         cce_copy_date=_parse_iso_date(row.cce_copy_date),
         cce_notice_date=_parse_iso_date(row.cce_notice_date),
         cce_lccn=row.cce_lccn,
-        cce_lccn_url=_lccn_url(row.cce_lccn),
+        cce_lccn_canonical=cce_lccn_canonical,
+        cce_lccn_url=_lccn_url(cce_lccn_canonical),
         cce_prev_regnums=_split_prev_regnums(row.cce_prev_regnums),
         cce_renewal_id=row.cce_renewal_id,
         cce_renewal_oreg=row.cce_renewal_oreg,

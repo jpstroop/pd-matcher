@@ -1,10 +1,6 @@
 """Tests for :mod:`pd_matcher.match.scorers.lccn`."""
 
-from hypothesis import given
-from hypothesis import strategies as st
-
 from pd_matcher.match.scorers.context import ScorerContext
-from pd_matcher.match.scorers.lccn import _canonical
 from pd_matcher.match.scorers.lccn import score_lccn
 from pd_matcher.models import IndexedNyplRegRecord
 
@@ -96,21 +92,3 @@ def test_score_lccn_skipped_when_only_slash_present(scorer_context: ScorerContex
     """Input that becomes empty after slash truncation yields skipped."""
     ev = score_lccn("/abc", _record("37013688"), scorer_context)
     assert ev.skipped is True
-
-
-def test_canonical_returns_none_for_none() -> None:
-    """``_canonical(None)`` returns ``None`` without raising."""
-    assert _canonical(None) is None
-
-
-def test_canonical_preserves_long_right_substring() -> None:
-    """A right-of-hyphen substring longer than 6 digits is kept verbatim."""
-    assert _canonical("12-1234567") == "121234567"
-
-
-@given(value=st.text(alphabet=st.characters(min_codepoint=32, max_codepoint=126), max_size=40))
-def test_canonical_is_idempotent(value: str) -> None:
-    """``_canonical`` is idempotent: applying it twice equals applying it once."""
-    once = _canonical(value)
-    twice = _canonical(once)
-    assert twice == once

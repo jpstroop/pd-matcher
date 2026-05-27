@@ -378,19 +378,40 @@ def test_build_card_single_note_round_trips() -> None:
 def test_build_card_projects_lccn_and_builds_lccn_url() -> None:
     card = build_card(_row(_marc(), evidence_json="{}", cce_lccn="28000854"))
     assert card.cce_lccn == "28000854"
+    assert card.cce_lccn_canonical == "28000854"
     assert card.cce_lccn_url == "https://lccn.loc.gov/28000854"
 
 
-def test_build_card_lccn_url_preserves_human_form() -> None:
+def test_build_card_projects_canonical_form_for_hyphenated_cce_lccn() -> None:
     card = build_card(_row(_marc(), evidence_json="{}", cce_lccn="28-854"))
     assert card.cce_lccn == "28-854"
-    assert card.cce_lccn_url == "https://lccn.loc.gov/28-854"
+    assert card.cce_lccn_canonical == "28000854"
+    assert card.cce_lccn_url == "https://lccn.loc.gov/28000854"
 
 
 def test_build_card_lccn_url_none_when_lccn_absent() -> None:
     card = build_card(_row(_marc(), evidence_json="{}"))
     assert card.cce_lccn is None
+    assert card.cce_lccn_canonical is None
     assert card.cce_lccn_url is None
+
+
+def test_build_card_projects_canonical_marc_lccn_equal_to_raw_when_already_canonical() -> None:
+    card = build_card(_row(_marc(lccn="53001234"), evidence_json="{}"))
+    assert card.marc_lccn == "53001234"
+    assert card.marc_lccn_canonical == "53001234"
+
+
+def test_build_card_projects_canonical_marc_lccn_normalises_hyphenated_form() -> None:
+    card = build_card(_row(_marc(lccn="53-1234"), evidence_json="{}"))
+    assert card.marc_lccn == "53-1234"
+    assert card.marc_lccn_canonical == "53001234"
+
+
+def test_build_card_projects_marc_lccn_canonical_none_when_absent() -> None:
+    card = build_card(_row(_marc(lccn=None), evidence_json="{}"))
+    assert card.marc_lccn is None
+    assert card.marc_lccn_canonical is None
 
 
 def test_build_card_projects_prev_regnums_in_order() -> None:

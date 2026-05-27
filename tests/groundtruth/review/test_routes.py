@@ -42,6 +42,7 @@ def _pair(
     oclc: str | None = "0001",
     isbns: tuple[str, ...] = ("9780000000000",),
     cce_desc: str = "vi, 200 p.",
+    cce_lccn: str | None = "28000854",
 ) -> PairInsert:
     marc = MarcRecord(
         control_id=control_id,
@@ -94,7 +95,7 @@ def _pair(
         cce_new_matter_claimed="added chapter 5",
         cce_copy_date="1953-04-01",
         cce_notice_date="1953-04-02",
-        cce_lccn="28000854",
+        cce_lccn=cce_lccn,
         cce_prev_regnums="A100000; A200000",
         cce_renewal_id=renewal_id,
         cce_renewal_oreg=renewal_oreg,
@@ -216,6 +217,23 @@ def empty_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
     db_path = tmp_path / "review.db"
     with ReviewDb.connect(db_path):
         pass
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
+def hyphenated_lccn_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="hyp-1",
+                nypl_uuid="u-hyp-1",
+                cce_lccn="37-13688",
+            )
+        )
     app = create_app(db_path, vault_path)
     with TestClient(app) as test_client:
         yield test_client
@@ -820,6 +838,16 @@ def test_card_renders_lccn_as_lccn_loc_gov_link(client: TestClient) -> None:
     assert response.status_code == 200
     assert 'href="https://lccn.loc.gov/28000854"' in response.text
     assert ">28000854<" in response.text
+
+
+def test_card_renders_hyphenated_cce_lccn_with_canonical_primary_and_raw_parenthetical(
+    hyphenated_lccn_client: TestClient,
+) -> None:
+    response = hyphenated_lccn_client.get("/")
+    assert response.status_code == 200
+    assert 'href="https://lccn.loc.gov/37013688"' in response.text
+    assert ">37013688</a>" in response.text
+    assert "<small>(37-13688)</small>" in response.text
 
 
 def test_card_renders_prev_regnums_row(client: TestClient) -> None:
