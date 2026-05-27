@@ -1,73 +1,73 @@
 """Tests for :mod:`pd_matcher.match.scorers.extent`."""
 
 from pd_matcher.match.scorers.context import ScorerContext
-from pd_matcher.match.scorers.extent import _extract_page_count
+from pd_matcher.match.scorers.extent import extract_page_count
 from pd_matcher.match.scorers.extent import score_extent
 
 
-def test_extract_page_count_handles_marc_300a_plain() -> None:
+def testextract_page_count_handles_marc_300a_plain() -> None:
     """A plain ``"312 p."`` extracts 312."""
-    assert _extract_page_count("312 p.") == 312
+    assert extract_page_count("312 p.") == 312
 
 
-def test_extract_page_count_strips_roman_front_matter() -> None:
+def testextract_page_count_strips_roman_front_matter() -> None:
     """Roman-numeral front matter is stripped before integer extraction."""
-    assert _extract_page_count("xii, 312 p.") == 312
+    assert extract_page_count("xii, 312 p.") == 312
 
 
-def test_extract_page_count_handles_bracketed_pages() -> None:
+def testextract_page_count_handles_bracketed_pages() -> None:
     """``"[8], 312 p."`` extracts 312 (the largest count after stripping)."""
-    assert _extract_page_count("[8], 312 p.") == 312
+    assert extract_page_count("[8], 312 p.") == 312
 
 
-def test_extract_page_count_handles_long_word_form() -> None:
+def testextract_page_count_handles_long_word_form() -> None:
     """``"312 pages"`` extracts 312."""
-    assert _extract_page_count("312 pages") == 312
+    assert extract_page_count("312 pages") == 312
 
 
-def test_extract_page_count_takes_largest_for_multivolume_paren() -> None:
+def testextract_page_count_takes_largest_for_multivolume_paren() -> None:
     """``"1 v. (312 p.)"`` picks 312 over the leading volume count."""
-    assert _extract_page_count("1 v. (312 p.)") == 312
+    assert extract_page_count("1 v. (312 p.)") == 312
 
 
-def test_extract_page_count_skips_loose_leaf_extents() -> None:
+def testextract_page_count_skips_loose_leaf_extents() -> None:
     """``"v. (loose-leaf)"`` has no integer and yields ``None``."""
-    assert _extract_page_count("v. (loose-leaf)") is None
+    assert extract_page_count("v. (loose-leaf)") is None
 
 
-def test_extract_page_count_skips_unpaged_extents() -> None:
+def testextract_page_count_skips_unpaged_extents() -> None:
     """``"unpaged"`` has no integer and yields ``None``."""
-    assert _extract_page_count("unpaged") is None
+    assert extract_page_count("unpaged") is None
 
 
-def test_extract_page_count_handles_cce_prefix_form() -> None:
+def testextract_page_count_handles_cce_prefix_form() -> None:
     """``"p. 312"`` (CCE prefix form) extracts 312."""
-    assert _extract_page_count("p. 312") == 312
+    assert extract_page_count("p. 312") == 312
 
 
-def test_extract_page_count_skips_cce_cm_only() -> None:
+def testextract_page_count_skips_cce_cm_only() -> None:
     """``"p. cm."`` has no integer and yields ``None``."""
-    assert _extract_page_count("p. cm.") is None
+    assert extract_page_count("p. cm.") is None
 
 
-def test_extract_page_count_handles_illustrations_suffix() -> None:
+def testextract_page_count_handles_illustrations_suffix() -> None:
     """``"312 p. illus."`` extracts 312."""
-    assert _extract_page_count("312 p. illus.") == 312
+    assert extract_page_count("312 p. illus.") == 312
 
 
-def test_extract_page_count_returns_none_for_empty() -> None:
+def testextract_page_count_returns_none_for_empty() -> None:
     """An empty string yields ``None``."""
-    assert _extract_page_count("") is None
+    assert extract_page_count("") is None
 
 
-def test_extract_page_count_returns_none_for_none() -> None:
+def testextract_page_count_returns_none_for_none() -> None:
     """``None`` input yields ``None``."""
-    assert _extract_page_count(None) is None
+    assert extract_page_count(None) is None
 
 
-def test_extract_page_count_returns_none_when_only_zero() -> None:
+def testextract_page_count_returns_none_when_only_zero() -> None:
     """``"0 p."`` has no positive integer and yields ``None``."""
-    assert _extract_page_count("0 p.") is None
+    assert extract_page_count("0 p.") is None
 
 
 def test_score_extent_zero_delta_is_max(scorer_context: ScorerContext) -> None:

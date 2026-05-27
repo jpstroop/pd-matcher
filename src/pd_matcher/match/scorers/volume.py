@@ -10,10 +10,21 @@ describes a single-volume edition) need a dedicated signal.
 The scorer classifies each side as one of:
 
 * ``whole`` — one record describes an entire multi-volume set or a
-  collected/complete edition. MARC indicators: extent like ``"5 v."``,
-  ``"v. 1-3"``, ``"3 v. in 1"``; title containing ``"collected"``,
-  ``"complete"``, ``"selected"``. CCE indicators: same patterns on
-  ``desc``, plus the same title cues.
+  collected/complete edition with a known volume count. MARC indicators:
+  extent like ``"5 v."``, ``"v. 1-3"``, ``"3 v. in 1"``; title
+  containing ``"collected"``, ``"complete"``, ``"selected"``. CCE
+  indicators: same patterns on ``desc``, plus the same title cues.
+* ``whole_open`` — a MARC record cataloged at the series level as an
+  open/ongoing multipart monograph. AACR2 codes this with bare
+  ``300 ‡a v.`` (no number, no count) — the period gets stripped at
+  parse time so we see ``"v"`` in :attr:`MarcRecord.extent`. RDA codes
+  the same shape as ``300 ‡a volumes``. The open-date convention
+  ``260/264 ‡c [1945-]`` (square brackets = cataloger-supplied date,
+  trailing hyphen = ongoing publication) is the second signal. Either
+  cue is sufficient. Such a record describes the abstract serial
+  entity rather than any particular piece, so it is essentially never
+  the correct linkage target for a CCE registration (which is always
+  for one specific volume).
 * ``part`` — one record describes a single part/volume of a larger
   work. MARC indicators: ``title_part_number`` populated, or title
   starting with ``"vol."``/``"pt."``. CCE indicators: ``desc``
@@ -23,12 +34,16 @@ The scorer classifies each side as one of:
 
 Score:
 
-* 100.0 when both sides agree (``whole↔whole`` or both ``part`` with
-  the same part number).
+* 100.0 when both sides agree (``whole↔whole``, ``whole_open↔whole``,
+  ``whole_open↔whole_open``, or both ``part`` with the same part number).
 * 25.0 when both sides agree on ``part`` but the part numbers differ
   (``Vol. 1`` vs. ``Vol. 2``).
-* 0.0 (soft penalty) when one side is ``whole`` and the other ``part``.
-* ``skipped=True`` when either side is ``unknown``.
+* 0.0 (soft penalty) when one side is ``whole`` and the other ``part``;
+  also ``whole_open ↔ part`` and ``whole_open ↔ unknown`` when the CCE
+  ``desc`` parses to a concrete page count (single-volume registration).
+* ``skipped=True`` when either side is ``unknown`` and no cross-reference
+  fires; ``whole_open ↔ unknown`` skips when the CCE ``desc`` is not a
+  parseable page-count statement (no useful signal either way).
 
 The penalty is soft on purpose: the matching architecture treats every
 scorer as a downweighted feature, no hard rejects. A calibrator can
@@ -40,6 +55,7 @@ from re import compile as re_compile
 
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.scorers.context import ScorerContext
+from pd_matcher.match.scorers.extent import extract_page_count
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 
@@ -50,13 +66,17 @@ _PART_NUMBER_RE = re_compile(
     r"\b(?:v(?:ol)?|pt|bk|book)\.?\s*([ivxlcdm]+|\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b",
     IGNORECASE,
 )
-_WHOLE_VOLUME_COUNT_RE = re_compile(r"\b(\d+)\s*v(?:ol)?s?\.?\b", IGNORECASE)
+_WHOLE_VOLUME_COUNT_RE = re_compile(
+    r"\b(\d+)\s*(?:v(?:ol(?:ume)?)?s?)\.?\b",
+    IGNORECASE,
+)
 _VOLUME_RANGE_RE = re_compile(r"\bv(?:ol)?\.?\s*\d+\s*-\s*\d+\b", IGNORECASE)
 _MULTIVOLUME_IN_ONE_RE = re_compile(r"\b\d+\s*v\.?\s*in\s*\d+\b", IGNORECASE)
 _COLLECTED_TITLE_RE = re_compile(
     r"\b(collected|complete|selected)\s+(works|writings|poems|essays|letters)\b",
     IGNORECASE,
 )
+_OPEN_DATE_RE = re_compile(r"\[\d{4}-(?!\d)")
 
 _PART_KIND_CANONICAL = {
     "v": "v",
@@ -115,16 +135,41 @@ def _is_collected_title(value: str | None) -> bool:
     return _COLLECTED_TITLE_RE.search(value) is not None
 
 
+def _is_bare_volume_extent(value: str | None) -> bool:
+    """Return ``True`` for the AACR2 bare ``"v"`` / RDA bare ``"volumes"`` extent.
+
+    The MARC parser strips the trailing period from ``"v."`` so the
+    open-multipart sentinel arrives here as bare ``"v"``. RDA records
+    spell out ``"volumes"`` instead. Match exactly (case-insensitive)
+    so genuine part statements like ``"v. 1"`` or ``"3 volumes"`` don't
+    get swept in.
+    """
+    if not value:
+        return False
+    lowered = value.strip().lower()
+    return lowered == "v" or lowered == "volumes"
+
+
+def _is_open_publication_date(value: str | None) -> bool:
+    """Return ``True`` when ``value`` is a ``[YYYY-]`` open-date string."""
+    if not value:
+        return False
+    return _OPEN_DATE_RE.search(value) is not None
+
+
 class _Cardinality:
     """Sentinel kind labels — kept here to avoid leaking into the public API."""
 
     WHOLE = "whole"
+    WHOLE_OPEN = "whole_open"
     PART = "part"
     UNKNOWN = "unknown"
 
 
 def _classify_marc(marc: MarcRecord) -> tuple[str, str | None]:
     """Return ``(cardinality, part_number)`` for the MARC side."""
+    if _is_bare_volume_extent(marc.extent) or _is_open_publication_date(marc.publication_date_raw):
+        return _Cardinality.WHOLE_OPEN, None
     if _is_multivolume_whole(marc.extent) or _is_collected_title(marc.title):
         return _Cardinality.WHOLE, None
     if marc.title_part_number:
@@ -145,6 +190,63 @@ def _classify_cce(cce: IndexedNyplRegRecord) -> tuple[str, str | None]:
     return _Cardinality.UNKNOWN, None
 
 
+def _build_features(
+    marc_kind: str,
+    cce_kind: str,
+) -> tuple[tuple[str, float], ...]:
+    """Project per-side classification onto the Evidence feature tuple."""
+    return (
+        ("marc_is_whole", 1.0 if marc_kind == _Cardinality.WHOLE else 0.0),
+        ("marc_is_whole_open", 1.0 if marc_kind == _Cardinality.WHOLE_OPEN else 0.0),
+        ("marc_is_part", 1.0 if marc_kind == _Cardinality.PART else 0.0),
+        ("cce_is_whole", 1.0 if cce_kind == _Cardinality.WHOLE else 0.0),
+        ("cce_is_part", 1.0 if cce_kind == _Cardinality.PART else 0.0),
+    )
+
+
+def _score_whole_open(
+    cce_kind: str,
+    cce: IndexedNyplRegRecord,
+    features: tuple[tuple[str, float], ...],
+) -> Evidence:
+    """Return Evidence for a MARC-side ``whole_open`` classification."""
+    if cce_kind == _Cardinality.PART:
+        return Evidence(
+            scorer=_SCORER_NAME,
+            score=0.0,
+            max=_MAX_SCORE,
+            skipped=False,
+            decisive=False,
+            features=features,
+        )
+    if cce_kind in (_Cardinality.WHOLE, _Cardinality.WHOLE_OPEN):
+        return Evidence(
+            scorer=_SCORER_NAME,
+            score=_MAX_SCORE,
+            max=_MAX_SCORE,
+            skipped=False,
+            decisive=False,
+            features=features,
+        )
+    if extract_page_count(cce.desc) is not None:
+        return Evidence(
+            scorer=_SCORER_NAME,
+            score=0.0,
+            max=_MAX_SCORE,
+            skipped=False,
+            decisive=False,
+            features=features,
+        )
+    return Evidence(
+        scorer=_SCORER_NAME,
+        score=0.0,
+        max=_MAX_SCORE,
+        skipped=True,
+        decisive=False,
+        features=features,
+    )
+
+
 def score_volume(
     marc: MarcRecord,
     cce: IndexedNyplRegRecord,
@@ -154,12 +256,9 @@ def score_volume(
     del ctx
     marc_kind, marc_part = _classify_marc(marc)
     cce_kind, cce_part = _classify_cce(cce)
-    features: tuple[tuple[str, float], ...] = (
-        ("marc_is_whole", 1.0 if marc_kind == _Cardinality.WHOLE else 0.0),
-        ("marc_is_part", 1.0 if marc_kind == _Cardinality.PART else 0.0),
-        ("cce_is_whole", 1.0 if cce_kind == _Cardinality.WHOLE else 0.0),
-        ("cce_is_part", 1.0 if cce_kind == _Cardinality.PART else 0.0),
-    )
+    features = _build_features(marc_kind, cce_kind)
+    if marc_kind == _Cardinality.WHOLE_OPEN:
+        return _score_whole_open(cce_kind, cce, features)
     if marc_kind == _Cardinality.UNKNOWN or cce_kind == _Cardinality.UNKNOWN:
         return Evidence(
             scorer=_SCORER_NAME,

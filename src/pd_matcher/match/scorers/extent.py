@@ -40,7 +40,7 @@ _ROMAN_PREFIX_RE = re_compile(r"^\s*(?:\[[^\]]*\]\s*,?\s*)?[ivxlcdm]+\s*,\s*", I
 _INTEGER_RE = re_compile(r"\d+")
 
 
-def _extract_page_count(value: str | None) -> int | None:
+def extract_page_count(value: str | None) -> int | None:
     """Return the largest plain integer in ``value`` after stripping romans.
 
     Returns ``None`` when ``value`` is empty, has no digits, or has
@@ -65,8 +65,8 @@ def score_extent(
 ) -> Evidence:
     """Return :class:`Evidence` for a (MARC extent, CCE desc) pair."""
     del ctx
-    marc_pages = _extract_page_count(marc_extent)
-    cce_pages = _extract_page_count(cce_desc)
+    marc_pages = extract_page_count(marc_extent)
+    cce_pages = extract_page_count(cce_desc)
     if marc_pages is None or cce_pages is None:
         return Evidence(
             scorer=_SCORER_NAME,
@@ -99,5 +99,6 @@ def score_extent(
 
 
 __all__ = [
+    "extract_page_count",
     "score_extent",
 ]
