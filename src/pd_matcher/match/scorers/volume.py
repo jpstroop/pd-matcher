@@ -56,6 +56,7 @@ from re import compile as re_compile
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.scorers.context import ScorerContext
 from pd_matcher.match.scorers.extent import extract_page_count
+from pd_matcher.match.signals.multipart import is_series_level
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 
@@ -76,7 +77,6 @@ _COLLECTED_TITLE_RE = re_compile(
     r"\b(collected|complete|selected)\s+(works|writings|poems|essays|letters)\b",
     IGNORECASE,
 )
-_OPEN_DATE_RE = re_compile(r"\[\d{4}-(?!\d)")
 
 _PART_KIND_CANONICAL = {
     "v": "v",
@@ -135,28 +135,6 @@ def _is_collected_title(value: str | None) -> bool:
     return _COLLECTED_TITLE_RE.search(value) is not None
 
 
-def _is_bare_volume_extent(value: str | None) -> bool:
-    """Return ``True`` for the AACR2 bare ``"v"`` / RDA bare ``"volumes"`` extent.
-
-    The MARC parser strips the trailing period from ``"v."`` so the
-    open-multipart sentinel arrives here as bare ``"v"``. RDA records
-    spell out ``"volumes"`` instead. Match exactly (case-insensitive)
-    so genuine part statements like ``"v. 1"`` or ``"3 volumes"`` don't
-    get swept in.
-    """
-    if not value:
-        return False
-    lowered = value.strip().lower()
-    return lowered == "v" or lowered == "volumes"
-
-
-def _is_open_publication_date(value: str | None) -> bool:
-    """Return ``True`` when ``value`` is a ``[YYYY-]`` open-date string."""
-    if not value:
-        return False
-    return _OPEN_DATE_RE.search(value) is not None
-
-
 class _Cardinality:
     """Sentinel kind labels — kept here to avoid leaking into the public API."""
 
@@ -168,7 +146,7 @@ class _Cardinality:
 
 def _classify_marc(marc: MarcRecord) -> tuple[str, str | None]:
     """Return ``(cardinality, part_number)`` for the MARC side."""
-    if _is_bare_volume_extent(marc.extent) or _is_open_publication_date(marc.publication_date_raw):
+    if is_series_level(marc):
         return _Cardinality.WHOLE_OPEN, None
     if _is_multivolume_whole(marc.extent) or _is_collected_title(marc.title):
         return _Cardinality.WHOLE, None

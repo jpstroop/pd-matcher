@@ -267,6 +267,34 @@ def test_build_card_online_resource_match_is_case_insensitive() -> None:
         assert card.marc_is_online_resource is True, extent
 
 
+def test_build_card_flags_series_level_for_bare_v_extent() -> None:
+    """``marc_is_series_level`` fires when the MARC extent is the AACR2 bare ``"v"``."""
+    marc = _marc(extent="v")
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_is_series_level is True
+
+
+def test_build_card_flags_series_level_for_open_publication_date() -> None:
+    """``marc_is_series_level`` fires when the MARC date matches ``[YYYY-]``."""
+    marc = _marc(publication_date_raw="[1945-]")
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_is_series_level is True
+
+
+def test_build_card_does_not_flag_series_level_for_closed_monograph() -> None:
+    """A closed monograph (no bare-v, no open-date) yields ``False``."""
+    marc = _marc(extent="xxiv, 841 p.", publication_date_raw="1953")
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_is_series_level is False
+
+
+def test_build_card_does_not_flag_series_level_for_specific_volume_marker() -> None:
+    """``"v. 1"`` is a part marker and must not fire the series-level signal."""
+    marc = _marc(extent="v. 1")
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_is_series_level is False
+
+
 def test_build_card_flags_translation_from_desc() -> None:
     """``cce_is_translation`` fires when the CCE desc carries a translation cue."""
     card = build_card(_row(_marc(), evidence_json="{}", cce_desc="312 p. tr. from the French"))

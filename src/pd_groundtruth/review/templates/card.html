@@ -54,6 +54,7 @@
       <div class="field"><div class="k">title</div><div class="v title">{{ card.marc_title }}</div></div>
       {% if card.marc_title_part_number or card.marc_title_part_name %}<div class="field"><div class="k">title parts</div><div class="v"><small>{% if card.marc_title_part_number and card.marc_title_part_name %}{{ card.marc_title_part_number }}: {{ card.marc_title_part_name }}{% elif card.marc_title_part_number %}{{ card.marc_title_part_number }}{% else %}{{ card.marc_title_part_name }}{% endif %}</small></div></div>{% endif %}
       {% if card.marc_is_online_resource %}<div class="field"><span class="badge-ebook">E-book reprint</span></div>{% endif %}
+      {% if card.marc_is_series_level %}<div class="field"><span class="badge-series">Open multipart set</span></div>{% endif %}
       {% if card.marc_statement_of_responsibility %}<div class="field"><div class="k">statement of responsibility</div><div class="v">{{ card.marc_statement_of_responsibility }}</div></div>{% endif %}
       {% if card.marc_main_author %}<div class="field"><div class="k">main author</div><div class="v">{{ card.marc_main_author }}</div></div>{% endif %}
       {% if card.marc_added_authors %}<div class="field"><div class="k">added authors</div><div class="v">{{ card.marc_added_authors | join("; ") }}</div></div>{% endif %}

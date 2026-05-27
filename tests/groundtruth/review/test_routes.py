@@ -154,6 +154,23 @@ def ebook_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
 
 
 @fixture
+def series_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="eng-series-1",
+                nypl_uuid="u-eng-series-1",
+                extent="v",
+            )
+        )
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
 def translation_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
     db_path = tmp_path / "review.db"
     with ReviewDb.connect(db_path) as db:
@@ -471,6 +488,19 @@ def test_ebook_badge_absent_for_physical_pairs(client: TestClient) -> None:
     assert response.status_code == 200
     assert "E-book reprint" not in response.text
     assert '<span class="badge-ebook">' not in response.text
+
+
+def test_series_badge_renders_for_bare_v_extent(series_client: TestClient) -> None:
+    response = series_client.get("/")
+    assert response.status_code == 200
+    assert '<span class="badge-series">Open multipart set</span>' in response.text
+
+
+def test_series_badge_absent_for_closed_monograph_pairs(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Open multipart set" not in response.text
+    assert '<span class="badge-series">' not in response.text
 
 
 def test_translation_badge_renders_when_cue_present(translation_client: TestClient) -> None:

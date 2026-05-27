@@ -24,6 +24,7 @@ from pd_groundtruth.review.relative_time import format_relative
 from pd_groundtruth.review_db import CurrentLabelRow
 from pd_groundtruth.review_db import LabeledPairRow
 from pd_groundtruth.review_db import ReviewPairRow
+from pd_matcher.match.signals.multipart import is_series_level
 from pd_matcher.match.signals.translation import any_value_matches
 from pd_matcher.models import MarcRecord
 from pd_matcher.normalize.lccn import canonical as canonical_lccn
@@ -92,6 +93,7 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     marc_language_code: str | None
     marc_country_code: str | None
     marc_is_online_resource: bool
+    marc_is_series_level: bool
 
     cce_title: str | None
     cce_author: str | None
@@ -397,6 +399,7 @@ def build_card(
         marc_language_code=marc.language_code,
         marc_country_code=marc.country_code,
         marc_is_online_resource=_is_online_resource(marc.extent),
+        marc_is_series_level=is_series_level(marc),
         cce_title=row.cce_title,
         cce_author=row.cce_author,
         cce_publishers=row.cce_publishers,
