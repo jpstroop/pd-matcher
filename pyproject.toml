@@ -53,7 +53,7 @@ lint-fix = "ruff check --fix src tests"
 typecheck = "mypy src tests"
 test = "pytest"
 webui = "pytest -m webui -o addopts= --no-header"
-regression = "pytest -m regression --no-cov tests/regression"
+regression = "pytest -s -m regression --no-cov tests/regression"
 regression-baseline = "python tests/regression/update_baseline.py"
 gates = {composite = ["fmt", "lint", "typecheck", "test"]}
 
