@@ -58,3 +58,4 @@ pairings:
   - {group: author,    marc: main_author, cce: renewal_claimants}
   - {group: publisher, marc: publisher,   cce: publisher_names}
   - {group: publisher, marc: publisher,   cce: author_name}
+  - {group: publisher, marc: publisher,   cce: claimants}

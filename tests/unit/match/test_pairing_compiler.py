@@ -114,6 +114,18 @@ def test_compile_renewal_title_pairing_uses_renewal_field() -> None:
     assert cce_accessor(_nypl(renewal_title="Renewal Title")) == "Renewal Title"
 
 
+def test_compile_publisher_claimants_pairing_reads_claimants() -> None:
+    """A ``publisher`` pairing referencing ``claimants`` reads the claimants list."""
+    cfg = PairingConfig(
+        marc_fields={"pub": FieldSpec(fields=("publisher",), combine="first")},
+        cce_fields={"cl": FieldSpec(fields=("claimants",), combine="join")},
+        pairings=(PairingSpec(group="publisher", marc="pub", cce="cl"),),
+    )
+    compiled = compile_pairings(cfg)
+    cce_accessor = compiled.publisher[0].cce_accessor
+    assert cce_accessor(_nypl(claimants=("Acme Co", "Sons"))) == "Acme Co Sons"
+
+
 def test_compile_renewal_claimants_pairing_uses_renewal_field() -> None:
     """A pairing referencing ``renewal_claimants`` reads the renewal field."""
     cfg = PairingConfig(
