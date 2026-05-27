@@ -32,6 +32,7 @@ from pd_matcher.match.result import CandidateMatch
 from pd_matcher.match.result import MatchResult
 from pd_matcher.match.scorers.context import ScorerContext
 from pd_matcher.match.scorers.edition import score_edition
+from pd_matcher.match.scorers.extent import score_extent
 from pd_matcher.match.scorers.isbn import score_isbn
 from pd_matcher.match.scorers.lccn import score_lccn
 from pd_matcher.match.scorers.name import score_author
@@ -136,6 +137,8 @@ def _score_candidate(
     winning.append(score_year(marc.publication_year, candidate.reg_year, ctx))
     sources.append(_FIXED_SOURCE)
     winning.append(score_edition(marc.edition, candidate.edition, ctx))
+    sources.append(_FIXED_SOURCE)
+    winning.append(score_extent(marc.extent, candidate.desc, ctx))
     sources.append(_FIXED_SOURCE)
 
     combined = combiner.combine(tuple(winning))

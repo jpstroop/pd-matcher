@@ -37,6 +37,7 @@ class WeightedMeanCombiner(Struct, frozen=True, forbid_unknown_fields=True):
             "edition.compat": cfg.edition_weight,
             "lccn.exact": cfg.lccn_weight,
             "isbn.exact": cfg.isbn_weight,
+            "extent.page_count": cfg.extent_weight,
         }
 
     def combine(self, evidence: Sequence[Evidence]) -> CombinedScore:

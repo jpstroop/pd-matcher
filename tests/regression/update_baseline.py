@@ -55,6 +55,7 @@ def main() -> None:
         edition_weight=base_matching.edition_weight,
         lccn_weight=base_matching.lccn_weight,
         isbn_weight=base_matching.isbn_weight,
+        extent_weight=base_matching.extent_weight,
         year_window=_YEAR_WINDOW,
         min_combined_score=base_matching.min_combined_score,
         scorer=base_matching.scorer,

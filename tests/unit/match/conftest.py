@@ -47,6 +47,7 @@ def matching_config() -> MatchingConfig:
         edition_weight=0.05,
         lccn_weight=0.10,
         isbn_weight=0.05,
+        extent_weight=0.0,
         year_window=2,
         min_combined_score=70.0,
         scorer="weighted_mean",
