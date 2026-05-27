@@ -498,6 +498,7 @@ def match(
             lccn_weight=matching_config.lccn_weight,
             isbn_weight=matching_config.isbn_weight,
             extent_weight=matching_config.extent_weight,
+            volume_weight=matching_config.volume_weight,
             year_window=year_window if year_window is not None else matching_config.year_window,
             min_combined_score=(
                 min_score if min_score is not None else matching_config.min_combined_score
@@ -598,6 +599,7 @@ def eval_(
             lccn_weight=matching_config.lccn_weight,
             isbn_weight=matching_config.isbn_weight,
             extent_weight=matching_config.extent_weight,
+            volume_weight=matching_config.volume_weight,
             year_window=year_window,
             min_combined_score=matching_config.min_combined_score,
             scorer=matching_config.scorer,

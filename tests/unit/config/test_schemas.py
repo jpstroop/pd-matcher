@@ -22,6 +22,7 @@ def _valid_matching() -> dict[str, object]:
         "lccn_weight": 0.10,
         "isbn_weight": 0.05,
         "extent_weight": 0.0,
+        "volume_weight": 0.0,
         "year_window": 2,
         "min_combined_score": 70.0,
         "scorer": "weighted_mean",

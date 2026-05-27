@@ -17,7 +17,7 @@ def test_load_shipped_matching_defaults() -> None:
     resource = files("pd_matcher.config.defaults") / "matching.yaml"
     with as_file(resource) as path:
         cfg = load_matching_config(path)
-    assert cfg.title_weight == 0.40
+    assert cfg.title_weight == 0.35
     assert cfg.author_weight == 0.20
     assert cfg.publisher_weight == 0.10
     assert cfg.year_weight == 0.10
@@ -25,6 +25,7 @@ def test_load_shipped_matching_defaults() -> None:
     assert cfg.lccn_weight == 0.10
     assert cfg.isbn_weight == 0.00
     assert cfg.extent_weight == 0.05
+    assert cfg.volume_weight == 0.05
     assert cfg.year_window == 0
     assert cfg.min_combined_score == 70.0
     assert cfg.scorer == "weighted_mean"

@@ -44,6 +44,7 @@ def test_eval_meets_regression_baseline() -> None:
         lccn_weight=base_matching.lccn_weight,
         isbn_weight=base_matching.isbn_weight,
         extent_weight=base_matching.extent_weight,
+        volume_weight=base_matching.volume_weight,
         year_window=baseline.params.year_window,
         min_combined_score=base_matching.min_combined_score,
         scorer=base_matching.scorer,

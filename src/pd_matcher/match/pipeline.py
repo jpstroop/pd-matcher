@@ -38,6 +38,7 @@ from pd_matcher.match.scorers.lccn import score_lccn
 from pd_matcher.match.scorers.name import score_author
 from pd_matcher.match.scorers.name import score_publisher
 from pd_matcher.match.scorers.title import score_title
+from pd_matcher.match.scorers.volume import score_volume
 from pd_matcher.match.scorers.year import score_year
 from pd_matcher.match.signals.translation import is_translation_signal
 from pd_matcher.models import IndexedNyplRegRecord
@@ -160,6 +161,8 @@ def _score_candidate(
     winning.append(score_edition(marc.edition, candidate.edition, ctx))
     sources.append(_FIXED_SOURCE)
     winning.append(score_extent(marc.extent, candidate.desc, ctx))
+    sources.append(_FIXED_SOURCE)
+    winning.append(score_volume(marc, candidate, ctx))
     sources.append(_FIXED_SOURCE)
 
     combined = combiner.combine(tuple(winning))

@@ -55,6 +55,7 @@ def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
         lccn_weight=0.10,
         isbn_weight=0.05,
         extent_weight=0.0,
+        volume_weight=0.0,
         year_window=2,
         min_combined_score=30.0,
         scorer="weighted_mean",

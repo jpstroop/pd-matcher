@@ -48,6 +48,7 @@ def _config(*, min_score: float = 30.0) -> MatchingConfig:
         lccn_weight=0.10,
         isbn_weight=0.05,
         extent_weight=0.0,
+        volume_weight=0.0,
         year_window=2,
         min_combined_score=min_score,
         scorer="weighted_mean",
