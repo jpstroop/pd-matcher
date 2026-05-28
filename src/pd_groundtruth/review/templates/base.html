@@ -17,11 +17,18 @@
     header .tally { color: var(--muted); font-size: .9rem; }
     header a { color: var(--accent); text-decoration: none; }
     main { max-width: 980px; margin: 1.4rem auto; padding: 0 1.2rem; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-    .panel { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; }
+    .comparison-grid { display: grid; grid-template-columns: 1fr 1fr;
+                        grid-template-rows: auto repeat(9, auto); gap: 0 1rem; }
+    .panel { background: #fff; border: 1px solid var(--line); border-radius: 10px;
+             padding: 1rem 1.2rem; }
+    .comparison-grid > .panel { display: grid; grid-template-rows: subgrid;
+                                 grid-row: 1 / -1; align-content: start; }
     .panel h2 { margin: 0 0 .6rem; font-size: .8rem; letter-spacing: .08em;
                 text-transform: uppercase; color: var(--muted); }
+    .comparison-grid > .panel > .row { min-height: 0; }
     .field { margin: .35rem 0; }
+    .comparison-grid > .panel > .row > .field:first-child { margin-top: 0; }
+    .comparison-grid > .panel > .row > .field:last-child { margin-bottom: 0; }
     .field .k { color: var(--muted); font-size: .78rem; }
     .field .v { font-size: .98rem; }
     .v.title { font-weight: 600; font-size: 1.1rem; }
