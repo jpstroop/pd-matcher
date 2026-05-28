@@ -117,10 +117,13 @@
     <h2>Evidence (per-scorer normalized)</h2>
     {% if card.evidence %}
       {% for ev in card.evidence %}
-      <div class="ev-row">
-        <span>{{ ev.scorer }}</span>
-        <span class="ev-bar"><span class="ev-fill" style="width: {{ (ev.normalized * 100) | round(1) }}%"></span></span>
-        <span class="ev-score">{{ "%.2f"|format(ev.normalized) }}{% if ev.source %} <span class="ev-source">(via {{ ev.source }})</span>{% endif %}</span>
+      <div class="ev-entry">
+        <div class="ev-row">
+          <span>{{ ev.scorer }}</span>
+          <span class="ev-bar"><span class="ev-fill" style="width: {{ (ev.normalized * 100) | round(1) }}%"></span></span>
+          <span class="ev-score">{{ "%.2f"|format(ev.normalized) }}</span>
+        </div>
+        {% if ev.source %}<div class="ev-source-row"><span class="ev-source">via {{ ev.source }}</span></div>{% endif %}
       </div>
       {% endfor %}
     {% else %}

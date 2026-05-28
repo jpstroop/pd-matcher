@@ -964,16 +964,17 @@ def test_card_renders_evidence_source_breadcrumb_when_present(
 ) -> None:
     response = evidence_source_client.get("/")
     assert response.status_code == 200
-    assert "(via title_main ↔ title)" in response.text
-    assert "(via main_author ↔ author_name)" in response.text
+    assert "via title_main ↔ title" in response.text
+    assert "via main_author ↔ author_name" in response.text
     assert 'class="ev-source"' in response.text
+    assert 'class="ev-source-row"' in response.text
 
 
 def test_card_omits_evidence_source_breadcrumb_when_absent(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
-    assert "(via " not in response.text
     assert 'class="ev-source"' not in response.text
+    assert 'class="ev-source-row"' not in response.text
 
 
 def test_pair_route_pre_fills_note_textarea_from_current_label(client: TestClient) -> None:
