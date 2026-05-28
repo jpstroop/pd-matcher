@@ -1,5 +1,27 @@
 {% extends "base.html" %}
 {% block content %}
+<form class="filters-bar" method="get" action="/">
+  <label>
+    <span>language</span>
+    <select name="language">
+      <option value="">any</option>
+      {% for choice in language_choices %}
+      <option value="{{ choice }}"{% if filters.language == choice %} selected{% endif %}>{{ choice }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    <span>band</span>
+    <select name="band">
+      <option value="">any</option>
+      {% for choice in band_choices %}
+      <option value="{{ choice }}"{% if filters.band == choice %} selected{% endif %}>{{ choice }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Filter</button>
+  {% if filters.language or filters.band %}<a class="clear" href="/">Clear</a>{% endif %}
+</form>
 {% if back_id is not none or forward_id is not none %}
 <div class="nav-row">
   {% if back_id is not none %}

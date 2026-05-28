@@ -48,6 +48,10 @@ from pd_groundtruth.review_db import CurrentLabelRow
 from pd_groundtruth.review_db import ProgressCounts
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.review_db import ReviewPairRow
+from pd_groundtruth.sampling import BAND_70_80
+from pd_groundtruth.sampling import BAND_80_90
+from pd_groundtruth.sampling import BAND_BELOW
+from pd_groundtruth.sampling import BAND_GE90
 from pd_matcher.models import MarcRecord
 
 _LOGGER = getLogger(__name__)
@@ -58,6 +62,7 @@ _VAULT_PATH_ATTR: str = "label_vault_path"
 _LABELER: str = "jpstroop"
 _SKIP_QUERY: list[int] = Query([])
 _LANGUAGE_CHOICES: tuple[str, ...] = ("eng", "fre", "ger", "spa", "ita")
+_BAND_CHOICES: tuple[str, ...] = (BAND_GE90, BAND_80_90, BAND_70_80, BAND_BELOW)
 _VERDICT_CHOICES: tuple[str, ...] = ("match", "no_match", "unsure")
 _SORT_CHOICES: tuple[tuple[str, str], ...] = (("desc", "newest first"), ("asc", "oldest first"))
 _LABELS_PAGE_SIZE: int = 100
@@ -117,6 +122,8 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 "counts": counts,
                 "back_id": nav_history.back_id(history),
                 "forward_id": nav_history.forward_id(history),
+                "language_choices": _LANGUAGE_CHOICES,
+                "band_choices": _BAND_CHOICES,
             },
         )
         nav_history.write_history(response, history)
@@ -146,6 +153,8 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                     "filters": filters,
                     "counts": counts,
                     "back_id": nav_history.back_id(history),
+                    "language_choices": _LANGUAGE_CHOICES,
+                    "band_choices": _BAND_CHOICES,
                 },
             )
             nav_history.write_history(response, history)

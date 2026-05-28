@@ -1220,3 +1220,58 @@ def test_nav_cookie_is_session_cookie_no_max_age_or_expires(client: TestClient) 
     assert "expires" not in set_cookie
     assert "httponly" in set_cookie
     assert "samesite=strict" in set_cookie
+
+
+def test_card_renders_filter_bar_with_language_and_band_selects(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert '<form class="filters-bar" method="get" action="/">' in response.text
+    assert '<select name="language">' in response.text
+    assert '<select name="band">' in response.text
+    for choice in ("eng", "fre", "ger", "spa", "ita"):
+        assert f'<option value="{choice}">{choice}</option>' in response.text
+    for choice in ("ge90", "b80_90", "b70_80", "below"):
+        assert f'<option value="{choice}">{choice}</option>' in response.text
+
+
+def test_card_filter_bar_marks_selected_language_and_band(client: TestClient) -> None:
+    response = client.get("/", params={"language": "fre", "band": "b70_80"})
+    assert response.status_code == 200
+    assert '<option value="fre" selected>fre</option>' in response.text
+    assert '<option value="b70_80" selected>b70_80</option>' in response.text
+
+
+def test_card_filter_bar_shows_clear_link_when_filters_active(client: TestClient) -> None:
+    response = client.get("/", params={"language": "fre"})
+    assert response.status_code == 200
+    assert '<a class="clear" href="/">Clear</a>' in response.text
+
+
+def test_card_filter_bar_omits_clear_link_when_no_filters(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert '<a class="clear" href="/">Clear</a>' not in response.text
+
+
+def test_pair_route_renders_filter_bar_with_language_selected(client: TestClient) -> None:
+    response = client.get("/pair/1", params={"language": "eng"})
+    assert response.status_code == 200
+    assert '<form class="filters-bar" method="get" action="/">' in response.text
+    assert '<option value="eng" selected>eng</option>' in response.text
+
+
+def test_empty_queue_renders_filter_bar(empty_client: TestClient) -> None:
+    response = empty_client.get("/")
+    assert response.status_code == 200
+    assert "All done" in response.text
+    assert '<form class="filters-bar" method="get" action="/">' in response.text
+    assert '<select name="language">' in response.text
+    assert '<select name="band">' in response.text
+
+
+def test_empty_queue_filter_bar_marks_selected_filters(empty_client: TestClient) -> None:
+    response = empty_client.get("/", params={"language": "eng", "band": "below"})
+    assert response.status_code == 200
+    assert '<option value="eng" selected>eng</option>' in response.text
+    assert '<option value="below" selected>below</option>' in response.text
+    assert '<a class="clear" href="/">Clear</a>' in response.text
