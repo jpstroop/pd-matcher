@@ -20,14 +20,25 @@
 
   "publisher_stopwords": [
     "a", "an", "and", "at", "by", "for", "from", "in", "of", "on",
-    "the", "to", "with"
+    "the", "to", "with",
+    "&",
+    "co", "company",
+    "inc", "incorporated",
+    "corp", "corporation",
+    "bros", "brothers",
+    "ltd", "limited",
+    "pub", "publ", "pubs", "publishing", "publisher", "publishers",
+    "press",
+    "soc", "society",
+    "assn", "assoc", "association",
+    "book", "books"
   ],
 
   "notes_on_exclusions": {
     "not_included": [
-      "new", "history", "story", "life", "american", "world", "book",
-      "company", "press", "university", "illustrated", "edited", "translated"
+      "new", "history", "story", "life", "american", "world",
+      "university", "illustrated", "edited", "translated"
     ],
-    "reason": "These are content words that help distinguish between different works"
+    "reason": "These are content words that help distinguish between different works. Publisher-side corporate-suffix and form-of-publication noise was promoted to publisher_stopwords following the 2026-05-28 lower-band diagnostic; these stay scoped to publisher because removing them from title would strip distinguishing tokens from names like 'Penguin Books'."
   }
 }

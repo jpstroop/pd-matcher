@@ -310,6 +310,17 @@ _ABBREVIATIONS: Mapping[str, str] = {
     "pt": "part",
     "pts": "part",
     "bk": "book",
+    "inc": "incorporated",
+    "corp": "corporation",
+    "co": "company",
+    "bros": "brothers",
+    "ltd": "limited",
+    "pub": "publishing",
+    "pubs": "publishing",
+    "publ": "publishing",
+    "soc": "society",
+    "assn": "association",
+    "assoc": "association",
 }
 
 _ABBREVIATION_RE = re_compile(
