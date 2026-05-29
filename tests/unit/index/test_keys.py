@@ -31,7 +31,14 @@ def test_author_keys_drops_author_stopwords_and_keeps_names() -> None:
 
 
 def test_publisher_keys_drops_publisher_stopwords() -> None:
-    assert publisher_keys("Acme Press") == frozenset({"acme", "press"})
+    """Connectives drop; corporate-suffix noise drops; entity tokens survive."""
+    assert publisher_keys("Acme Press for the Public") == frozenset({"acme", "public"})
+
+
+def test_publisher_keys_drops_corporate_suffix_noise() -> None:
+    """``& Co``, ``Inc.``, ``Ltd``, ``Publishing`` are publisher-side noise."""
+    assert publisher_keys("Gabriel Sons & Co.") == frozenset({"gabriel", "sons"})
+    assert publisher_keys("State Art Publishing Inc.") == frozenset({"state", "art"})
 
 
 def test_keys_return_empty_frozenset_for_none() -> None:

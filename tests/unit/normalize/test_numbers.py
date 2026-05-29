@@ -118,3 +118,31 @@ def test_normalize_numbers_handles_multiple_abbreviations() -> None:
 def test_normalize_numbers_treats_pure_punctuation_token_as_passthrough() -> None:
     out = normalize_numbers("3 , ii", "eng")
     assert out == "3 , 2"
+
+
+def test_normalize_numbers_expands_corporate_suffixes() -> None:
+    out = normalize_numbers("Carrick & Evans, inc. and Sons & Co. and Dennis Corp.", "eng")
+    assert "incorporated" in out
+    assert "company" in out
+    assert "corporation" in out
+
+
+def test_normalize_numbers_expands_publishing_abbreviations() -> None:
+    assert normalize_numbers("State Art Pub.", "eng") == "State Art publishing"
+    assert normalize_numbers("Hebrew Publ.", "eng") == "Hebrew publishing"
+    assert normalize_numbers("Tiny Pubs.", "eng") == "Tiny publishing"
+
+
+def test_normalize_numbers_expands_society_and_association_abbreviations() -> None:
+    assert normalize_numbers("American Insurance Assn.", "eng") == (
+        "American Insurance association"
+    )
+    assert normalize_numbers("American Insurance Assoc.", "eng") == (
+        "American Insurance association"
+    )
+    assert normalize_numbers("Royal Soc.", "eng") == "Royal society"
+
+
+def test_normalize_numbers_expands_brothers_and_limited() -> None:
+    assert normalize_numbers("Smith Bros.", "eng") == "Smith brothers"
+    assert normalize_numbers("Acme Ltd.", "eng") == "Acme limited"

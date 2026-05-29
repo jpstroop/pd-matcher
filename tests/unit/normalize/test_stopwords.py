@@ -37,3 +37,54 @@ def test_stopword_set_is_frozen() -> None:
     except AttributeError:
         return
     raise AssertionError("StopwordSet should reject mutation")
+
+
+_ENGLISH_PUBLISHER_NOISE_ADDITIONS: frozenset[str] = frozenset(
+    {
+        "&",
+        "co",
+        "company",
+        "inc",
+        "incorporated",
+        "corp",
+        "corporation",
+        "bros",
+        "brothers",
+        "ltd",
+        "limited",
+        "pub",
+        "publ",
+        "pubs",
+        "publishing",
+        "publisher",
+        "publishers",
+        "press",
+        "soc",
+        "society",
+        "assn",
+        "assoc",
+        "association",
+        "book",
+        "books",
+    }
+)
+
+
+def test_english_publisher_stopwords_include_publisher_noise() -> None:
+    publisher = load_stopwords("eng").publisher
+    assert _ENGLISH_PUBLISHER_NOISE_ADDITIONS.issubset(publisher)
+
+
+def test_publisher_noise_additions_are_not_english_title_stopwords() -> None:
+    title = load_stopwords("eng").title
+    promotable = _ENGLISH_PUBLISHER_NOISE_ADDITIONS - {"&"}
+    assert promotable.isdisjoint(title), (
+        "Publisher-side noise must not leak into title stopwords; doing so"
+        " would strip distinguishing tokens from names like 'Penguin Books'."
+    )
+
+
+def test_publisher_noise_additions_are_not_english_author_stopwords() -> None:
+    author = load_stopwords("eng").author
+    promotable = _ENGLISH_PUBLISHER_NOISE_ADDITIONS - {"&"}
+    assert promotable.isdisjoint(author)
