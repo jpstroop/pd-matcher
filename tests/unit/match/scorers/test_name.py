@@ -66,3 +66,51 @@ def test_score_publisher_features_include_lengths_and_overlap(
     assert feature_map["normalized_marc_len"] > 0.0
     assert feature_map["normalized_nypl_len"] > 0.0
     assert feature_map["token_overlap"] >= 1.0
+
+
+def test_score_publisher_disjoint_tokens_below_floor_zeroed(
+    scorer_context: ScorerContext,
+) -> None:
+    """Unrelated single-token names collapse to zero via the disjoint floor."""
+    ev = score_publisher("Maruzen", "Peter Chiarulli", scorer_context)
+    assert ev.score == 0.0
+    assert dict(ev.features)["token_overlap"] == 0.0
+
+
+def test_score_author_disjoint_tokens_below_floor_zeroed(
+    scorer_context: ScorerContext,
+) -> None:
+    """The disjoint floor applies symmetrically to the author scorer."""
+    ev = score_author("Maruzen", "Peter Chiarulli", scorer_context)
+    assert ev.score == 0.0
+
+
+def test_score_publisher_disjoint_typo_above_floor_preserved(
+    scorer_context: ScorerContext,
+) -> None:
+    """Single-character typos clear the floor and keep the raw ratio."""
+    ev = score_publisher("Wonder", "Woncler", scorer_context)
+    assert ev.score > 70.0
+    assert dict(ev.features)["token_overlap"] == 0.0
+
+
+def test_score_publisher_disjoint_in_floor_band_preserved(
+    scorer_context: ScorerContext,
+) -> None:
+    """Disjoint pairs in the (50, 70) band sit above the floor and are kept.
+
+    ``token_set_ratio('smith', 'smyht') == 60``: a two-character permutation
+    yields a real-signal score that the chosen floor of 50 must preserve.
+    """
+    ev = score_publisher("Smith", "Smyht", scorer_context)
+    assert 50.0 < ev.score < 70.0
+    assert dict(ev.features)["token_overlap"] == 0.0
+
+
+def test_score_publisher_overlapping_tokens_unaffected(
+    scorer_context: ScorerContext,
+) -> None:
+    """Token intersection bypasses the floor entirely."""
+    ev = score_publisher("Macmillan", "Macmillan & Co", scorer_context)
+    assert ev.score == 100.0
+    assert dict(ev.features)["token_overlap"] >= 1.0

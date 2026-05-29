@@ -6,6 +6,15 @@ Press, Inc."), which is exactly what
 :func:`rapidfuzz.fuzz.token_set_ratio` is engineered for. The pipeline is
 the same on both sides — normalize, drop language-specific stopwords for
 the field, then compare.
+
+When the two token sets are disjoint, ``token_set_ratio`` silently falls
+back to character-level Levenshtein and emits noise scores (20-40) for
+strings that share nothing semantically. We collapse those to 0 below
+:data:`_DISJOINT_FUZZY_FLOOR`. A cutoff of 50 sits above the observed
+unrelated-name cluster (16-36, e.g. ``Maruzen`` vs ``Peter Chiarulli``
+≈36) while preserving the (50, 70) band where borderline real signal
+lives; a stricter cutoff of 70 was measured and cost ~3% recall on the
+locked regression set, so 50 is the chosen floor.
 """
 
 from rapidfuzz.fuzz import token_set_ratio
@@ -18,6 +27,7 @@ from pd_matcher.normalize.text import tokenize
 _MAX_SCORE: float = 100.0
 _AUTHOR_SCORER: str = "name.author"
 _PUBLISHER_SCORER: str = "name.publisher"
+_DISJOINT_FUZZY_FLOOR: float = 50.0
 
 
 def _prepare(value: str, language: str, stopwords: frozenset[str]) -> tuple[str, str]:
@@ -61,9 +71,11 @@ def _evidence(
             decisive=False,
             features=(),
         )
-    score = float(token_set_ratio(marc_prepared, nypl_prepared))
     marc_set = set(marc_prepared.split())
     nypl_set = set(nypl_prepared.split())
+    score = float(token_set_ratio(marc_prepared, nypl_prepared))
+    if not (marc_set & nypl_set) and score < _DISJOINT_FUZZY_FLOOR:
+        score = 0.0
     overlap = float(len(marc_set & nypl_set))
     features: tuple[tuple[str, float], ...] = (
         ("normalized_marc_len", float(len(marc_normalized))),
