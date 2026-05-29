@@ -105,14 +105,25 @@ Ship the configurable subsystem with the data-derived default pairing set above.
 
 ## Reproduction
 
+The original study used the pre-vault CSV-driven eval (`--ground-truth
+data/combined_ground_truth.csv`, retired with #25 in 2026-05-25). The numbers
+above reflect that run and won't reproduce identically against the current
+vault-driven eval, which uses every labeled pair instead of a 500-pair sample.
+The equivalent command today is:
+
 ```bash
 pdm run pd-matcher eval \
-  --ground-truth data/combined_ground_truth.csv \
+  --vault data/label_vault.jsonl \
+  --pool data/candidates \
   --index caches/cce.lmdb \
-  --sample 500 --seed 42 --workers 8 --year-window 0 \
+  --year-window 0 \
   --report eval_pairings.json
 ```
 
 The "before" row is the exact-year (N=0) line from the
-[year-window study](year-window.md), produced with the same flags against the
-pre-change (hard-coded-pairings) pipeline.
+[year-window study](year-window.md), produced against the pre-change
+(hard-coded-pairings) pipeline.
+
+The pairing set in `src/pd_matcher/config/defaults/field_pairings.yaml` has
+grown since this study (renewal-side pairings + publisher↔claimants added in
+2026-05-27); the 8 pairings tabulated above were the set at study time.

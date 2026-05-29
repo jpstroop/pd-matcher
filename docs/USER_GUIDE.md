@@ -137,9 +137,8 @@ pdm run pd-matcher match \
 ```
 
 (`pd-matcher match` takes either `--marc <single XML file>` or
-`--prepared <chunk dir produced by prepare-marc>`. See the
-[`prepare-marc` README section](../README.md#how-it-fits-together) for
-the chunking workflow.)
+`--prepared <chunk dir produced by pd-matcher prepare-marc>`. Run
+`pdm run pd-matcher prepare-marc --help` for the chunking workflow.)
 
 `build-queue` does the matching AND stratifies by language and
 confidence band, so you don't burn label effort on easy high-confidence

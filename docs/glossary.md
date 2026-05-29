@@ -10,9 +10,9 @@ and [Domain & data](#domain--data), followed by [Further reading](#further-readi
 ## Matching & statistics
 
 **Ground truth.** The set of known-correct answers we measure against — here, the
-~20k hand-curated MARC↔CCE pairings in `data/combined_ground_truth.csv`. The
-matcher never sees it while matching; we only use it to score how well the
-matcher did.
+hand-labeled MARC↔CCE verdicts in `data/label_vault.jsonl` (~640 unique pairs as
+of mid-2026, growing as labeling continues). The matcher never sees it while
+matching; we only use it to score how well the matcher did.
 
 **True positive / false positive / false negative.** For a yes/no decision: a
 true positive (TP) is a correct "yes" (we matched a record to the right CCE

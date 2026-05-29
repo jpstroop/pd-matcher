@@ -114,24 +114,23 @@ The window remains configurable in `matching.yaml` and overridable per run with
 
 ## Reproduction
 
+The original sweep used the pre-vault CSV-driven eval (`--ground-truth
+data/combined_ground_truth.csv` plus `--sample` / `--seed` / `--workers`),
+retired with #25 in 2026-05-25. The current vault-driven eval evaluates every
+labeled pair (no sampling), so the seed-stability check is no longer
+meaningful — what remains is the window sweep:
+
 ```bash
-# Four-window sweep
+# Four-window sweep against the current vault
 for W in 0 1 2 3; do
   pdm run pd-matcher eval \
-    --ground-truth data/combined_ground_truth.csv \
+    --vault data/label_vault.jsonl \
+    --pool data/candidates \
     --index caches/cce.lmdb \
-    --sample 500 --seed 42 --workers 8 --year-window "$W" \
+    --year-window "$W" \
     --report "eval_w${W}.json"
 done
-
-# Seed stability
-for SEED in 1 2 3 4; do
-  for W in 0 1; do
-    pdm run pd-matcher eval \
-      --ground-truth data/combined_ground_truth.csv \
-      --index caches/cce.lmdb \
-      --sample 500 --seed "$SEED" --workers 8 --year-window "$W" \
-      --report "eval_s${SEED}_w${W}.json"
-  done
-done
 ```
+
+The numbers in this study reflect the 2026-era sample-based run and won't
+reproduce identically against the larger vault.

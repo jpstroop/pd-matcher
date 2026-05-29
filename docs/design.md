@@ -326,13 +326,15 @@ The combiner is a plain weighted mean over **present** (non-skipped) Evidence. D
 
 | Scorer | Weight |
 |---|---|
-| title | 0.40 |
+| title | 0.35 |
 | author | 0.20 |
 | publisher | 0.10 |
 | year | 0.10 |
 | edition | 0.05 |
 | lccn | 0.10 |
-| isbn | 0.05 |
+| extent | 0.05 |
+| volume | 0.05 |
+| isbn | 0.00 |
 
 A perfect LCCN match in isolation contributes `0.10 × 100 = 10` to the raw score, not 100. **Hard identifiers do not short-circuit.** In Phase 4 we considered making `lccn.decisive = true` short-circuit to confidence 1.0; we walked that back when the user pointed out that LCCN and ISBN have ~5% transcription error rates in this corpus. The `decisive` flag is still on Evidence for audit and ML feature inspection, but the combiner is a plain weighted mean.
 
