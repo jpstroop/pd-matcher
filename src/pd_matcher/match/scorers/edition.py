@@ -8,6 +8,14 @@ score depending on whether they match. When only one side has an
 extractable number we fall back to fuzzy token-set comparison; when both
 sides lack a number we likewise fall back to fuzzy comparison rather than
 emit a misleading zero.
+
+The fuzzy fallback floors the score at 0 when token sets are disjoint and
+``rapidfuzz`` would otherwise drop into its character-level Levenshtein
+backstop (see :data:`_DISJOINT_FUZZY_FLOOR`); the integer path is
+unaffected because it already returns a clean 0/100. The floor is set at
+50 to clip the unrelated-text noise cluster (16-36) while preserving the
+(50, 70) band where borderline real signal lives; a stricter cutoff of
+70 was measured and cost ~3% recall on the locked regression set.
 """
 
 from re import compile as re_compile
@@ -22,6 +30,7 @@ from pd_matcher.normalize.text import normalize_text
 _MAX_SCORE: float = 100.0
 _SCORER_NAME: str = "edition.compat"
 _LEADING_INT_RE = re_compile(r"(\d{1,4})")
+_DISJOINT_FUZZY_FLOOR: float = 50.0
 
 
 def _extract_edition_number(value: str) -> int | None:
@@ -68,6 +77,10 @@ def score_edition(
             explicit_mismatch = 1.0
     else:
         score = float(token_set_ratio(marc_normalized, nypl_normalized))
+        marc_tokens = set(marc_normalized.split())
+        nypl_tokens = set(nypl_normalized.split())
+        if not (marc_tokens & nypl_tokens) and score < _DISJOINT_FUZZY_FLOOR:
+            score = 0.0
     features: tuple[tuple[str, float], ...] = (
         ("marc_edition_num", float(marc_num) if marc_num is not None else -1.0),
         ("nypl_edition_num", float(nypl_num) if nypl_num is not None else -1.0),

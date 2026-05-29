@@ -51,3 +51,46 @@ def test_score_edition_fuzzy_fallback_when_one_side_has_number(
     ev = score_edition("revised", "1st edition", scorer_context)
     assert 0.0 <= ev.score < 100.0
     assert dict(ev.features)["explicit_mismatch"] == 0.0
+
+
+def test_score_edition_fuzzy_disjoint_below_floor_zeroed(
+    scorer_context: ScorerContext,
+) -> None:
+    """Disjoint fuzzy-fallback tokens collapse to zero below the floor.
+
+    ``token_set_ratio('abridged', 'reprint') ≈ 27`` — squarely in the
+    16-36 noise cluster the floor is designed to clip.
+    """
+    ev = score_edition("abridged", "reprint", scorer_context)
+    assert ev.score == 0.0
+    assert dict(ev.features)["explicit_mismatch"] == 0.0
+
+
+def test_score_edition_fuzzy_disjoint_in_floor_band_preserved(
+    scorer_context: ScorerContext,
+) -> None:
+    """Disjoint fuzzy pairs in the (50, 70) band sit above the floor.
+
+    ``token_set_ratio('abridged', 'revised') ≈ 53``: borderline real
+    signal that the chosen floor of 50 must preserve. A stricter cutoff
+    of 70 cost ~3% recall on the locked regression set.
+    """
+    ev = score_edition("abridged", "revised", scorer_context)
+    assert 50.0 < ev.score < 70.0
+    assert dict(ev.features)["explicit_mismatch"] == 0.0
+
+
+def test_score_edition_fuzzy_disjoint_above_floor_preserved(
+    scorer_context: ScorerContext,
+) -> None:
+    """A single-character typo on a one-token edition clears the floor."""
+    ev = score_edition("revised", "revisd", scorer_context)
+    assert ev.score > 70.0
+
+
+def test_score_edition_fuzzy_overlapping_tokens_unaffected(
+    scorer_context: ScorerContext,
+) -> None:
+    """Token intersection bypasses the disjoint floor in the fuzzy fallback."""
+    ev = score_edition("revised", "revised limited", scorer_context)
+    assert ev.score == 100.0
