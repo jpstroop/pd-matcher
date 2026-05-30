@@ -174,6 +174,45 @@ def test_compile_renewal_claimants_pairing_uses_renewal_field() -> None:
     assert cce_accessor(_nypl(renewal_claimants="X; Y")) == "X; Y"
 
 
+def test_compile_author_sor_renewal_author_pairing_reads_both_fields() -> None:
+    """An ``author`` pairing of ``sor ↔ renewal_author`` reads both sides."""
+    cfg = PairingConfig(
+        marc_fields={
+            "sor": FieldSpec(fields=("statement_of_responsibility",), combine="first"),
+        },
+        cce_fields={"ra": FieldSpec(fields=("renewal_author",), combine="first")},
+        pairings=(PairingSpec(group="author", marc="sor", cce="ra"),),
+    )
+    compiled = compile_pairings(cfg)
+    pairing = compiled.author[0]
+    assert pairing.marc_accessor(_marc(statement_of_responsibility="by Daisy Neumann")) == (
+        "by Daisy Neumann"
+    )
+    assert pairing.cce_accessor(_nypl(renewal_author="GOLDSTEIN, DAISY NEUMANN.")) == (
+        "GOLDSTEIN, DAISY NEUMANN."
+    )
+
+
+def test_compile_author_sor_renewal_claimants_pairing_reads_both_fields() -> None:
+    """An ``author`` pairing of ``sor ↔ renewal_claimants`` reads both sides."""
+    cfg = PairingConfig(
+        marc_fields={
+            "sor": FieldSpec(fields=("statement_of_responsibility",), combine="first"),
+        },
+        cce_fields={"rc": FieldSpec(fields=("renewal_claimants",), combine="first")},
+        pairings=(PairingSpec(group="author", marc="sor", cce="rc"),),
+    )
+    compiled = compile_pairings(cfg)
+    pairing = compiled.author[0]
+    assert pairing.marc_accessor(_marc(statement_of_responsibility="by Daisy Neumann")) == (
+        "by Daisy Neumann"
+    )
+    assert (
+        pairing.cce_accessor(_nypl(renewal_claimants="Daisy Neumann|Mrs. Richard Goldstein|||A"))
+        == "Daisy Neumann|Mrs. Richard Goldstein|||A"
+    )
+
+
 def test_combine_first_returns_first_non_empty() -> None:
     """``first`` skips empties and returns the first non-empty value."""
     cfg = PairingConfig(
