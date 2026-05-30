@@ -320,5 +320,8 @@ change. Two commands:
   guide for verdicts and edge cases.
 - [docs/studies/](studies/) — write-ups of one-off measurement runs
   (year-window study, field-pairing experiments, etc.).
+- [docs/learned_scorer_diagnostic.md](learned_scorer_diagnostic.md) —
+  the periodic LightGBM diagnostic over the labeled vault: purpose,
+  how to re-run, output conventions.
 - GitHub issues at <https://github.com/jpstroop/pd-matcher/issues> —
   active work and tracked decisions.
