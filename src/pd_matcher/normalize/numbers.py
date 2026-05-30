@@ -321,6 +321,8 @@ _ABBREVIATIONS: Mapping[str, str] = {
     "soc": "society",
     "assn": "association",
     "assoc": "association",
+    "univ": "university",
+    "calif": "california",
 }
 
 _ABBREVIATION_RE = re_compile(

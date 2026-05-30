@@ -19,6 +19,8 @@ def _marc(
     title_main: str = "Main",
     main_author: str | None = "Author",
     series_titles: tuple[str, ...] = (),
+    statement_of_responsibility: str | None = None,
+    publisher: str | None = None,
 ) -> MarcRecord:
     return MarcRecord(
         control_id="m",
@@ -26,6 +28,8 @@ def _marc(
         title_main=title_main,
         main_author=main_author,
         series_titles=series_titles,
+        statement_of_responsibility=statement_of_responsibility,
+        publisher=publisher,
     )
 
 
@@ -124,6 +128,53 @@ def test_compile_publisher_claimants_pairing_reads_claimants() -> None:
     compiled = compile_pairings(cfg)
     cce_accessor = compiled.publisher[0].cce_accessor
     assert cce_accessor(_nypl(claimants=("Acme Co", "Sons"))) == "Acme Co Sons"
+
+
+def test_compile_publisher_sor_title_pairing_reads_sor_and_cce_title() -> None:
+    """A ``publisher`` pairing of ``sor ↔ title`` reads MARC SoR and CCE title."""
+    cfg = PairingConfig(
+        marc_fields={
+            "sor": FieldSpec(fields=("statement_of_responsibility",), combine="first"),
+        },
+        cce_fields={"t": FieldSpec(fields=("title",), combine="first")},
+        pairings=(PairingSpec(group="publisher", marc="sor", cce="t"),),
+    )
+    compiled = compile_pairings(cfg)
+    pairing = compiled.publisher[0]
+    assert pairing.marc_accessor(_marc(statement_of_responsibility="by Levy")) == "by Levy"
+    assert pairing.cce_accessor(_nypl(title="Annotated translation")) == "Annotated translation"
+
+
+def test_compile_publisher_sor_publisher_names_pairing_reads_publisher_names() -> None:
+    """A ``publisher`` pairing of ``sor ↔ publisher_names`` reads the joined names."""
+    cfg = PairingConfig(
+        marc_fields={
+            "sor": FieldSpec(fields=("statement_of_responsibility",), combine="first"),
+        },
+        cce_fields={"pn": FieldSpec(fields=("publisher_names",), combine="join")},
+        pairings=(PairingSpec(group="publisher", marc="sor", cce="pn"),),
+    )
+    compiled = compile_pairings(cfg)
+    pairing = compiled.publisher[0]
+    assert pairing.marc_accessor(_marc(statement_of_responsibility="by Matsumoto")) == (
+        "by Matsumoto"
+    )
+    assert pairing.cce_accessor(_nypl(publisher_names=("Ryozo Matsumoto",))) == "Ryozo Matsumoto"
+
+
+def test_compile_publisher_sor_claimants_pairing_reads_claimants() -> None:
+    """A ``publisher`` pairing of ``sor ↔ claimants`` reads the joined claimants."""
+    cfg = PairingConfig(
+        marc_fields={
+            "sor": FieldSpec(fields=("statement_of_responsibility",), combine="first"),
+        },
+        cce_fields={"cl": FieldSpec(fields=("claimants",), combine="join")},
+        pairings=(PairingSpec(group="publisher", marc="sor", cce="cl"),),
+    )
+    compiled = compile_pairings(cfg)
+    pairing = compiled.publisher[0]
+    assert pairing.marc_accessor(_marc(statement_of_responsibility="by Levy")) == "by Levy"
+    assert pairing.cce_accessor(_nypl(claimants=("Howard S. Levy",))) == "Howard S. Levy"
 
 
 def test_compile_renewal_claimants_pairing_uses_renewal_field() -> None:

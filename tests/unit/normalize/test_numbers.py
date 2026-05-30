@@ -146,3 +146,18 @@ def test_normalize_numbers_expands_society_and_association_abbreviations() -> No
 def test_normalize_numbers_expands_brothers_and_limited() -> None:
     assert normalize_numbers("Smith Bros.", "eng") == "Smith brothers"
     assert normalize_numbers("Acme Ltd.", "eng") == "Acme limited"
+
+
+def test_normalize_numbers_expands_institutional_abbreviations() -> None:
+    assert normalize_numbers("Univ. of California Press", "eng") == (
+        "university of California Press"
+    )
+    assert normalize_numbers("Regents of the Univ. of Calif.", "eng") == (
+        "Regents of the university of california"
+    )
+
+
+def test_normalize_numbers_leaves_unabbreviated_institutional_words_unchanged() -> None:
+    assert normalize_numbers("university", "eng") == "university"
+    assert normalize_numbers("university press", "eng") == "university press"
+    assert normalize_numbers("california", "eng") == "california"
