@@ -1230,8 +1230,24 @@ def test_card_renders_filter_bar_with_language_and_band_selects(client: TestClie
     assert '<select name="band">' in response.text
     for choice in ("eng", "fre", "ger", "spa", "ita"):
         assert f'<option value="{choice}">{choice}</option>' in response.text
-    for choice in ("ge90", "b80_90", "b70_80", "below"):
+    for choice in ("ge90", "b80_90", "b70_80", "b60_70", "below"):
         assert f'<option value="{choice}">{choice}</option>' in response.text
+
+
+def test_card_filter_bar_renders_b60_70_between_b70_80_and_below(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    band_section = response.text.split('<select name="band">')[1].split("</select>")[0]
+    b70_index = band_section.index('value="b70_80"')
+    b60_index = band_section.index('value="b60_70"')
+    below_index = band_section.index('value="below"')
+    assert b70_index < b60_index < below_index
+
+
+def test_card_filter_bar_marks_selected_b60_70_band(client: TestClient) -> None:
+    response = client.get("/", params={"band": "b60_70"})
+    assert response.status_code == 200
+    assert '<option value="b60_70" selected>b60_70</option>' in response.text
 
 
 def test_card_filter_bar_marks_selected_language_and_band(client: TestClient) -> None:

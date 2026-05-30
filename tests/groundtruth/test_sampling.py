@@ -3,6 +3,7 @@
 from pytest import approx
 from pytest import raises
 
+from pd_groundtruth.sampling import BAND_60_70
 from pd_groundtruth.sampling import BAND_70_80
 from pd_groundtruth.sampling import BAND_80_90
 from pd_groundtruth.sampling import BAND_BELOW
@@ -26,8 +27,17 @@ def test_band_of_boundaries_are_half_open_from_above() -> None:
     assert band_of(0.8) == BAND_80_90
     assert band_of(0.7999) == BAND_70_80
     assert band_of(0.7) == BAND_70_80
-    assert band_of(0.6999) == BAND_BELOW
+    assert band_of(0.6999) == BAND_60_70
+    assert band_of(0.6) == BAND_60_70
+    assert band_of(0.5999) == BAND_BELOW
     assert band_of(0.0) == BAND_BELOW
+
+
+def test_band_of_60_70_boundaries_match_brief() -> None:
+    assert band_of(0.60) == BAND_60_70
+    assert band_of(0.69) == BAND_60_70
+    assert band_of(0.59) == BAND_BELOW
+    assert band_of(0.70) == BAND_70_80
 
 
 def test_default_budget_matches_documented_caps() -> None:
@@ -35,14 +45,22 @@ def test_default_budget_matches_documented_caps() -> None:
     assert budget.cap_for("eng", BAND_GE90) == 500
     assert budget.cap_for("eng", BAND_80_90) == 200
     assert budget.cap_for("eng", BAND_70_80) == 200
+    assert budget.cap_for("eng", BAND_60_70) == 200
     assert budget.cap_for("eng", BAND_BELOW) == 300
     for language in ("fre", "ger", "spa", "ita"):
         assert budget.cap_for(language, BAND_GE90) == 60
         assert budget.cap_for(language, BAND_80_90) == 30
         assert budget.cap_for(language, BAND_70_80) == 30
+        assert budget.cap_for(language, BAND_60_70) == 30
         assert budget.cap_for(language, BAND_BELOW) == 80
-    assert budget.total() == 2000
+    assert budget.total() == 2320
     assert budget.languages() == ("eng", "fre", "ger", "spa", "ita")
+
+
+def test_default_budget_b60_70_mirrors_b70_80_per_language() -> None:
+    budget = default_budget()
+    for language in ("eng", "fre", "ger", "spa", "ita"):
+        assert budget.cap_for(language, BAND_60_70) == budget.cap_for(language, BAND_70_80)
 
 
 def test_cap_for_unconfigured_stratum_is_zero() -> None:
@@ -112,7 +130,7 @@ def test_reservoir_sample_differs_across_seeds() -> None:
 
 def test_iter_capped_bands_excludes_below() -> None:
     bands = tuple(iter_capped_bands())
-    assert bands == (BAND_GE90, BAND_80_90, BAND_70_80)
+    assert bands == (BAND_GE90, BAND_80_90, BAND_70_80, BAND_60_70)
     assert BAND_BELOW not in bands
 
 

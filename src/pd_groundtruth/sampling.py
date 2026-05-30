@@ -21,6 +21,7 @@ from msgspec import Struct
 BAND_GE90: str = "ge90"
 BAND_80_90: str = "b80_90"
 BAND_70_80: str = "b70_80"
+BAND_60_70: str = "b60_70"
 BAND_BELOW: str = "below"
 
 SOURCE_BANDED: str = "banded"
@@ -29,8 +30,9 @@ SOURCE_BELOW_SAMPLE: str = "below_sample"
 _THRESHOLD_GE90: float = 0.9
 _THRESHOLD_80: float = 0.8
 _THRESHOLD_70: float = 0.7
+_THRESHOLD_60: float = 0.6
 
-_CAPPED_BANDS: tuple[str, ...] = (BAND_GE90, BAND_80_90, BAND_70_80)
+_CAPPED_BANDS: tuple[str, ...] = (BAND_GE90, BAND_80_90, BAND_70_80, BAND_60_70)
 
 
 def band_of(score: float) -> str:
@@ -38,8 +40,9 @@ def band_of(score: float) -> str:
 
     Bands are half-open from above: ``>=0.9`` is :data:`BAND_GE90`,
     ``[0.8, 0.9)`` is :data:`BAND_80_90`, ``[0.7, 0.8)`` is
-    :data:`BAND_70_80`, and anything ``<0.7`` is :data:`BAND_BELOW`
-    (eligible for the random :data:`SOURCE_BELOW_SAMPLE` bucket).
+    :data:`BAND_70_80`, ``[0.6, 0.7)`` is :data:`BAND_60_70`, and anything
+    ``<0.6`` is :data:`BAND_BELOW` (eligible for the random
+    :data:`SOURCE_BELOW_SAMPLE` bucket).
     """
     if score >= _THRESHOLD_GE90:
         return BAND_GE90
@@ -47,6 +50,8 @@ def band_of(score: float) -> str:
         return BAND_80_90
     if score >= _THRESHOLD_70:
         return BAND_70_80
+    if score >= _THRESHOLD_60:
+        return BAND_60_70
     return BAND_BELOW
 
 
@@ -55,9 +60,10 @@ class BudgetModel(Struct, frozen=True, forbid_unknown_fields=True):
 
     ``caps`` maps a ``(language, band)`` key to the maximum number of pairs
     to persist for that stratum. The banded caps (:data:`BAND_GE90`,
-    :data:`BAND_80_90`, :data:`BAND_70_80`) draw the first accepted
-    outcomes in stream order; the :data:`BAND_BELOW` cap feeds the random
-    :data:`SOURCE_BELOW_SAMPLE` reservoir so recall stays measurable.
+    :data:`BAND_80_90`, :data:`BAND_70_80`, :data:`BAND_60_70`) draw the
+    first accepted outcomes in stream order; the :data:`BAND_BELOW` cap
+    feeds the random :data:`SOURCE_BELOW_SAMPLE` reservoir so recall stays
+    measurable.
     """
 
     caps: dict[tuple[str, str], int]
@@ -83,22 +89,27 @@ _DEFAULT_CAPS: dict[tuple[str, str], int] = {
     ("eng", BAND_GE90): 500,
     ("eng", BAND_80_90): 200,
     ("eng", BAND_70_80): 200,
+    ("eng", BAND_60_70): 200,
     ("eng", BAND_BELOW): 300,
     ("fre", BAND_GE90): 60,
     ("fre", BAND_80_90): 30,
     ("fre", BAND_70_80): 30,
+    ("fre", BAND_60_70): 30,
     ("fre", BAND_BELOW): 80,
     ("ger", BAND_GE90): 60,
     ("ger", BAND_80_90): 30,
     ("ger", BAND_70_80): 30,
+    ("ger", BAND_60_70): 30,
     ("ger", BAND_BELOW): 80,
     ("spa", BAND_GE90): 60,
     ("spa", BAND_80_90): 30,
     ("spa", BAND_70_80): 30,
+    ("spa", BAND_60_70): 30,
     ("spa", BAND_BELOW): 80,
     ("ita", BAND_GE90): 60,
     ("ita", BAND_80_90): 30,
     ("ita", BAND_70_80): 30,
+    ("ita", BAND_60_70): 30,
     ("ita", BAND_BELOW): 80,
 }
 
@@ -106,11 +117,11 @@ _DEFAULT_TOTAL: int = sum(_DEFAULT_CAPS.values())
 
 
 def default_budget() -> BudgetModel:
-    """Return the documented default budget (~2,000 pairs, English-weighted).
+    """Return the documented default budget (~2,320 pairs, English-weighted).
 
-    English: ge90=500, b80_90=200, b70_80=200, below=300. Each of fre/ger/
-    spa/ita: ge90=60, b80_90=30, b70_80=30, below=80. The exact total is
-    :data:`_DEFAULT_TOTAL`.
+    English: ge90=500, b80_90=200, b70_80=200, b60_70=200, below=300. Each
+    of fre/ger/spa/ita: ge90=60, b80_90=30, b70_80=30, b60_70=30, below=80.
+    The exact total is :data:`_DEFAULT_TOTAL`.
     """
     return BudgetModel(caps=dict(_DEFAULT_CAPS))
 
@@ -266,6 +277,7 @@ def iter_capped_bands() -> Iterator[str]:
 
 
 __all__ = [
+    "BAND_60_70",
     "BAND_70_80",
     "BAND_80_90",
     "BAND_BELOW",
