@@ -45,7 +45,7 @@ Who reads the labels:
 | **NYPL** | The New York Public Library transcribed the CCE volumes into structured XML/TSV. We consume their transcriptions, not the original LoC PDFs. |
 | **LMDB** | Lightning Memory-Mapped Database — the on-disk key-value store the matcher uses for its CCE index. Fast random reads across multiple worker processes; built once by `pd-matcher index build`. |
 | **Moving wall** | The lower bound on publication years the matcher cares about. Anything ≤ `today.year − 95` is already PD by age — there is no meaningful linkage signal to record — so it's filtered at acquire time, and the wall advances every January 1. As of 2026, the wall is 1931. |
-| **Confidence band** | A discrete bucket the matcher assigns to each score: `ge90` (≥ 0.90), `b80_90`, `b70_80`, `below` (< 0.70). Labels stratify across bands so we don't only label easy high-confidence pairs. |
+| **Confidence band** | A discrete bucket the matcher assigns to each score: `ge90` (≥ 0.90), `b80_90`, `b70_80`, `b60_70`, `below` (< 0.60). Labels stratify across bands so we don't only label easy high-confidence pairs. |
 | **Stratified sample** | A sampling scheme that takes a *fixed* number of items from each `(language, band)` cell, instead of sampling proportionally. Spreads labeling effort across the score range and across all languages. |
 | **Pair** | One `(MARC record, CCE registration)` candidate to be labeled. The matcher proposes; the human disposes. |
 | **Vault** | `data/label_vault.jsonl` — the durable, git-tracked, append-only record of every human verdict ever rendered. Source of truth for the ground truth. |
@@ -389,7 +389,7 @@ Skips are **session-local**: each skipped `pair_id` is appended to the URL as a 
 **Focus a session** with URL filters — useful for the English-first curriculum (label the easier languages before the harder ones):
 
 - `…/?language=eng` (or `fre` / `ger` / `spa` / `ita`)
-- add `&band=ge90` (or `b80_90`, `b70_80`, `below`) to drill into one confidence band
+- add `&band=ge90` (or `b80_90`, `b70_80`, `b60_70`, `below`) to drill into one confidence band
 
 **Track progress** at `…/stats`: labeled vs. remaining and the match / no_match / unsure tally, per language. Revisit or re-label any specific pair at `…/pair/{id}`.
 

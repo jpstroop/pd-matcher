@@ -48,6 +48,7 @@ from pd_groundtruth.review_db import CurrentLabelRow
 from pd_groundtruth.review_db import ProgressCounts
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.review_db import ReviewPairRow
+from pd_groundtruth.sampling import BAND_60_70
 from pd_groundtruth.sampling import BAND_70_80
 from pd_groundtruth.sampling import BAND_80_90
 from pd_groundtruth.sampling import BAND_BELOW
@@ -62,7 +63,7 @@ _VAULT_PATH_ATTR: str = "label_vault_path"
 _LABELER: str = "jpstroop"
 _SKIP_QUERY: list[int] = Query([])
 _LANGUAGE_CHOICES: tuple[str, ...] = ("eng", "fre", "ger", "spa", "ita")
-_BAND_CHOICES: tuple[str, ...] = (BAND_GE90, BAND_80_90, BAND_70_80, BAND_BELOW)
+_BAND_CHOICES: tuple[str, ...] = (BAND_GE90, BAND_80_90, BAND_70_80, BAND_60_70, BAND_BELOW)
 _VERDICT_CHOICES: tuple[str, ...] = ("match", "no_match", "unsure")
 _SORT_CHOICES: tuple[tuple[str, str], ...] = (("desc", "newest first"), ("asc", "oldest first"))
 _LABELS_PAGE_SIZE: int = 100
