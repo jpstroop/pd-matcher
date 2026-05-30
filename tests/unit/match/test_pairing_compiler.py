@@ -130,21 +130,6 @@ def test_compile_publisher_claimants_pairing_reads_claimants() -> None:
     assert cce_accessor(_nypl(claimants=("Acme Co", "Sons"))) == "Acme Co Sons"
 
 
-def test_compile_publisher_sor_title_pairing_reads_sor_and_cce_title() -> None:
-    """A ``publisher`` pairing of ``sor ↔ title`` reads MARC SoR and CCE title."""
-    cfg = PairingConfig(
-        marc_fields={
-            "sor": FieldSpec(fields=("statement_of_responsibility",), combine="first"),
-        },
-        cce_fields={"t": FieldSpec(fields=("title",), combine="first")},
-        pairings=(PairingSpec(group="publisher", marc="sor", cce="t"),),
-    )
-    compiled = compile_pairings(cfg)
-    pairing = compiled.publisher[0]
-    assert pairing.marc_accessor(_marc(statement_of_responsibility="by Levy")) == "by Levy"
-    assert pairing.cce_accessor(_nypl(title="Annotated translation")) == "Annotated translation"
-
-
 def test_compile_publisher_sor_publisher_names_pairing_reads_publisher_names() -> None:
     """A ``publisher`` pairing of ``sor ↔ publisher_names`` reads the joined names."""
     cfg = PairingConfig(

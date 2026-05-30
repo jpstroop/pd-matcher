@@ -59,6 +59,5 @@ pairings:
   - {group: publisher, marc: publisher,   cce: publisher_names}
   - {group: publisher, marc: publisher,   cce: author_name}
   - {group: publisher, marc: publisher,   cce: claimants}
-  - {group: publisher, marc: sor,         cce: title}
   - {group: publisher, marc: sor,         cce: publisher_names}
   - {group: publisher, marc: sor,         cce: claimants}
