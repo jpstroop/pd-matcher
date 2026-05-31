@@ -56,7 +56,8 @@ _DEFAULT_INDEX_PATH = Path("caches/cce.lmdb")
 _DEFAULT_REVIEW_DB_PATH = Path("data/review.db")
 _DEFAULT_VAULT_PATH = Path("data/label_vault.jsonl")
 _DEFAULT_VAULT_MARCS_PATH = Path("data/published/vault_marcs.xml")
-_DEFAULT_PUBLISHED_LINKAGE_PATH = Path("data/published/vault.jsonl")
+_DEFAULT_PUBLISHED_TRAINING_PATH = Path("data/published/training.jsonl")
+_DEFAULT_PUBLISHED_MATCHES_PATH = Path("data/published/matches.jsonl")
 _LABELER = "jpstroop"
 _LOG_DIR_NAME = "logs"
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -413,23 +414,29 @@ def publish_linkage_command(
         Path,
         Option("--vault", help="JSONL label vault to reshape for publication."),
     ] = _DEFAULT_VAULT_PATH,
-    out: Annotated[
+    training_out: Annotated[
         Path,
-        Option("--out", help="Destination JSONL file."),
-    ] = _DEFAULT_PUBLISHED_LINKAGE_PATH,
+        Option(
+            "--training-out",
+            help="Destination JSONL with every adjudicated verdict (match / no_match / unsure).",
+        ),
+    ] = _DEFAULT_PUBLISHED_TRAINING_PATH,
+    matches_out: Annotated[
+        Path,
+        Option("--matches-out", help="Destination JSONL with match rows only."),
+    ] = _DEFAULT_PUBLISHED_MATCHES_PATH,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
     ] = None,
 ) -> None:
-    """Reshape the vault into a published JSONL with universal identifiers leading."""
+    """Reshape the vault into the published JSONL pair (training + matches-only)."""
     _configure_logging("publish-linkage", log_file)
-    report = publish_linkage(vault, out)
+    report = publish_linkage(vault, training_out, matches_out)
     echo(
-        f"wrote {report.rows_written} rows to {out} "
-        f"(matches={report.matches} "
-        f"no_matches={report.no_matches} "
-        f"unsures={report.unsures})"
+        f"wrote {report.rows_written} rows to {training_out} "
+        f"({report.matches} matches also written to {matches_out}; "
+        f"no_matches={report.no_matches} unsures={report.unsures})"
     )
 
 

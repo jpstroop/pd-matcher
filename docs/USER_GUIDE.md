@@ -255,16 +255,22 @@ that's already done is a logged no-op.
 The public dataset lives in a **separate data repository** at
 [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage).
 This code repo doesn't bundle the publishable artifacts directly —
-they're regenerated on demand and pushed to the data repo. Two files
+they're regenerated on demand and pushed to the data repo. Three files
 make up the published dataset:
 
 - `vault_marcs.xml` — MARCXML of every MARC referenced by the vault
   (from `dump-vault-marcs`).
-- `vault.jsonl` — the reshaped linkage table with universal identifiers
-  (LCCN / ISBN / OCLC) leading and Princeton-local `marc_control_id`
-  demoted to provenance (from `publish-linkage`). The labeler's
-  free-text note is intentionally stripped; all verdicts (`match`,
-  `no_match`, `unsure`) are emitted.
+- `training.jsonl` — the full reshaped table with every adjudicated
+  verdict (`match`, `no_match`, `unsure`). The natural training input
+  for a learned matcher (from `publish-linkage`).
+- `matches.jsonl` — the same schema, filtered to `match` rows only.
+  The curated linkage table for consumers who only need confirmed
+  pairs (also from `publish-linkage`).
+
+Both JSONL files share the same row schema: universal identifiers
+(LCCN, ISBN, OCLC) lead, CCE-side fields next, and Princeton-local
+`marc_control_id` is demoted to a provenance trace at the tail. The
+labeler's free-text note is intentionally stripped.
 
 Workflow:
 
@@ -272,19 +278,20 @@ Workflow:
 # One-time: clone the data repo into the gitignored data/published/ path.
 git clone https://github.com/jpstroop/cce-marc-linkage data/published
 
-# After a labeling session: regenerate both files.
+# After a labeling session: regenerate the artifacts.
 pdm run pd-groundtruth dump-vault-marcs
 pdm run pd-groundtruth publish-linkage
 
 # Review what changed, then commit and push from inside the data repo:
 cd data/published
-git add vault_marcs.xml vault.jsonl
+git add vault_marcs.xml training.jsonl matches.jsonl
 git commit -m "regenerate from vault @ N entries"
 git push origin main
 ```
 
-Both commands default to writing into `data/published/`; override with
-`--out` if your local clone lives elsewhere.
+Both commands default to writing into `data/published/`; override the
+individual paths with `--out`, `--training-out`, or `--matches-out` if
+your local clone lives elsewhere.
 
 `dump-vault-marcs` reads the vault and `data/candidates/`, walks shards
 streamingly, and writes a single MARCXML file. It reports
@@ -292,10 +299,10 @@ streamingly, and writes a single MARCXML file. It reports
 `marcs_missing` — the missing count is vault entries whose MARC no
 longer exists in the candidate pool.
 
-`publish-linkage` reads only the vault, reshapes each entry into the
-published row schema, and writes JSONL sorted by `labeled_at`
-ascending so successive regenerations produce diff-friendly output.
-It reports `rows_written`, `matches`, `no_matches`, and `unsures`.
+`publish-linkage` reads only the vault and writes both JSONL files in
+one streaming pass, sorted by `labeled_at` ascending so successive
+regenerations produce diff-friendly output. It reports `rows_written`
+(the training file's row count), plus the per-verdict breakdown.
 
 Both are read-only against the code repo's vault; safe to run anytime,
 including mid-labeling-session — outputs are point-in-time snapshots.

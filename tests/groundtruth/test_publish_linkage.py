@@ -49,58 +49,81 @@ def _rows(path: Path) -> list[dict[str, object]]:
     return [loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def test_emits_one_row_per_vault_entry(tmp_path: Path) -> None:
-    vault = tmp_path / "vault.jsonl"
-    out = tmp_path / "published.jsonl"
+def _paths(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Return ``(vault, training, matches)`` paths."""
+    return tmp_path / "vault.jsonl", tmp_path / "training.jsonl", tmp_path / "matches.jsonl"
+
+
+def test_training_file_carries_every_adjudicated_verdict(tmp_path: Path) -> None:
+    vault, training, matches = _paths(tmp_path)
     upsert_entry(vault, _entry(marc_control_id="m1", nypl_uuid="u1"))
     upsert_entry(vault, _entry(marc_control_id="m2", nypl_uuid="u2", verdict="no_match"))
     upsert_entry(vault, _entry(marc_control_id="m3", nypl_uuid="u3", verdict="unsure"))
 
-    report = publish_linkage(vault, out)
+    report = publish_linkage(vault, training, matches)
 
     assert report.rows_written == 3
     assert report.matches == 1
     assert report.no_matches == 1
     assert report.unsures == 1
-    rows = _rows(out)
-    assert len(rows) == 3
+    assert len(_rows(training)) == 3
+
+
+def test_matches_file_carries_only_match_rows(tmp_path: Path) -> None:
+    vault, training, matches = _paths(tmp_path)
+    upsert_entry(vault, _entry(marc_control_id="m1", nypl_uuid="u1", verdict="match"))
+    upsert_entry(vault, _entry(marc_control_id="m2", nypl_uuid="u2", verdict="no_match"))
+    upsert_entry(vault, _entry(marc_control_id="m3", nypl_uuid="u3", verdict="match"))
+    upsert_entry(vault, _entry(marc_control_id="m4", nypl_uuid="u4", verdict="unsure"))
+
+    publish_linkage(vault, training, matches)
+
+    matches_rows = _rows(matches)
+    assert len(matches_rows) == 2
+    assert {row["verdict"] for row in matches_rows} == {"match"}
+
+
+def test_matches_file_uses_identical_row_schema_to_training(tmp_path: Path) -> None:
+    """A match row appearing in both files is byte-identical."""
+    vault, training, matches = _paths(tmp_path)
+    upsert_entry(vault, _entry(verdict="match"))
+
+    publish_linkage(vault, training, matches)
+
+    assert training.read_bytes() == matches.read_bytes()
 
 
 def test_field_order_leads_with_universal_identifiers(tmp_path: Path) -> None:
-    """Universal IDs lead; marc_control_id is at the tail."""
-    vault = tmp_path / "vault.jsonl"
-    out = tmp_path / "published.jsonl"
+    vault, training, matches = _paths(tmp_path)
     upsert_entry(vault, _entry())
 
-    publish_linkage(vault, out)
+    publish_linkage(vault, training, matches)
 
-    raw = out.read_text(encoding="utf-8").strip()
+    raw = training.read_text(encoding="utf-8").strip()
     expected_prefix = '{"lccn":"40012345","oclc":"ocm12345","isbns":["9780000000000"]'
     assert raw.startswith(expected_prefix)
     assert raw.endswith('"marc_control_id":"ctrl-1"}')
 
 
-def test_note_is_stripped_from_output(tmp_path: Path) -> None:
-    """The labeler's free-text note must not appear in published output."""
-    vault = tmp_path / "vault.jsonl"
-    out = tmp_path / "published.jsonl"
+def test_note_is_stripped_from_both_files(tmp_path: Path) -> None:
+    vault, training, matches = _paths(tmp_path)
     upsert_entry(vault, _entry(note="series-level CCE, see series titled X"))
 
-    publish_linkage(vault, out)
+    publish_linkage(vault, training, matches)
 
-    raw = out.read_text(encoding="utf-8")
-    assert "note" not in raw
-    assert "series-level" not in raw
+    for path in (training, matches):
+        raw = path.read_text(encoding="utf-8")
+        assert "note" not in raw
+        assert "series-level" not in raw
 
 
 def test_null_universal_identifiers_serialize_as_null(tmp_path: Path) -> None:
-    vault = tmp_path / "vault.jsonl"
-    out = tmp_path / "published.jsonl"
+    vault, training, matches = _paths(tmp_path)
     upsert_entry(vault, _entry(lccn=None, oclc=None, isbns=()))
 
-    publish_linkage(vault, out)
+    publish_linkage(vault, training, matches)
 
-    row = _rows(out)[0]
+    row = _rows(training)[0]
     assert row["lccn"] is None
     assert row["oclc"] is None
     assert row["isbns"] == []
@@ -108,21 +131,19 @@ def test_null_universal_identifiers_serialize_as_null(tmp_path: Path) -> None:
 
 def test_null_cce_renewal_fields_serialize_as_null(tmp_path: Path) -> None:
     """An unrenewed registration has cce_renewal_id and cce_renewal_oreg null."""
-    vault = tmp_path / "vault.jsonl"
-    out = tmp_path / "published.jsonl"
+    vault, training, matches = _paths(tmp_path)
     upsert_entry(vault, _entry(cce_renewal_id=None, cce_renewal_oreg=None))
 
-    publish_linkage(vault, out)
+    publish_linkage(vault, training, matches)
 
-    row = _rows(out)[0]
+    row = _rows(training)[0]
     assert row["cce_regnum"] == "A12345"
     assert row["cce_renewal_id"] is None
     assert row["cce_renewal_oreg"] is None
 
 
 def test_rows_emitted_in_labeled_at_ascending_order(tmp_path: Path) -> None:
-    vault = tmp_path / "vault.jsonl"
-    out = tmp_path / "published.jsonl"
+    vault, training, matches = _paths(tmp_path)
     upsert_entry(
         vault,
         _entry(marc_control_id="late", nypl_uuid="late", labeled_at="2026-05-31T15:00:00+00:00"),
@@ -140,48 +161,60 @@ def test_rows_emitted_in_labeled_at_ascending_order(tmp_path: Path) -> None:
         ),
     )
 
-    publish_linkage(vault, out)
+    publish_linkage(vault, training, matches)
 
-    control_ids = [row["marc_control_id"] for row in _rows(out)]
+    control_ids = [row["marc_control_id"] for row in _rows(training)]
     assert control_ids == ["early", "middle", "late"]
 
 
-def test_empty_vault_produces_empty_output(tmp_path: Path) -> None:
-    vault = tmp_path / "vault.jsonl"
-    out = tmp_path / "published.jsonl"
+def test_empty_vault_produces_empty_outputs(tmp_path: Path) -> None:
+    vault, training, matches = _paths(tmp_path)
 
-    report = publish_linkage(vault, out)
+    report = publish_linkage(vault, training, matches)
 
     assert report.rows_written == 0
     assert report.matches == 0
-    assert report.no_matches == 0
-    assert report.unsures == 0
-    assert out.read_text(encoding="utf-8") == ""
+    assert training.read_text(encoding="utf-8") == ""
+    assert matches.read_text(encoding="utf-8") == ""
 
 
-def test_creates_output_parent_directory(tmp_path: Path) -> None:
+def test_vault_with_no_matches_produces_empty_matches_file(tmp_path: Path) -> None:
+    """A vault holding only no_match + unsure verdicts produces an empty matches file."""
+    vault, training, matches = _paths(tmp_path)
+    upsert_entry(vault, _entry(marc_control_id="m1", nypl_uuid="u1", verdict="no_match"))
+    upsert_entry(vault, _entry(marc_control_id="m2", nypl_uuid="u2", verdict="unsure"))
+
+    publish_linkage(vault, training, matches)
+
+    assert len(_rows(training)) == 2
+    assert matches.read_text(encoding="utf-8") == ""
+
+
+def test_creates_output_parent_directories(tmp_path: Path) -> None:
+    """Each output file's parent directory is created if missing."""
     vault = tmp_path / "vault.jsonl"
-    out = tmp_path / "nested" / "deeper" / "published.jsonl"
+    training = tmp_path / "nested" / "training" / "training.jsonl"
+    matches = tmp_path / "other" / "matches" / "matches.jsonl"
     upsert_entry(vault, _entry())
 
-    publish_linkage(vault, out)
+    publish_linkage(vault, training, matches)
 
-    assert out.exists()
+    assert training.exists()
+    assert matches.exists()
 
 
-def test_tmp_file_cleaned_up_on_success(tmp_path: Path) -> None:
-    vault = tmp_path / "vault.jsonl"
-    out = tmp_path / "published.jsonl"
+def test_tmp_files_cleaned_up_on_success(tmp_path: Path) -> None:
+    vault, training, matches = _paths(tmp_path)
     upsert_entry(vault, _entry())
 
-    publish_linkage(vault, out)
+    publish_linkage(vault, training, matches)
 
-    assert not out.with_name(out.name + ".tmp").exists()
+    assert not training.with_name(training.name + ".tmp").exists()
+    assert not matches.with_name(matches.name + ".tmp").exists()
 
 
-def test_cli_publish_linkage_writes_jsonl(tmp_path: Path) -> None:
-    vault = tmp_path / "vault.jsonl"
-    out = tmp_path / "published.jsonl"
+def test_cli_publish_linkage_writes_both_files(tmp_path: Path) -> None:
+    vault, training, matches = _paths(tmp_path)
     upsert_entry(vault, _entry(marc_control_id="m1", nypl_uuid="u1"))
     upsert_entry(vault, _entry(marc_control_id="m2", nypl_uuid="u2", verdict="no_match"))
 
@@ -191,8 +224,10 @@ def test_cli_publish_linkage_writes_jsonl(tmp_path: Path) -> None:
             "publish-linkage",
             "--vault",
             str(vault),
-            "--out",
-            str(out),
+            "--training-out",
+            str(training),
+            "--matches-out",
+            str(matches),
             "--log-file",
             str(tmp_path / "run.log"),
         ],
@@ -200,7 +235,6 @@ def test_cli_publish_linkage_writes_jsonl(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "wrote 2 rows" in result.stdout
-    assert "matches=1" in result.stdout
-    assert "no_matches=1" in result.stdout
-    rows = _rows(out)
-    assert len(rows) == 2
+    assert "1 matches also written" in result.stdout
+    assert len(_rows(training)) == 2
+    assert len(_rows(matches)) == 1
