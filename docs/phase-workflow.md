@@ -137,7 +137,7 @@ So every change ships as an isolated phase branch with its own regenerated basel
 
 ## Reading the diff
 
-The diff script reports three categories per pair (default threshold 0.5, default move threshold 0.10):
+`scripts/diff_branch_predictions.py` (the script invoked in step 5 of the flowchart above) reports three categories per pair (default threshold 0.5, default move threshold 0.10):
 
 1. **NO-MATCH → MATCH flips.** Score crossed up through the threshold. Split by vault verdict:
    - `vault=match` rows are **true wins** — the branch promoted a labeled match that `main` had below the line.
