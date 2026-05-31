@@ -35,6 +35,31 @@ the original:
 When you genuinely can't tell whether the CCE entry registers the
 original or a translation → `unsure`, note the ambiguity.
 
+## Series and sets — asymmetric rule
+
+When MARC and CCE describe different scopes within the same series or
+set, the verdict depends on which side is the broader entity. The
+question we're answering is *"does this CCE registration cover the work
+the MARC describes?"* — not *"are these the same bibliographic
+entity?"* Coverage flows from the broader registration to the narrower
+work, not the other way around.
+
+- **MARC = series/set; CCE = single member → `no_match`.** The CCE
+  registration covers only the specific volume; calling the pair a
+  match would imply the registration covers the whole series, which
+  it doesn't. This is the common case (Princeton's MARC frequently
+  describes whole multi-volume sets; CCE registrations are usually
+  per-volume).
+- **MARC = single member; CCE = series/set → `match`.** A series-level
+  registration covers the members of the series, so the member-level
+  MARC is genuinely covered by that registration. This is rarer but
+  real. Capture *"series-level CCE"* (or similar) in the note so the
+  inference is visible downstream — a future consumer needs to know
+  this is a series-coverage match, not an exact-volume match.
+
+When you can't tell whether a CCE registration is series-level or
+volume-level → `unsure`, note the doubt.
+
 ## E-book reprint badge
 
 When the card shows a yellow **E-book reprint** badge, the MARC record's
