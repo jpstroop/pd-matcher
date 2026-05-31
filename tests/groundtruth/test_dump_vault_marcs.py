@@ -248,6 +248,22 @@ def test_001_with_empty_text_is_treated_as_missing(tmp_path: Path) -> None:
     assert _control_numbers(tmp_path / "vault_marcs.xml") == ["ctrl-real"]
 
 
+def test_output_file_ends_with_trailing_newline(tmp_path: Path) -> None:
+    """The dump terminates with a single ``\\n`` so the pre-commit end-of-file
+    hook does not have to retroactively modify the file post-stage."""
+    vault = tmp_path / "vault.jsonl"
+    pool = tmp_path / "pool"
+    upsert_entry(vault, _entry("ctrl-a", "uuid-a"))
+    _write_shard(pool / "eng" / "shard.xml", [("ctrl-a", "Anything")])
+
+    out = tmp_path / "vault_marcs.xml"
+    dump_vault_marcs(vault, pool, out)
+
+    raw = out.read_bytes()
+    assert raw.endswith(b"</collection>\n")
+    assert not raw.endswith(b"</collection>\n\n")
+
+
 def test_creates_output_parent_directory(tmp_path: Path) -> None:
     vault = tmp_path / "vault.jsonl"
     pool = tmp_path / "pool"

@@ -101,6 +101,8 @@ def dump_vault_marcs(
                     _clear_record(record)
                 if wanted.issubset(written):
                     break
+    with output_path.open("ab") as appendix:
+        appendix.write(b"\n")
     missing = wanted - written
     if missing:
         _LOGGER.warning(
