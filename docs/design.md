@@ -23,7 +23,7 @@ The answer is non-trivial because:
 
 The codebase decomposes this into seven layers, each independently testable and reviewable:
 
-1. **Parsing** (`parsers/`) — streaming readers for MARCXML, NYPL registration XML, NYPL renewal TSV.
+1. **Parsing** (`parsers/`) — streaming readers for MARCXML, CCE registration XML, CCE renewal TSV (the CCE files in their NYPL-transcribed form).
 2. **Normalization** (`normalize/`) — Unicode/diacritic stripping, multilingual stopword removal, Snowball stemming, multilingual number/ordinal/abbreviation expansion.
 3. **Indexing** (`index/`) — LMDB-backed persistent index with year-bucket blocking and a precomputed registration↔renewal join.
 4. **Scoring** (`match/scorers/`) — pure-function scorers, one per signal type, each emitting structured `Evidence`.
@@ -115,7 +115,7 @@ src/pd_matcher/
     └── messages.py               # output wire format (worker → writer)
 ```
 
-Tests mirror this exactly under `tests/unit/`, with `tests/integration/` for cross-module smoke tests and `tests/fixtures/` for tiny hand-crafted MARC, NYPL registration, and NYPL renewal samples.
+Tests mirror this exactly under `tests/unit/`, with `tests/integration/` for cross-module smoke tests and `tests/fixtures/` for tiny hand-crafted MARC, CCE registration, and CCE renewal samples.
 
 ---
 
@@ -209,7 +209,7 @@ We delegate the heavy lifting to [ftfy](https://ftfy.readthedocs.io/), which han
 
 `pd_matcher.normalize.encoding.clean_text` wraps this into a `CleanedText(text, mojibake_fixed)` result. Every parser routes each finalized subfield value through `clean_text` after its own punctuation strip. Per-parser stats counters (`MarcParseStats`, `NyplRegParseStats`, `NyplRenParseStats`) carry a `mojibake_fixed_count` so dataset quality can be surfaced in run reporting without re-walking the source files.
 
-For NYPL renewals (TSV, read as raw bytes rather than parsed as XML by lxml), we additionally probe each file at open time with a whole-file UTF-8 strict decode. The supplied corpus always passes the probe, so the hot path uses `csv.reader` directly. When the probe fails — possible if a future ingest mixes a Windows-1255-encoded Hebrew slice into the corpus — the parser switches to a bytes-level reader that routes every cell through `pd_matcher.normalize.cp1255_fallback.decode_subfield`. That decoder tries strict UTF-8, then strict Windows-1255 (accepted only if the result contains at least one Hebrew-block codepoint, to reject cp1255 decodings that succeed but produce garbage), then UTF-8 with `errors="replace"`. The two fallback counters (`subfields_decoded_as_cp1255`, `subfields_decoded_with_replacement`) are zero on the current corpus and exist to make a future quality regression visible the first time it appears.
+For CCE renewals (TSV, read as raw bytes rather than parsed as XML by lxml), we additionally probe each file at open time with a whole-file UTF-8 strict decode. The supplied corpus always passes the probe, so the hot path uses `csv.reader` directly. When the probe fails — possible if a future ingest mixes a Windows-1255-encoded Hebrew slice into the corpus — the parser switches to a bytes-level reader that routes every cell through `pd_matcher.normalize.cp1255_fallback.decode_subfield`. That decoder tries strict UTF-8, then strict Windows-1255 (accepted only if the result contains at least one Hebrew-block codepoint, to reject cp1255 decodings that succeed but produce garbage), then UTF-8 with `errors="replace"`. The two fallback counters (`subfields_decoded_as_cp1255`, `subfields_decoded_with_replacement`) are zero on the current corpus and exist to make a future quality regression visible the first time it appears.
 
 ### Pre-commit + ruff + mypy strict
 

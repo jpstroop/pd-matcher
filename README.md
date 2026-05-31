@@ -683,8 +683,9 @@ permitted.
 
 This license covers the code only, **not the bundled data**:
 
-- The NYPL registration and renewal datasets are git submodules under
-  `data/nypl-reg/` and `data/nypl-ren/` and carry their own licenses from NYPL.
+- The CCE registration and renewal datasets are pulled in as NYPL-transcribed
+  git submodules under `data/nypl-reg/` and `data/nypl-ren/`; NYPL's
+  transcriptions carry their own licenses.
 - The underlying Catalog of Copyright Entries is a work of the U.S. Copyright
   Office (Library of Congress) and is in the public domain in the United States.
 - Any MARC catalog you match against, and the ground-truth pairings, are your

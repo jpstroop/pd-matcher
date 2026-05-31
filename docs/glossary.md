@@ -223,8 +223,9 @@ Python command runs through it (`pdm run …`) so it uses the project's locked
 dependency versions.
 
 **Submodule (git).** A git repository nested inside another at a pinned commit.
-The NYPL registration and renewal datasets are submodules — versioned references
-to NYPL's own repositories rather than copies checked into ours.
+The CCE registration and renewal datasets are pulled in as NYPL-transcribed
+submodules — versioned references to NYPL's own repositories rather than
+copies checked into ours.
 
 **Snowball.** A framework and family of stemming algorithms (the successor to the
 classic Porter stemmer), with rule sets per language. Accessed via the `PyStemmer`
