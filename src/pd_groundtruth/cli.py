@@ -20,6 +20,7 @@ from typer import echo
 from pd_groundtruth.acquire import acquire
 from pd_groundtruth.acquire import default_min_year
 from pd_groundtruth.build_queue import build_queue
+from pd_groundtruth.dump_vault_marcs import dump_vault_marcs
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
@@ -53,6 +54,7 @@ _DEFAULT_POOL_PATH = Path("data/candidates")
 _DEFAULT_INDEX_PATH = Path("caches/cce.lmdb")
 _DEFAULT_REVIEW_DB_PATH = Path("data/review.db")
 _DEFAULT_VAULT_PATH = Path("data/label_vault.jsonl")
+_DEFAULT_VAULT_MARCS_PATH = Path("data/vault_marcs.xml")
 _LABELER = "jpstroop"
 _LOG_DIR_NAME = "logs"
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -371,6 +373,36 @@ def seed_vault_command(
             upsert_entry(vault, entry)
             seeded += 1
     echo(f"seeded {seeded} labels; skipped {skipped} already-present")
+
+
+@app.command(name="dump-vault-marcs")
+def dump_vault_marcs_command(
+    vault: Annotated[
+        Path,
+        Option("--vault", help="JSONL label vault whose MARCs to dump."),
+    ] = _DEFAULT_VAULT_PATH,
+    pool: Annotated[
+        Path,
+        Option("--pool", help="Root dir whose <lang>/*.xml shards form the candidate pool."),
+    ] = _DEFAULT_POOL_PATH,
+    out: Annotated[
+        Path,
+        Option("--out", help="Destination MARCXML file."),
+    ] = _DEFAULT_VAULT_MARCS_PATH,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Write a MARCXML collection of every vault MARC for downstream publication."""
+    _configure_logging("dump-vault-marcs", log_file)
+    report = dump_vault_marcs(vault, pool, out)
+    echo(
+        f"wrote {report.marcs_written} records to {out} "
+        f"(vault_entries={report.vault_entries} "
+        f"distinct_marcs={report.distinct_marcs_requested} "
+        f"missing={report.marcs_missing})"
+    )
 
 
 @app.command(name="vault-into-queue")
