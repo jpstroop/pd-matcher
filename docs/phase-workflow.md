@@ -125,6 +125,13 @@ So every change ships as an isolated phase branch with its own regenerated basel
 │ 9. CLEAN UP                                                 │
 │   git branch -d phase-N-topic                               │
 │   gh issue close N -R jpstroop/pd-matcher -c "merged at …"  │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 10. REBUILD QUEUE (if scoring changed; batchable)           │
+│    pdm run pd-groundtruth build-queue --rebuild             │
+│    (defer until a cluster of related branches lands)        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -149,3 +156,19 @@ The diff script reports three categories per pair (default threshold 0.5, defaul
 ## When to skip the diff
 
 Skip the per-pair diff only when the change cannot possibly affect scoring: documentation, comment-only edits, test refactors that don't touch source, or scripts in the gitignored `scripts/` directory. Anything that touches `src/pd_matcher/` — even a constant — runs through the diff before merge.
+
+## After scoring changes: rebuild the labeling queue
+
+The review queue (`data/review.db`) is the SQLite database the labeling UI reads from. It is built by scoring a stratified MARC sample against the current matcher and writing the top candidates per record. **Once it's built, it doesn't update itself** — every pair in it carries the score and band assignment computed at build time.
+
+After merging any branch that changes how the matcher scores (new pairings, new signals, new normalization rules, weight changes), the queue is stale relative to `main`. Pairs that *now* fall into the labeling bands aren't surfaced; pairs that *now* score below threshold are still in rotation. Labels captured against a stale queue are informative against the old matcher, not the current one.
+
+```bash
+pdm run pd-groundtruth build-queue --rebuild
+```
+
+`--rebuild` drops the existing `data/review.db` and re-runs scoring against the current pool and matcher. Vault verdicts are preserved automatically — every entry in `data/label_vault.jsonl` is pre-applied into the freshly-built queue, so pairs you've already labeled stay labeled.
+
+**Batching.** The rebuild is the same cost regardless of how many scoring branches merged since the last one, so defer it until a cluster of related branches has all landed. The previous status snapshot in the resume-here memory tracks when a rebuild is pending; check it before labeling.
+
+Skip the rebuild when the change cannot affect scoring (docs, tests, scripts, refactors).
