@@ -34,8 +34,8 @@ from msgspec.json import decode as json_decode
 
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import VaultEntry
-from pd_groundtruth.label_vault import append_entry
 from pd_groundtruth.label_vault import extract_marc_identifiers
+from pd_groundtruth.label_vault import upsert_entry
 from pd_groundtruth.review import nav_history
 from pd_groundtruth.review.filters import ReviewFilters
 from pd_groundtruth.review.filters import label_filters_active
@@ -316,7 +316,7 @@ def _append_vault_entry(
             cce_renewal_id=cce_renewal_id,
             cce_renewal_oreg=cce_renewal_oreg,
         )
-        append_entry(vault_path, entry)
+        upsert_entry(vault_path, entry)
     except Exception:
         _LOGGER.exception(
             "label vault append failed for marc=%s nypl=%s",

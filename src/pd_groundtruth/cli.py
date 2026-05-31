@@ -22,9 +22,9 @@ from pd_groundtruth.acquire import default_min_year
 from pd_groundtruth.build_queue import build_queue
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import VaultEntry
-from pd_groundtruth.label_vault import append_entry
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import extract_marc_identifiers
+from pd_groundtruth.label_vault import upsert_entry
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.review.server import serve
 from pd_groundtruth.review_db import VERDICT_MATCH
@@ -330,7 +330,7 @@ def seed_vault_command(
     ] = _DEFAULT_REVIEW_DB_PATH,
     vault: Annotated[
         Path,
-        Option("--vault", help="JSONL label vault to append into (created if absent)."),
+        Option("--vault", help="JSONL label vault to upsert into (created if absent)."),
     ] = _DEFAULT_VAULT_PATH,
     log_file: Annotated[
         Path | None,
@@ -339,9 +339,9 @@ def seed_vault_command(
 ) -> None:
     """One-shot migration: dump every current label from ``--db`` into ``--vault``.
 
-    Idempotent: entries already present (matching ``marc_control_id`` +
-    ``nypl_uuid`` + ``labeled_at``) are skipped. Different ``labeled_at`` for
-    the same pair is treated as a new event and appended.
+    Idempotent: entries already present at the same ``labeled_at`` for the
+    same pair are skipped. A different ``labeled_at`` upserts the entry in
+    place, since the vault holds exactly one entry per pair.
     """
     _configure_logging("seed-vault", log_file)
     existing = current_entries(vault)
@@ -368,7 +368,7 @@ def seed_vault_command(
                 cce_renewal_id=label.cce_renewal_id,
                 cce_renewal_oreg=label.cce_renewal_oreg,
             )
-            append_entry(vault, entry)
+            upsert_entry(vault, entry)
             seeded += 1
     echo(f"seeded {seeded} labels; skipped {skipped} already-present")
 

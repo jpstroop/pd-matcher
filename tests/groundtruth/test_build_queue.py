@@ -770,7 +770,7 @@ def test_writer_vault_injection_preserves_verdict_metadata(tmp_path: Path) -> No
 def test_build_queue_carries_vault_pair_through_rebuild(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    from pd_groundtruth.label_vault import append_entry
+    from pd_groundtruth.label_vault import upsert_entry
 
     pool = tmp_path / "pool"
     (pool / "eng").mkdir(parents=True)
@@ -779,7 +779,7 @@ def test_build_queue_carries_vault_pair_through_rebuild(
 
     vault_path = tmp_path / "vault.jsonl"
     vault_entry = _vault_entry("vault-marc", "vault-uuid", verdict="match")
-    append_entry(vault_path, vault_entry)
+    upsert_entry(vault_path, vault_entry)
 
     captured_resolve: dict[str, object] = {}
     captured_sample_marcs: list[list[str]] = []
@@ -925,13 +925,13 @@ class _NullCceLookup:
 def test_build_queue_reports_vault_entries_missing_from_pool(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    from pd_groundtruth.label_vault import append_entry
+    from pd_groundtruth.label_vault import upsert_entry
 
     pool = tmp_path / "pool"
     (pool / "eng").mkdir(parents=True)
     _write_shard(pool / "eng" / "shard_1.xml", "in-pool", "Present")
     vault_path = tmp_path / "vault.jsonl"
-    append_entry(vault_path, _vault_entry("missing-marc", "uuid-x"))
+    upsert_entry(vault_path, _vault_entry("missing-marc", "uuid-x"))
 
     from pd_groundtruth import build_queue_vault as bqv
 
@@ -976,13 +976,13 @@ def test_build_queue_reports_vault_entries_missing_from_pool(
 def test_build_queue_reports_vault_entry_missing_from_index(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    from pd_groundtruth.label_vault import append_entry
+    from pd_groundtruth.label_vault import upsert_entry
 
     pool = tmp_path / "pool"
     (pool / "eng").mkdir(parents=True)
     _write_shard(pool / "eng" / "shard_1.xml", "have-marc", "Present")
     vault_path = tmp_path / "vault.jsonl"
-    append_entry(vault_path, _vault_entry("have-marc", "uuid-gone"))
+    upsert_entry(vault_path, _vault_entry("have-marc", "uuid-gone"))
 
     from pd_groundtruth import build_queue_vault as bqv
 
@@ -1099,11 +1099,11 @@ def test_build_queue_threads_requeue_verdicts_to_resolver_and_factory(
 
 def test_factory_call_applies_requeue_filter_to_vault_reread(tmp_path: Path) -> None:
     """The factory's writer-process vault re-read honors ``requeue_verdicts``."""
-    from pd_groundtruth.label_vault import append_entry
+    from pd_groundtruth.label_vault import upsert_entry
 
     vault_path = tmp_path / "vault.jsonl"
-    append_entry(vault_path, _vault_entry("ctrl-keep", "uuid-keep", verdict="match"))
-    append_entry(vault_path, _vault_entry("ctrl-drop", "uuid-drop", verdict="unsure"))
+    upsert_entry(vault_path, _vault_entry("ctrl-keep", "uuid-keep", verdict="match"))
+    upsert_entry(vault_path, _vault_entry("ctrl-drop", "uuid-drop", verdict="unsure"))
     factory = StratifyingWriterFactory(
         db_path=tmp_path / "review.db",
         budget=BudgetModel(caps={}),

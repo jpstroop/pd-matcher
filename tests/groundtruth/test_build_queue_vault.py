@@ -10,7 +10,7 @@ from pd_groundtruth.build_queue_vault import _make_vault_pair_builder
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import VaultEntry
-from pd_groundtruth.label_vault import append_entry
+from pd_groundtruth.label_vault import upsert_entry
 from pd_groundtruth.sampling import SOURCE_BANDED
 from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.evidence import Evidence
@@ -110,7 +110,7 @@ def _entry(control_id: str, nypl_uuid: str, *, verdict: str) -> VaultEntry:
 
 def _seed_vault(path: Path, entries: tuple[VaultEntry, ...]) -> None:
     for entry in entries:
-        append_entry(path, entry)
+        upsert_entry(path, entry)
 
 
 def test_load_vault_filtered_default_returns_all_entries(tmp_path: Path) -> None:

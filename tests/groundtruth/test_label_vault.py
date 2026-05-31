@@ -8,10 +8,10 @@ from pytest import raises
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import VaultEntry
-from pd_groundtruth.label_vault import append_entry
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.label_vault import iter_entries
+from pd_groundtruth.label_vault import upsert_entry
 from pd_matcher.models import MarcRecord
 
 
@@ -53,9 +53,9 @@ def test_current_entries_returns_empty_dict_for_missing_file(tmp_path: Path) -> 
     assert current_entries(tmp_path / "missing.jsonl") == {}
 
 
-def test_append_creates_parent_dir_and_file(tmp_path: Path) -> None:
+def test_upsert_creates_parent_dir_and_file(tmp_path: Path) -> None:
     path = tmp_path / "nested" / "vault.jsonl"
-    append_entry(path, _entry())
+    upsert_entry(path, _entry())
     assert path.exists()
     assert path.parent.is_dir()
 
@@ -63,15 +63,15 @@ def test_append_creates_parent_dir_and_file(tmp_path: Path) -> None:
 def test_round_trip_single_entry(tmp_path: Path) -> None:
     path = tmp_path / "vault.jsonl"
     entry = _entry(verdict="no_match", note="title collision")
-    append_entry(path, entry)
+    upsert_entry(path, entry)
     [read_back] = list(iter_entries(path))
     assert read_back == entry
 
 
-def test_append_writes_one_line_per_entry_with_trailing_newline(tmp_path: Path) -> None:
+def test_upsert_writes_one_line_per_distinct_pair_with_trailing_newline(tmp_path: Path) -> None:
     path = tmp_path / "vault.jsonl"
-    append_entry(path, _entry(marc_control_id="a", nypl_uuid="u-a"))
-    append_entry(path, _entry(marc_control_id="b", nypl_uuid="u-b"))
+    upsert_entry(path, _entry(marc_control_id="a", nypl_uuid="u-a"))
+    upsert_entry(path, _entry(marc_control_id="b", nypl_uuid="u-b"))
     raw = path.read_bytes()
     assert raw.endswith(b"\n")
     assert raw.count(b"\n") == 2
@@ -79,7 +79,7 @@ def test_append_writes_one_line_per_entry_with_trailing_newline(tmp_path: Path) 
 
 def test_iter_entries_skips_empty_trailing_lines(tmp_path: Path) -> None:
     path = tmp_path / "vault.jsonl"
-    append_entry(path, _entry())
+    upsert_entry(path, _entry())
     with path.open("a", encoding="utf-8") as handle:
         handle.write("\n\n   \n")
     assert len(list(iter_entries(path))) == 1
@@ -110,9 +110,9 @@ def test_current_entries_returns_latest_per_key(tmp_path: Path) -> None:
     first = _entry(verdict="match", labeled_at="2026-05-01T00:00:00+00:00")
     second = _entry(verdict="no_match", labeled_at="2026-05-02T00:00:00+00:00")
     third = _entry(verdict="unsure", labeled_at="2026-05-03T00:00:00+00:00")
-    append_entry(path, first)
-    append_entry(path, second)
-    append_entry(path, third)
+    upsert_entry(path, first)
+    upsert_entry(path, second)
+    upsert_entry(path, third)
     latest = current_entries(path)
     assert latest[("ctrl-1", "uuid-1")] == third
 
@@ -121,19 +121,64 @@ def test_current_entries_keeps_distinct_keys_separate(tmp_path: Path) -> None:
     path = tmp_path / "vault.jsonl"
     a = _entry(marc_control_id="a", nypl_uuid="u-a", verdict="match")
     b = _entry(marc_control_id="b", nypl_uuid="u-b", verdict="no_match")
-    append_entry(path, a)
-    append_entry(path, b)
+    upsert_entry(path, a)
+    upsert_entry(path, b)
     latest = current_entries(path)
     assert latest[("a", "u-a")] == a
     assert latest[("b", "u-b")] == b
 
 
-def test_full_history_preserved_via_iter_entries(tmp_path: Path) -> None:
+def test_upsert_replaces_existing_entry_for_same_pair(tmp_path: Path) -> None:
     path = tmp_path / "vault.jsonl"
-    append_entry(path, _entry(verdict="match", labeled_at="2026-05-01T00:00:00+00:00"))
-    append_entry(path, _entry(verdict="no_match", labeled_at="2026-05-02T00:00:00+00:00"))
-    history = list(iter_entries(path))
-    assert [event.verdict for event in history] == ["match", "no_match"]
+    upsert_entry(path, _entry(verdict="match", labeled_at="2026-05-01T00:00:00+00:00"))
+    upsert_entry(path, _entry(verdict="no_match", labeled_at="2026-05-02T00:00:00+00:00"))
+    entries = list(iter_entries(path))
+    assert len(entries) == 1
+    assert entries[0].verdict == "no_match"
+    assert entries[0].labeled_at == "2026-05-02T00:00:00+00:00"
+
+
+def test_upsert_same_verdict_updates_timestamp_in_place(tmp_path: Path) -> None:
+    path = tmp_path / "vault.jsonl"
+    upsert_entry(path, _entry(verdict="match", note=None, labeled_at="2026-05-01T00:00:00+00:00"))
+    upsert_entry(path, _entry(verdict="match", note=None, labeled_at="2026-05-02T00:00:00+00:00"))
+    entries = list(iter_entries(path))
+    assert len(entries) == 1
+    assert entries[0].verdict == "match"
+    assert entries[0].labeled_at == "2026-05-02T00:00:00+00:00"
+
+
+def test_upsert_same_verdict_updates_note_when_changed(tmp_path: Path) -> None:
+    path = tmp_path / "vault.jsonl"
+    upsert_entry(path, _entry(verdict="match", note=None, labeled_at="2026-05-01T00:00:00+00:00"))
+    upsert_entry(
+        path,
+        _entry(verdict="match", note="OCR glitch caught", labeled_at="2026-05-02T00:00:00+00:00"),
+    )
+    entries = list(iter_entries(path))
+    assert len(entries) == 1
+    assert entries[0].note == "OCR glitch caught"
+    assert entries[0].labeled_at == "2026-05-02T00:00:00+00:00"
+
+
+def test_upsert_preserves_first_seen_order_across_distinct_pairs(tmp_path: Path) -> None:
+    path = tmp_path / "vault.jsonl"
+    upsert_entry(path, _entry(marc_control_id="a", nypl_uuid="u-a"))
+    upsert_entry(path, _entry(marc_control_id="b", nypl_uuid="u-b"))
+    upsert_entry(path, _entry(marc_control_id="c", nypl_uuid="u-c"))
+    upsert_entry(
+        path,
+        _entry(marc_control_id="a", nypl_uuid="u-a", verdict="no_match"),
+    )
+    keys = [(e.marc_control_id, e.nypl_uuid) for e in iter_entries(path)]
+    assert keys == [("a", "u-a"), ("b", "u-b"), ("c", "u-c")]
+
+
+def test_upsert_cleans_up_tmp_file_on_success(tmp_path: Path) -> None:
+    path = tmp_path / "vault.jsonl"
+    upsert_entry(path, _entry())
+    tmp_path_artifact = path.with_name(path.name + ".tmp")
+    assert not tmp_path_artifact.exists()
 
 
 def test_extract_marc_identifiers_pulls_lccn_oclc_isbns() -> None:
@@ -193,7 +238,7 @@ def test_round_trip_preserves_cce_identifier_fields(tmp_path: Path) -> None:
         cce_renewal_id="R999",
         cce_renewal_oreg="A555",
     )
-    append_entry(path, entry)
+    upsert_entry(path, entry)
     [read_back] = list(iter_entries(path))
     assert read_back.cce_regnum == "A555"
     assert read_back.cce_renewal_id == "R999"
@@ -209,7 +254,7 @@ def test_round_trip_preserves_nulls_for_unrenewed_registration(tmp_path: Path) -
         cce_renewal_id=None,
         cce_renewal_oreg=None,
     )
-    append_entry(path, entry)
+    upsert_entry(path, entry)
     [read_back] = list(iter_entries(path))
     assert read_back.cce_regnum == "A111"
     assert read_back.cce_renewal_id is None
