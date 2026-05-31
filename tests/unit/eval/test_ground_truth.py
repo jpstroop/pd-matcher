@@ -8,7 +8,7 @@ from pytest import LogCaptureFixture
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import VaultEntry
-from pd_groundtruth.label_vault import append_entry
+from pd_groundtruth.label_vault import upsert_entry
 from pd_matcher.config.loader import load_pairing_config
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
@@ -122,7 +122,7 @@ def _vault_entry(
 
 def _seed_vault(vault_path: Path, entries: tuple[VaultEntry, ...]) -> None:
     for entry in entries:
-        append_entry(vault_path, entry)
+        upsert_entry(vault_path, entry)
 
 
 def _standard_marc_records() -> tuple[str, ...]:

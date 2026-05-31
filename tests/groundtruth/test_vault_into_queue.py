@@ -11,7 +11,7 @@ from pd_groundtruth.cli import app
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import VaultEntry
-from pd_groundtruth.label_vault import append_entry
+from pd_groundtruth.label_vault import upsert_entry
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
 from pd_groundtruth.review_db import PairInsert
@@ -301,7 +301,7 @@ def test_run_backfill_uses_latest_vault_entry_per_key(tmp_path: Path) -> None:
     with ReviewDb.connect(db_path):
         pass
     vault_path = tmp_path / "vault.jsonl"
-    append_entry(
+    upsert_entry(
         vault_path,
         _vault_entry(
             "ctrl-a",
@@ -310,7 +310,7 @@ def test_run_backfill_uses_latest_vault_entry_per_key(tmp_path: Path) -> None:
             labeled_at="2026-05-22T09:00:00+00:00",
         ),
     )
-    append_entry(
+    upsert_entry(
         vault_path,
         _vault_entry(
             "ctrl-a",
@@ -476,8 +476,8 @@ def test_vault_into_queue_end_to_end_against_fake_index(tmp_path: Path) -> None:
     with ReviewDb.connect(db_path):
         pass
     vault_path = tmp_path / "vault.jsonl"
-    append_entry(vault_path, _vault_entry("id-1", "uuid-1"))
-    append_entry(
+    upsert_entry(vault_path, _vault_entry("id-1", "uuid-1"))
+    upsert_entry(
         vault_path,
         _vault_entry("id-missing", "uuid-2", verdict=VERDICT_NO_MATCH),
     )

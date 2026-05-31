@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import VaultEntry
-from pd_groundtruth.label_vault import append_entry
+from pd_groundtruth.label_vault import upsert_entry
 from pd_matcher.cli import _resolve_log_file
 from pd_matcher.cli import app
 from pd_matcher.config.schemas import MatchingConfig
@@ -108,8 +108,8 @@ def _write_vault(vault_path: Path) -> None:
         labeler="test",
         marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
     )
-    append_entry(vault_path, match_entry)
-    append_entry(vault_path, no_match_entry)
+    upsert_entry(vault_path, match_entry)
+    upsert_entry(vault_path, no_match_entry)
 
 
 def _prepare_vault_and_pool(tmp_path: Path) -> tuple[Path, Path]:

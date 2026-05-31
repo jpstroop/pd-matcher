@@ -98,7 +98,7 @@ def test_seed_vault_is_idempotent(tmp_path: Path) -> None:
     assert len(list(vault_path.read_text(encoding="utf-8").splitlines())) == 1
 
 
-def test_seed_vault_appends_when_relabeled(tmp_path: Path) -> None:
+def test_seed_vault_upserts_when_relabeled(tmp_path: Path) -> None:
     db_path = tmp_path / "review.db"
     vault_path = tmp_path / "vault.jsonl"
     with ReviewDb.connect(db_path) as db:
@@ -119,7 +119,7 @@ def test_seed_vault_appends_when_relabeled(tmp_path: Path) -> None:
     assert latest[("ctrl-a", "uuid-a")].verdict == "no_match"
     assert latest[("ctrl-a", "uuid-a")].note == "changed mind"
     lines = vault_path.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2
+    assert len(lines) == 1
 
 
 def test_seed_vault_on_empty_db_writes_nothing(tmp_path: Path) -> None:

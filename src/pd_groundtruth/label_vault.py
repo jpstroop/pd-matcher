@@ -7,12 +7,12 @@ new filter lands). The vault, ``data/label_vault.jsonl``, lives in the repo and 
 committed to git so the human labor invested in adjudicating pairs survives
 those rebuilds.
 
-The file is append-only JSONL: one :class:`VaultEntry` per line, encoded with
+The file is an upsert table: exactly one :class:`VaultEntry` per
+``(marc_control_id, nypl_uuid)`` pair, encoded with
 :func:`msgspec.json.encode` (compact, deterministic) and terminated with
-``"\\n"``. Every line carries a ``schema`` integer for forward-compat. The
-*current* verdict for a pair is the last entry with a given
-``(marc_control_id, nypl_uuid)`` key, so re-labels do not overwrite history —
-the full audit trail is preserved.
+``"\\n"``. Every line carries a ``schema`` integer for forward-compat.
+Re-submitting a verdict for the same pair replaces the existing entry in
+place; relabel history is not preserved. The latest state IS the entry.
 
 Identifiers persisted alongside the verdict (under
 :class:`MarcIdentifiers`) let downstream tooling re-pair a labeled MARC record
@@ -49,13 +49,13 @@ class MarcIdentifiers(Struct, frozen=True, forbid_unknown_fields=True):
 
 
 class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
-    """One verdict event persisted to the label vault.
+    """The current verdict for one ``(marc_control_id, nypl_uuid)`` pair.
 
-    A ``(marc_control_id, nypl_uuid)`` pair may appear in the vault multiple
-    times; the latest entry by file order wins. Free-text ``note`` is the only
-    structured signal the labeler carries alongside the verdict — the
-    pre-schema-3 ``reasons`` and ``field_annotations`` fields have been retired
-    in favor of letting accumulated notes surface patterns naturally.
+    Exactly one entry exists per pair; re-submitting a verdict replaces the
+    existing entry in place. Free-text ``note`` is the only structured
+    signal the labeler carries alongside the verdict — the pre-schema-3
+    ``reasons`` and ``field_annotations`` fields have been retired in favor
+    of letting accumulated notes surface patterns naturally.
 
     Schema 4 adds three flat top-level CCE-side identifier fields:
     ``cce_regnum`` (the registration's Copyright Office number),
@@ -78,20 +78,39 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     cce_renewal_oreg: str | None = None
 
 
-def append_entry(path: Path, entry: VaultEntry) -> None:
-    """Append one :class:`VaultEntry` to ``path`` as a single JSONL line.
+def upsert_entry(path: Path, entry: VaultEntry) -> None:
+    """Insert or replace the entry for ``entry``'s pair in the vault.
 
-    Creates the parent directory and the file if either is missing. Calls
-    :func:`os.fsync` after the write because the vault is precious data — a
-    process crash between ``write`` and the OS buffer flush would otherwise
-    silently lose the label.
+    The vault holds at most one entry per ``(marc_control_id, nypl_uuid)``.
+    If an entry for that pair already exists, it is replaced in place by
+    ``entry`` (the new entry's fields win wholesale — verdict, note,
+    timestamp, labeler, identifiers). Otherwise ``entry`` is appended at the
+    end. Insertion order across distinct pairs is preserved.
+
+    Written atomically via a temp file + ``os.replace`` so a crash mid-write
+    cannot corrupt the vault. ``os.fsync`` runs on the temp file before the
+    rename because the vault is precious data and a crash between buffered
+    write and OS flush would otherwise silently lose the label.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json_encode(entry).decode("utf-8") + "\n"
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(payload)
+    key = (entry.marc_control_id, entry.nypl_uuid)
+    existing = list(iter_entries(path))
+    replaced = False
+    for index, current in enumerate(existing):
+        if (current.marc_control_id, current.nypl_uuid) == key:
+            existing[index] = entry
+            replaced = True
+            break
+    if not replaced:
+        existing.append(entry)
+    tmp_path = path.with_name(path.name + ".tmp")
+    with tmp_path.open("wb") as handle:
+        for item in existing:
+            handle.write(json_encode(item))
+            handle.write(b"\n")
         handle.flush()
         fsync(handle.fileno())
+    tmp_path.replace(path)
 
 
 def iter_entries(path: Path) -> Iterator[VaultEntry]:
@@ -113,15 +132,13 @@ def iter_entries(path: Path) -> Iterator[VaultEntry]:
 
 
 def current_entries(path: Path) -> dict[tuple[str, str], VaultEntry]:
-    """Return the latest :class:`VaultEntry` per ``(marc_control_id, nypl_uuid)``.
+    """Return one :class:`VaultEntry` per ``(marc_control_id, nypl_uuid)``.
 
-    Later lines in the file overwrite earlier ones, matching the "last entry
-    wins" semantics of the vault. A missing file returns an empty dict.
+    Since the vault upsert semantics guarantee one entry per pair, this is
+    a straight ``(key, entry)`` projection of the file. A missing file
+    returns an empty dict.
     """
-    latest: dict[tuple[str, str], VaultEntry] = {}
-    for entry in iter_entries(path):
-        latest[(entry.marc_control_id, entry.nypl_uuid)] = entry
-    return latest
+    return {(entry.marc_control_id, entry.nypl_uuid): entry for entry in iter_entries(path)}
 
 
 def extract_marc_identifiers(marc: MarcRecord) -> MarcIdentifiers:
@@ -142,8 +159,8 @@ __all__ = [
     "SCHEMA_VERSION",
     "MarcIdentifiers",
     "VaultEntry",
-    "append_entry",
     "current_entries",
     "extract_marc_identifiers",
     "iter_entries",
+    "upsert_entry",
 ]
