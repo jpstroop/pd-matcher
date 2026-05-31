@@ -27,6 +27,7 @@ from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.label_vault import upsert_entry
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
+from pd_groundtruth.publish_linkage import publish_linkage
 from pd_groundtruth.review.server import serve
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
@@ -55,6 +56,7 @@ _DEFAULT_INDEX_PATH = Path("caches/cce.lmdb")
 _DEFAULT_REVIEW_DB_PATH = Path("data/review.db")
 _DEFAULT_VAULT_PATH = Path("data/label_vault.jsonl")
 _DEFAULT_VAULT_MARCS_PATH = Path("data/published/vault_marcs.xml")
+_DEFAULT_PUBLISHED_LINKAGE_PATH = Path("data/published/vault.jsonl")
 _LABELER = "jpstroop"
 _LOG_DIR_NAME = "logs"
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -402,6 +404,32 @@ def dump_vault_marcs_command(
         f"(vault_entries={report.vault_entries} "
         f"distinct_marcs={report.distinct_marcs_requested} "
         f"missing={report.marcs_missing})"
+    )
+
+
+@app.command(name="publish-linkage")
+def publish_linkage_command(
+    vault: Annotated[
+        Path,
+        Option("--vault", help="JSONL label vault to reshape for publication."),
+    ] = _DEFAULT_VAULT_PATH,
+    out: Annotated[
+        Path,
+        Option("--out", help="Destination JSONL file."),
+    ] = _DEFAULT_PUBLISHED_LINKAGE_PATH,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Reshape the vault into a published JSONL with universal identifiers leading."""
+    _configure_logging("publish-linkage", log_file)
+    report = publish_linkage(vault, out)
+    echo(
+        f"wrote {report.rows_written} rows to {out} "
+        f"(matches={report.matches} "
+        f"no_matches={report.no_matches} "
+        f"unsures={report.unsures})"
     )
 
 

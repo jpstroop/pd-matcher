@@ -250,12 +250,21 @@ pdm run pd-groundtruth migrate-vault-v4   # most recent (CCE IDs)
 Migrations are idempotent and write atomically — re-running a migration
 that's already done is a logged no-op.
 
-### Publishable MARC dump
+### Publishing the linkage dataset
 
-The labeled MARC half of the public dataset lives in a **separate data
-repository** at [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage).
-This code repo doesn't bundle the publishable artifacts directly — they're
-regenerated on demand and pushed to the data repo.
+The public dataset lives in a **separate data repository** at
+[`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage).
+This code repo doesn't bundle the publishable artifacts directly —
+they're regenerated on demand and pushed to the data repo. Two files
+make up the published dataset:
+
+- `vault_marcs.xml` — MARCXML of every MARC referenced by the vault
+  (from `dump-vault-marcs`).
+- `vault.jsonl` — the reshaped linkage table with universal identifiers
+  (LCCN / ISBN / OCLC) leading and Princeton-local `marc_control_id`
+  demoted to provenance (from `publish-linkage`). The labeler's
+  free-text note is intentionally stripped; all verdicts (`match`,
+  `no_match`, `unsure`) are emitted.
 
 Workflow:
 
@@ -263,28 +272,33 @@ Workflow:
 # One-time: clone the data repo into the gitignored data/published/ path.
 git clone https://github.com/jpstroop/cce-marc-linkage data/published
 
-# After a labeling session: regenerate the MARCXML.
+# After a labeling session: regenerate both files.
 pdm run pd-groundtruth dump-vault-marcs
+pdm run pd-groundtruth publish-linkage
 
 # Review what changed, then commit and push from inside the data repo:
 cd data/published
-git add vault_marcs.xml
-git commit -m "regenerate vault_marcs.xml (N records, vault @ M entries)"
+git add vault_marcs.xml vault.jsonl
+git commit -m "regenerate from vault @ N entries"
 git push origin main
 ```
 
-`dump-vault-marcs` defaults to writing `data/published/vault_marcs.xml`;
-override with `--out` if your local clone lives somewhere else.
+Both commands default to writing into `data/published/`; override with
+`--out` if your local clone lives elsewhere.
 
-The command reads the vault and `data/candidates/`, walks shards
+`dump-vault-marcs` reads the vault and `data/candidates/`, walks shards
 streamingly, and writes a single MARCXML file. It reports
 `vault_entries`, `distinct_marcs_requested`, `marcs_written`, and
 `marcs_missing` — the missing count is vault entries whose MARC no
-longer exists in the candidate pool (filtered out by an earlier
-`acquire` step).
+longer exists in the candidate pool.
 
-Read-only against the code repo's vault and pool; safe to run anytime,
-including mid-labeling-session — the output is a point-in-time snapshot.
+`publish-linkage` reads only the vault, reshapes each entry into the
+published row schema, and writes JSONL sorted by `labeled_at`
+ascending so successive regenerations produce diff-friendly output.
+It reports `rows_written`, `matches`, `no_matches`, and `unsures`.
+
+Both are read-only against the code repo's vault; safe to run anytime,
+including mid-labeling-session — outputs are point-in-time snapshots.
 
 ### Regression baseline
 
