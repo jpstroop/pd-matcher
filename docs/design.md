@@ -555,6 +555,16 @@ The gate alone is necessary but not sufficient — precision and recall can move
 
 Two caveats. **AUC and average precision are reported but not gated**: locking them requires more `no_match` labels than the vault currently carries — the threshold-sweep precision numbers are noisy at small negative-sample sizes, so a strict gate would cry wolf. Bias labeling toward the `below_sample` band to firm them up. And **the eval drops entries gracefully when their MARC is missing from the pool** (data drift after a pool rebuild); a few drops per run is normal, but a large drop count signals the pool's composition shifted and is worth investigating before trusting the metrics.
 
+### Code repo vs data repo: published artifacts live elsewhere
+
+The code repo (`jpstroop/pd-matcher`) tracks code, tests, the live working vault, the regression baseline, and the NYPL submodules. It does **not** track the published consumer-facing artifacts. Those live in a separate repository at [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage) — a CC0-licensed dataset repo containing the MARCXML dump (`vault_marcs.xml`) and the reshaped linkage JSONL (`vault.jsonl`).
+
+The split is deliberate. The two repos have different audiences (developers vs. data consumers), different update cadences (per-feature vs. per-labeling-session), and different size trajectories (the code is bounded; the data grows with labeling effort). Bundling them would penalize one audience for the other's churn and bloat a code-only clone with data the matcher doesn't read.
+
+The connection between the two is loose. The data repo is cloned in-tree at the gitignored path `data/published/`, which is the default `--out` for `dump-vault-marcs` and `publish-linkage`. Anyone running a regeneration commits and pushes from inside that directory directly; the parent repo doesn't notice. The matcher's tests, the regression baseline, and the labeling UI never touch `data/published/`.
+
+The live vault stays in the code repo specifically because it's tightly coupled to the regression baseline (locked metrics depend on specific vault contents) and to the labeling UI's write path. Moving it would double the per-label workflow and create a footgun around baseline reproducibility. Only the *derived* publishable artifacts split out.
+
 ### design.md and git history as the durable design record
 
 Every meaningful design decision in this codebase is documented in two places: this file and the git commit log. Commit messages describe when and why each piece landed; this document captures the broader rationale and ties decisions together across modules.
