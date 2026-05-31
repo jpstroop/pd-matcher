@@ -48,6 +48,28 @@ so you can see *where* errors land, not just how many. The eval produces one ove
 copyright-status categories (e.g. how often a "renewed / in copyright" was
 predicted as "not renewed / public domain").
 
+**ROC curve (Receiver Operating Characteristic).** A plot of true-positive rate
+(recall) against false-positive rate as you sweep the decision threshold from
+very tight to very loose. A perfect classifier hugs the top-left corner; a
+random one tracks the diagonal. The shape shows how well the model *separates*
+matches from non-matches across all thresholds, independent of where you'd
+actually set the cut.
+
+**AUC / AUC-ROC.** The area under the ROC curve — a single number summarizing
+threshold-independent ranking quality. 1.0 is perfect separation, 0.5 is no
+better than chance. We report it as `auc_roc` in `tests/regression/baseline.json`.
+The unqualified term "AUC" is conventionally read as ROC-AUC, but it's ambiguous
+in the wider literature: PR-AUC (the area under the precision-recall curve)
+exists too. This project always means ROC-AUC when it says AUC.
+
+**Average precision (AP).** The area under the *precision-recall* curve,
+computed as a weighted mean of precisions at each recall level. Like AUC-ROC,
+it summarizes ranking quality across all thresholds, but it's more informative
+when positives are scarce relative to negatives (our setting — most MARC records
+have no CCE match). 1.0 is perfect; the value of a random ranking equals the
+positive class's base rate. We report it as `average_precision` in
+`tests/regression/baseline.json`.
+
 **Baseline.** A frozen reference measurement. Future changes are compared against
 it; if a metric drops by more than a set tolerance, that's a regression. Issue #3
 is about locking in a baseline so accidental quality drops fail CI.
