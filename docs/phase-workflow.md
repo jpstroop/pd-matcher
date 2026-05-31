@@ -147,7 +147,6 @@ So every change ships as an isolated phase branch with its own regenerated basel
 
 ## Invariants
 
-- **Never push.** The code is not pushed to a remote; issues at `jpstroop/pd-matcher` are the canonical IDs but git lives locally.
 - **Never amend.** New commits only; a failing pre-commit hook means re-stage and commit again, not `--amend`.
 - **Never touch `data/label_vault.jsonl` during branch ops.** The vault is append-only and labeled by hand; commit it separately on `main` only. Run `git stash list` after any agent delegation to verify nothing stashed it.
 - **Two branches both moved `baseline.json` → regenerate post-merge on main.** Neither branch's baseline is the combined-effect baseline; trusting one of them publishes a misleading number.
