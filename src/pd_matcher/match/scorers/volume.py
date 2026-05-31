@@ -29,7 +29,11 @@ The scorer classifies each side as one of:
   work. MARC indicators: ``title_part_number`` populated, or title
   starting with ``"vol."``/``"pt."``. CCE indicators: ``desc``
   containing ``"v. 1"`` / ``"pt. 2"`` / ``"book one"`` or matching
-  title prefixes.
+  title prefixes. Multilingual coverage: the part-detector also
+  matches French/Italian/Spanish/Portuguese (``"T. 1"``, ``"tome I"``,
+  ``"tomo II"``), German (``"Bd. 3"``, ``"Band III"``, ``"Tl. 2"``,
+  ``"Teil 2"``, ``"Heft 4"``), Dutch (``"Dl. 1"``, ``"Deel 2"``), and
+  Latin (``"Lib. III"``, ``"Pars II"``, ``"tomus IV"``).
 * ``unknown`` — neither cue fires.
 
 Score:
@@ -64,7 +68,21 @@ _MAX_SCORE: float = 100.0
 _SCORER_NAME: str = "volume.compat"
 
 _PART_NUMBER_RE = re_compile(
-    r"\b(?:v(?:ol)?|pt|bk|book)\.?\s*([ivxlcdm]+|\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b",
+    r"\b(?:"
+    r"v(?:ol(?:ume)?)?"  # English: v, vol, volume
+    r"|pt|part"  # English: pt, part
+    r"|bk|book"  # English: bk, book
+    r"|t(?:omes?|omos?|omus)?"  # FR tome(s) / IT-ES-PT tomo(s) / Latin tomus / bare T.
+    r"|bd|band"  # German: Bd., Band
+    r"|tl|teil"  # German: Tl., Teil
+    r"|dl|deel"  # Dutch: Dl., Deel
+    r"|l(?:ivres?|ibros?|iber)?"  # FR livre(s) / IT-ES libro(s) / Latin liber / bare L.
+    r"|lib"  # Latin: Lib.
+    r"|pars"  # Latin: Pars
+    r"|heft"  # German: Heft  (bare 'h' excluded vs initials)
+    r")\.?\s*"
+    r"(?![a-z]\.\s)"  # negative lookahead: reject 'L. M. Montgomery'-shape initials
+    r"([ivxlcdm]+|\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b",
     IGNORECASE,
 )
 _WHOLE_VOLUME_COUNT_RE = re_compile(
