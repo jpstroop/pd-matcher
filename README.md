@@ -276,6 +276,7 @@ The labeling workflow itself — what each verdict means, what to capture in the
 | `pdm run pd-groundtruth vault-into-queue …` | Recovery tool: backfill an existing `review.db` with vault entries that aren't already present. Rarely needed after the build-queue carryover fix; see "Recovery" below. |
 | `pdm run pd-groundtruth migrate-vault-v3 …` | One-shot migration: fold pre-schema-3 `reasons` / `field_annotations` into the note text and rewrite the vault at the current schema. Idempotent. |
 | `pdm run pd-groundtruth dump-vault-marcs …` | Write a MARCXML `<collection>` containing every MARC record referenced by the vault, drawn from `data/candidates/`. The MARC half of the published linkage dataset; pairs with `data/label_vault.jsonl`. Default output is `data/published/vault_marcs.xml` — a path inside an in-tree clone of the separate [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage) data repo (gitignored from this repo). Read-only against the vault and the pool; safe to run anytime. |
+| `pdm run pd-groundtruth publish-linkage …` | Reshape the vault into a published JSONL with universal bibliographic identifiers (LCCN, ISBN, OCLC) leading, CCE-side fields next, and Princeton-local `marc_control_id` demoted to provenance. The labeler's free-text note is dropped on publication; all verdicts (`match`, `no_match`, `unsure`) are emitted. Default output is `data/published/vault.jsonl` — same data repo as the MARCXML. Atomic write via temp file + `os.replace`. |
 
 ### How it fits together
 
