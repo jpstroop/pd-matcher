@@ -76,3 +76,37 @@ def test_score_title_returns_zero_when_unseen_tokens_idf_zero(
     ev = score_title("unique tokens here", "different ones entirely", ctx)
     assert ev.score == 0.0
     assert ev.skipped is False
+
+
+def test_score_title_script_mismatch_emits_non_skipped_zero(
+    scorer_context: ScorerContext,
+) -> None:
+    """A Latin/Hebrew script mismatch emits a non-skipped zero, not a skip.
+
+    The Evidence must count in the combiner's denominator so the pair is
+    penalized rather than silently dropped.
+    """
+    ev = score_title("Bereshit bara Elohim", "בראשית ברא אלהים", scorer_context)
+    assert ev.skipped is False
+    assert ev.score == 0.0
+    assert ev.max == 100.0
+    assert ("script_mismatch", 1.0) in ev.features
+
+
+def test_score_title_script_mismatch_cyrillic_emits_zero(
+    scorer_context: ScorerContext,
+) -> None:
+    """Latin vs. Cyrillic mismatch fires the script-mismatch zero."""
+    ev = score_title("Voyna i mir", "Война и мир", scorer_context)
+    assert ev.skipped is False
+    assert ev.score == 0.0
+
+
+def test_score_title_same_script_does_not_fire_mismatch(
+    scorer_context: ScorerContext,
+) -> None:
+    """Same-script inputs route through the normal token-set path."""
+    ev = score_title("A study of widgets", "A study of widgets", scorer_context)
+    assert ev.skipped is False
+    feature_map = dict(ev.features)
+    assert "script_mismatch" not in feature_map
