@@ -48,6 +48,8 @@ def _scalar(value: str | None) -> tuple[str, ...]:
 MARC_FIELDS: dict[str, MarcRawAccessor] = {
     "title": lambda marc: _scalar(marc.title),
     "title_main": lambda marc: _scalar(marc.title_main),
+    "title_part_number": lambda marc: _scalar(marc.title_part_number),
+    "title_part_name": lambda marc: _scalar(marc.title_part_name),
     "main_author": lambda marc: _scalar(marc.main_author),
     "statement_of_responsibility": lambda marc: _scalar(marc.statement_of_responsibility),
     "publisher": lambda marc: _scalar(marc.publisher),

@@ -38,6 +38,8 @@ marc_fields:
   sor:         {fields: [statement_of_responsibility], combine: first}
   publisher:   {fields: [publisher],    combine: first}
   series_lead: {fields: [series_titles], combine: first}
+  title_with_sor: {fields: [title, statement_of_responsibility], combine: concat}
+  title_with_parts_and_sor: {fields: [title, title_part_number, title_part_name, statement_of_responsibility], combine: concat}
 cce_fields:
   title:             {fields: [title],             combine: first}
   author_name:       {fields: [author_name],       combine: first}
@@ -51,6 +53,8 @@ pairings:
   - {group: title,     marc: title_main,  cce: title}
   - {group: title,     marc: series_lead, cce: title}
   - {group: title,     marc: title_full,  cce: renewal_title}
+  - {group: title,     marc: title_with_sor, cce: title}
+  - {group: title,     marc: title_with_parts_and_sor, cce: title}
   - {group: author,    marc: main_author, cce: author_name}
   - {group: author,    marc: sor,         cce: author_name}
   - {group: author,    marc: main_author, cce: claimants}

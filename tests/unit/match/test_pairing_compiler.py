@@ -21,6 +21,8 @@ def _marc(
     series_titles: tuple[str, ...] = (),
     statement_of_responsibility: str | None = None,
     publisher: str | None = None,
+    title_part_number: str | None = None,
+    title_part_name: str | None = None,
 ) -> MarcRecord:
     return MarcRecord(
         control_id="m",
@@ -30,6 +32,8 @@ def _marc(
         series_titles=series_titles,
         statement_of_responsibility=statement_of_responsibility,
         publisher=publisher,
+        title_part_number=title_part_number,
+        title_part_name=title_part_name,
     )
 
 
@@ -339,3 +343,122 @@ def test_compile_raises_on_unknown_cce_pairing_reference() -> None:
     )
     with raises(ConfigError, match="unknown cce field 'missing'"):
         compile_pairings(cfg)
+
+
+def test_marc_registry_exposes_title_part_number() -> None:
+    """``title_part_number`` surfaces :attr:`MarcRecord.title_part_number`."""
+    assert MARC_FIELDS["title_part_number"](_marc(title_part_number="Pt. 2")) == ("Pt. 2",)
+    assert MARC_FIELDS["title_part_number"](_marc(title_part_number=None)) == ()
+
+
+def test_marc_registry_exposes_title_part_name() -> None:
+    """``title_part_name`` surfaces :attr:`MarcRecord.title_part_name`."""
+    assert MARC_FIELDS["title_part_name"](_marc(title_part_name="Later years")) == ("Later years",)
+    assert MARC_FIELDS["title_part_name"](_marc(title_part_name=None)) == ()
+
+
+def test_compile_title_with_sor_pairing_concatenates_title_and_sor() -> None:
+    """A ``title`` pairing of ``title_with_sor ↔ title`` concatenates title and SoR."""
+    cfg = PairingConfig(
+        marc_fields={
+            "tws": FieldSpec(
+                fields=("title", "statement_of_responsibility"),
+                combine="concat",
+            ),
+        },
+        cce_fields={"t": FieldSpec(fields=("title",), combine="first")},
+        pairings=(PairingSpec(group="title", marc="tws", cce="t"),),
+    )
+    compiled = compile_pairings(cfg)
+    pairing = compiled.title[0]
+    assert (
+        pairing.marc_accessor(
+            _marc(title="Cold mountain", statement_of_responsibility="by Charles Frazier")
+        )
+        == "Cold mountain by Charles Frazier"
+    )
+    assert pairing.cce_accessor(_nypl(title="Cold mountain")) == "Cold mountain"
+
+
+def test_compile_title_with_sor_pairing_omits_missing_sor() -> None:
+    """``title_with_sor`` falls back to title alone when SoR is missing."""
+    cfg = PairingConfig(
+        marc_fields={
+            "tws": FieldSpec(
+                fields=("title", "statement_of_responsibility"),
+                combine="concat",
+            ),
+        },
+        cce_fields={"t": FieldSpec(fields=("title",), combine="first")},
+        pairings=(PairingSpec(group="title", marc="tws", cce="t"),),
+    )
+    compiled = compile_pairings(cfg)
+    pairing = compiled.title[0]
+    assert (
+        pairing.marc_accessor(_marc(title="Cold mountain", statement_of_responsibility=None))
+        == "Cold mountain"
+    )
+
+
+def test_compile_title_with_parts_and_sor_pairing_concatenates_all_parts() -> None:
+    """``title_with_parts_and_sor`` concatenates title, parts and SoR."""
+    cfg = PairingConfig(
+        marc_fields={
+            "twps": FieldSpec(
+                fields=(
+                    "title",
+                    "title_part_number",
+                    "title_part_name",
+                    "statement_of_responsibility",
+                ),
+                combine="concat",
+            ),
+        },
+        cce_fields={"t": FieldSpec(fields=("title",), combine="first")},
+        pairings=(PairingSpec(group="title", marc="twps", cce="t"),),
+    )
+    compiled = compile_pairings(cfg)
+    pairing = compiled.title[0]
+    assert (
+        pairing.marc_accessor(
+            _marc(
+                title="The history",
+                title_part_number="Part 2",
+                title_part_name="The later years",
+                statement_of_responsibility="by Jane Doe",
+            )
+        )
+        == "The history Part 2 The later years by Jane Doe"
+    )
+
+
+def test_compile_title_with_parts_and_sor_skips_empty_components() -> None:
+    """``title_with_parts_and_sor`` joins only the present components."""
+    cfg = PairingConfig(
+        marc_fields={
+            "twps": FieldSpec(
+                fields=(
+                    "title",
+                    "title_part_number",
+                    "title_part_name",
+                    "statement_of_responsibility",
+                ),
+                combine="concat",
+            ),
+        },
+        cce_fields={"t": FieldSpec(fields=("title",), combine="first")},
+        pairings=(PairingSpec(group="title", marc="twps", cce="t"),),
+    )
+    compiled = compile_pairings(cfg)
+    pairing = compiled.title[0]
+    assert (
+        pairing.marc_accessor(
+            _marc(
+                title="The history",
+                title_part_number=None,
+                title_part_name=None,
+                statement_of_responsibility="by Jane Doe",
+            )
+        )
+        == "The history by Jane Doe"
+    )
