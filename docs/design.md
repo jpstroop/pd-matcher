@@ -551,6 +551,8 @@ The gate is local-only — **CI is deferred** until the code is published. It is
 
 Run the gate with `pdm run regression` (re-runs the full vault-driven eval; ~4 minutes for the current ~300-entry vault). Refresh the baseline after an intentional pipeline change with `pdm run regression-baseline`, which reruns the eval and rewrites the JSON.
 
+The gate alone is necessary but not sufficient — precision and recall can move by a few thousandths and conceal individual flips. The full per-branch shipping flow, including the per-pair diff against `main` that surfaces those flips, is documented in [phase-workflow.md](phase-workflow.md).
+
 Two caveats. **AUC and average precision are reported but not gated**: locking them requires more `no_match` labels than the vault currently carries — the threshold-sweep precision numbers are noisy at small negative-sample sizes, so a strict gate would cry wolf. Bias labeling toward the `below_sample` band to firm them up. And **the eval drops entries gracefully when their MARC is missing from the pool** (data drift after a pool rebuild); a few drops per run is normal, but a large drop count signals the pool's composition shifted and is worth investigating before trusting the metrics.
 
 ### design.md and git history as the durable design record
