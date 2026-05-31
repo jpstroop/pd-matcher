@@ -343,3 +343,202 @@ def test_score_volume_whole_open_vs_whole_is_max(scorer_context: ScorerContext) 
     ev = score_volume(marc, cce, scorer_context)
     assert ev.skipped is False
     assert ev.score == 100.0
+
+
+# ---- Multilingual part-indicator coverage (#62) ------------------------------
+
+
+def test_score_volume_french_t_abbreviation_classifies_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """French ``T. 1`` (tome) on the CCE title fires part classification."""
+    marc = _marc(extent="5 v.")
+    cce = _cce(title="T. 1: Histoire de la philosophie")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_french_tome_with_roman_numeral_classifies_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """French verbose ``tome I`` with Roman numeral fires part classification."""
+    marc = _marc(extent="3 v.")
+    cce = _cce(title="Tome I: Les origines")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_italian_tomo_agreement_on_both_sides(
+    scorer_context: ScorerContext,
+) -> None:
+    """Italian/Spanish ``tomo 2`` on both sides agrees on same part number."""
+    marc = _marc(title="Storia d'Italia, tomo 2")
+    cce = _cce(title="Storia, tomo 2")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["marc_is_part"] == 1.0
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 100.0
+
+
+def test_score_volume_german_bd_abbreviation_classifies_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """German ``Bd. 2`` (Band, volume) fires part classification."""
+    marc = _marc(extent="5 v.")
+    cce = _cce(title="Goethes Werke, Bd. 2")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_german_band_with_roman_numeral_classifies_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """German verbose ``Band III`` with Roman numeral fires part classification."""
+    marc = _marc(extent="4 v.")
+    cce = _cce(desc="Band III, 412 p.")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_german_teil_classifies_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """German ``Teil 2`` (part) fires part classification on the CCE side."""
+    marc = _marc(extent="3 v.")
+    cce = _cce(title="Faust, Teil 2")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_german_tl_abbreviation_classifies_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """German ``Tl. 1`` (abbreviated Teil) fires part classification."""
+    marc = _marc(extent="2 v.")
+    cce = _cce(title="Werke, Tl. 1")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_german_heft_classifies_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """German ``Heft 4`` (fascicle) fires part classification."""
+    marc = _marc(extent="6 v.")
+    cce = _cce(title="Zeitschrift, Heft 4")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_dutch_dl_abbreviation_classifies_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """Dutch ``Dl. 1`` (abbreviated Deel) fires part classification."""
+    marc = _marc(extent="3 v.")
+    cce = _cce(title="Werken, Dl. 1")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_latin_lib_with_roman_numeral_classifies_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """Latin ``Lib. III`` (liber) fires part classification."""
+    marc = _marc(extent="6 v.")
+    cce = _cce(title="Historia naturalis, Lib. III")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_latin_pars_classifies_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """Latin ``Pars II`` (part) fires part classification."""
+    marc = _marc(extent="4 v.")
+    cce = _cce(title="Summa theologica, Pars II")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_french_livre_classifies_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """French ``livre 3`` fires part classification."""
+    marc = _marc(extent="5 v.")
+    cce = _cce(title="Discours, livre 3")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+# ---- False-positive guards: prefixes without numbers stay UNKNOWN ------------
+
+
+def test_score_volume_author_initials_do_not_classify_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """``T. S. Eliot`` is initials, not a French tome marker — no part classification."""
+    marc = _marc()
+    cce = _cce(title="T. S. Eliot, Selected Poems")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 0.0
+    assert ev.skipped is True
+
+
+def test_score_volume_lm_montgomery_initials_do_not_classify_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """``L. M. Montgomery`` is initials, not a French livre marker."""
+    marc = _marc()
+    cce = _cce(title="L. M. Montgomery, Anne of Green Gables")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 0.0
+    assert ev.skipped is True
+
+
+def test_score_volume_h_g_wells_initials_do_not_classify_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """``H. G. Wells`` initials — bare ``H.`` is excluded from the prefix set."""
+    marc = _marc()
+    cce = _cce(title="H. G. Wells, The Time Machine")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 0.0
+    assert ev.skipped is True
+
+
+def test_score_volume_bd_publisher_name_without_number_does_not_classify_as_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """``Bd.`` in a publisher abbreviation context (no following number) stays UNKNOWN."""
+    marc = _marc()
+    cce = _cce(title="Werke (Bd. München Verlag)")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 0.0
+    assert ev.skipped is True
