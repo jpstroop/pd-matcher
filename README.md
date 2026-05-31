@@ -275,6 +275,7 @@ The labeling workflow itself — what each verdict means, what to capture in the
 | `pdm run pd-groundtruth seed-vault …` | One-shot migration: dump every current label from a pre-existing `review.db` into the vault. Idempotent. |
 | `pdm run pd-groundtruth vault-into-queue …` | Recovery tool: backfill an existing `review.db` with vault entries that aren't already present. Rarely needed after the build-queue carryover fix; see "Recovery" below. |
 | `pdm run pd-groundtruth migrate-vault-v3 …` | One-shot migration: fold pre-schema-3 `reasons` / `field_annotations` into the note text and rewrite the vault at the current schema. Idempotent. |
+| `pdm run pd-groundtruth dump-vault-marcs …` | Write a MARCXML `<collection>` containing every MARC record referenced by the vault, drawn from `data/candidates/`. The MARC half of the eventual publishable dataset; pairs with `data/label_vault.jsonl` so a downstream user can reproduce or refine the linkage without access to Princeton's full bibdata dump. Read-only against the vault and the pool; safe to run anytime. |
 
 ### How it fits together
 

@@ -250,6 +250,29 @@ pdm run pd-groundtruth migrate-vault-v4   # most recent (CCE IDs)
 Migrations are idempotent and write atomically — re-running a migration
 that's already done is a logged no-op.
 
+### Publishable MARC dump
+
+The labeled MARC half of the eventual public dataset lives at
+`data/vault_marcs.xml` — a MARCXML `<collection>` containing one record
+per distinct `marc_control_id` referenced by the vault. Regenerate it
+when the vault has gained meaningful new labels:
+
+```bash
+pdm run pd-groundtruth dump-vault-marcs
+```
+
+The command reads the vault and `data/candidates/`, walks shards
+streamingly, and writes a single MARCXML file. It reports
+`vault_entries`, `distinct_marcs_requested`, `marcs_written`, and
+`marcs_missing` — the missing count is vault entries whose MARC no
+longer exists in the candidate pool (filtered out by an earlier
+`acquire` step). The artifact is checked into git, so the most recent
+commit of `data/vault_marcs.xml` is what an external consumer would
+pick up.
+
+Read-only against the vault and the pool; safe to run anytime,
+including mid-labeling-session — the output is a point-in-time snapshot.
+
 ### Regression baseline
 
 `tests/regression/baseline.json` is the locked snapshot of what the
@@ -274,6 +297,7 @@ change. Two commands:
 | `tests/` | unit + groundtruth + integration + regression | yes |
 | `data/nypl-reg/`, `data/nypl-ren/` | CCE submodules | submodule |
 | `data/label_vault.jsonl` | Vault (source of truth for labels) | **yes** |
+| `data/vault_marcs.xml` | Publishable MARCXML of every vault MARC (from `dump-vault-marcs`) | **yes** |
 | `data/candidates/` | MARC pool (acquire output) | no (gitignored) |
 | `data/review.db` | Transient label queue (SQLite) | no |
 | `caches/cce.lmdb/` | Built CCE index | no |
