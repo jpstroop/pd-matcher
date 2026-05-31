@@ -18,6 +18,7 @@ high while two titles that happen to share filler do not.
 
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.scorers.context import ScorerContext
+from pd_matcher.match.signals.script import is_script_mismatch
 from pd_matcher.normalize.numbers import normalize_numbers
 from pd_matcher.normalize.text import tokenize
 
@@ -44,6 +45,17 @@ def _skipped() -> Evidence:
     )
 
 
+def _script_mismatch_zero() -> Evidence:
+    return Evidence(
+        scorer=_SCORER_NAME,
+        score=0.0,
+        max=_MAX_SCORE,
+        skipped=False,
+        decisive=False,
+        features=(("script_mismatch", 1.0),),
+    )
+
+
 def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerContext) -> Evidence:
     """Return :class:`Evidence` for one (marc_title, nypl_title) pairing.
 
@@ -55,9 +67,14 @@ def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerConte
     Returns:
         An :class:`Evidence` whose ``score`` lies in ``[0, 100]``. The
         ``skipped`` flag is set when either input is empty or unusable.
+        When the two sides use different dominant Unicode scripts, the
+        scorer emits a non-skipped zero so the pair contributes to the
+        combiner's denominator instead of silently dropping out.
     """
     if not marc_title or not nypl_title:
         return _skipped()
+    if is_script_mismatch(marc_title, nypl_title):
+        return _script_mismatch_zero()
     marc_tokens = _prepare(marc_title, ctx)
     nypl_tokens = _prepare(nypl_title, ctx)
     if not marc_tokens or not nypl_tokens:
