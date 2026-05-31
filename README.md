@@ -175,7 +175,7 @@ The vault is the sole eval corpus as of #25; the prior `combined_ground_truth.cs
 
 ### `pd-matcher train-scorer`
 
-Phase 9 placeholder. Will eventually train a LightGBM model on the per-Evidence feature vectors and persist it alongside the index. Currently exits 2 with a "not yet implemented" message.
+Placeholder for the learned scorer (#4). Will eventually train a LightGBM model on the per-Evidence feature vectors and persist it alongside the index. Currently exits 2 with a "not yet implemented" message.
 
 ### Global flags
 

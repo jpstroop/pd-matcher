@@ -88,7 +88,7 @@ src/pd_matcher/
 │       ├── base.py               # Combiner Protocol + CombinedScore (raw, calibrated)
 │       ├── weighted_mean.py      # plain weighted mean over present Evidence
 │       ├── calibrator.py         # Platt-scaled logistic regression over (raw_score, is_match)
-│       └── learned.py            # Phase 9 stub for the LightGBM combiner
+│       └── learned.py            # stub for the learned scorer (#4)
 │
 ├── copyright/
 │   ├── status.py                 # CopyrightStatus StrEnum (16 leaves of the books-only matrix)
@@ -491,7 +491,7 @@ The Newton iteration solves for `a` and `b` that maximize the log-likelihood of 
 
 A side benefit: thresholds become meaningful. `--min-score 0.70` means "only show me matches with at least 70% probability of being correct" — not "only show me raw scores above 70 vibe points."
 
-If a learned scorer (Phase 9) replaces the weighted mean, the Platt calibrator becomes unnecessary — the learned model produces a probability directly. Until then, calibration is the right place for empirical knowledge of how raw scores relate to truth.
+If a learned scorer (#4) replaces the weighted mean, the Platt calibrator becomes unnecessary — the learned model produces a probability directly. Until then, calibration is the right place for empirical knowledge of how raw scores relate to truth.
 
 ---
 
@@ -507,7 +507,7 @@ The single most important design call. The prior project (which this repo is a r
 - Evidence is a frozen struct with named sub-features. A failing scorer returns `skipped=True` instead of a misleading 0.
 - The combiner sees only Evidence — it doesn't know how any score was produced. Swapping the title scorer affects only `title.py` and its tests.
 
-This makes Phase 9's learned scorer a drop-in: the LightGBM model reads features from the same Evidence objects the rule-based pipeline produces. No second feature pipeline to maintain.
+This makes the learned scorer (#4) a drop-in: the LightGBM model reads features from the same Evidence objects the rule-based pipeline produces. No second feature pipeline to maintain.
 
 ### One class per file
 
@@ -549,7 +549,7 @@ The baseline lives at `tests/regression/baseline.json` (schema: `pd_matcher.eval
 
 The gate is local-only — **CI is deferred** until the code is published. It is excluded from the default `pdm run pytest` run (and from coverage) by the `regression` marker, and it **skips gracefully** when `data/label_vault.jsonl`, `data/candidates/`, or `caches/cce.lmdb` is absent, so a fresh clone without the built index still passes the default suite. All of `regression.py` reaches 100% coverage through fast unit tests that fabricate `EvalReport` instances, never touching the index.
 
-Run the gate with `pdm run regression` (re-runs the full vault-driven eval; ~4 minutes for the current ~300-entry vault). Refresh the baseline after an intentional pipeline change with `pdm run regression-baseline`, which reruns the eval and rewrites the JSON.
+Run the gate with `pdm run regression` (re-runs the full vault-driven eval; ~10 minutes for the current ~1000-entry vault). Refresh the baseline after an intentional pipeline change with `pdm run regression-baseline`, which reruns the eval and rewrites the JSON.
 
 The gate alone is necessary but not sufficient — precision and recall can move by a few thousandths and conceal individual flips. The full per-branch shipping flow, including the per-pair diff against `main` that surfaces those flips, is documented in [phase-workflow.md](phase-workflow.md).
 
@@ -565,7 +565,7 @@ If a future contributor reads this file and asks "why msgspec?", the answer is h
 
 ## 7. Open questions and future work
 
-- **Learned scorer (Phase 9)**: replace the weighted mean + Platt calibrator with a LightGBM model trained on the same Evidence features. Plan calls for an A/B with the current pipeline and a ≥2 F1-point threshold for adoption.
+- **Learned scorer (#4)**: replace the weighted mean + Platt calibrator with a LightGBM model trained on the same Evidence features. Plan calls for an A/B with the current pipeline and a ≥2 F1-point threshold for adoption.
 - **Baselined regression eval (Phase 8)**: built — see §6, "Regression baseline + local gate". The gate is local-only for now; wiring it into CI is deferred until the code is published.
 - **HTML report viewer (Phase 7 follow-up)**: a tiny static-site generator over the CSV that lets a human auditor click into individual matches and see the per-scorer Evidence with its sub-features. Mocked up; not yet built.
 - **Delayed-URAA accession dates**: Cornell's matrix references country-specific Berne / WTO accession dates that replace the 1996 baseline. Phase 5 punts these to `UNKNOWN_INSUFFICIENT_DATA`. Could be tabulated if the corpus contains enough such works to justify it.
