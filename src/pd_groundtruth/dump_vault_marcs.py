@@ -2,10 +2,12 @@
 
 The published dataset's MARC half: for every distinct ``marc_control_id``
 in the label vault, copy the matching ``<record>`` element from
-``data/candidates/`` into a single ``data/vault_marcs.xml``. The output is
-the durable bibliographic context for the labeled linkage so downstream
-consumers can reproduce or refine the dataset without access to Princeton's
-full bibdata dump.
+``data/candidates/`` into a single MARCXML file. The default destination is
+``data/published/vault_marcs.xml`` — a path inside the in-tree clone of the
+separate ``jpstroop/cce-marc-linkage`` data repository (gitignored from the
+code repo). The output is the durable bibliographic context for the
+labeled linkage so downstream consumers can reproduce or refine the
+dataset without access to Princeton's full bibdata dump.
 
 The implementation streams: each candidate shard is iterparsed, only the
 records whose 001 controlfield matches the wanted set are kept, and they

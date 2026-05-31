@@ -252,25 +252,38 @@ that's already done is a logged no-op.
 
 ### Publishable MARC dump
 
-The labeled MARC half of the eventual public dataset lives at
-`data/vault_marcs.xml` — a MARCXML `<collection>` containing one record
-per distinct `marc_control_id` referenced by the vault. Regenerate it
-when the vault has gained meaningful new labels:
+The labeled MARC half of the public dataset lives in a **separate data
+repository** at [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage).
+This code repo doesn't bundle the publishable artifacts directly — they're
+regenerated on demand and pushed to the data repo.
+
+Workflow:
 
 ```bash
+# One-time: clone the data repo into the gitignored data/published/ path.
+git clone https://github.com/jpstroop/cce-marc-linkage data/published
+
+# After a labeling session: regenerate the MARCXML.
 pdm run pd-groundtruth dump-vault-marcs
+
+# Review what changed, then commit and push from inside the data repo:
+cd data/published
+git add vault_marcs.xml
+git commit -m "regenerate vault_marcs.xml (N records, vault @ M entries)"
+git push origin main
 ```
+
+`dump-vault-marcs` defaults to writing `data/published/vault_marcs.xml`;
+override with `--out` if your local clone lives somewhere else.
 
 The command reads the vault and `data/candidates/`, walks shards
 streamingly, and writes a single MARCXML file. It reports
 `vault_entries`, `distinct_marcs_requested`, `marcs_written`, and
 `marcs_missing` — the missing count is vault entries whose MARC no
 longer exists in the candidate pool (filtered out by an earlier
-`acquire` step). The artifact is checked into git, so the most recent
-commit of `data/vault_marcs.xml` is what an external consumer would
-pick up.
+`acquire` step).
 
-Read-only against the vault and the pool; safe to run anytime,
+Read-only against the code repo's vault and pool; safe to run anytime,
 including mid-labeling-session — the output is a point-in-time snapshot.
 
 ### Regression baseline
@@ -297,7 +310,7 @@ change. Two commands:
 | `tests/` | unit + groundtruth + integration + regression | yes |
 | `data/nypl-reg/`, `data/nypl-ren/` | CCE submodules | submodule |
 | `data/label_vault.jsonl` | Vault (source of truth for labels) | **yes** |
-| `data/vault_marcs.xml` | Publishable MARCXML of every vault MARC (from `dump-vault-marcs`) | **yes** |
+| `data/published/` | In-tree clone of the [`cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage) data repo (target of `dump-vault-marcs`) | no (gitignored; separate git repo) |
 | `data/candidates/` | MARC pool (acquire output) | no (gitignored) |
 | `data/review.db` | Transient label queue (SQLite) | no |
 | `caches/cce.lmdb/` | Built CCE index | no |

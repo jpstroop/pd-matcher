@@ -25,3 +25,7 @@ data/review.db
 data/review.db-journal
 data/review.db-shm
 data/review.db-wal
+
+# Published-data repo (separate git repo at jpstroop/cce-marc-linkage,
+# cloned in-tree here for the default --out of dump-vault-marcs).
+data/published/
