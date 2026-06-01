@@ -22,6 +22,10 @@ from sqlite3 import Row
 from sqlite3 import connect as sqlite_connect
 
 from msgspec import Struct
+from msgspec.json import decode as json_decode
+from msgspec.json import encode as json_encode
+
+from pd_groundtruth.label_vault import CategoryKey
 
 VERDICT_MATCH: str = "match"
 VERDICT_NO_MATCH: str = "no_match"
@@ -81,7 +85,8 @@ CREATE TABLE IF NOT EXISTS label (
     pair_id INTEGER NOT NULL REFERENCES review_pair(id),
     verdict TEXT NOT NULL CHECK (verdict IN ('match', 'no_match', 'unsure')),
     note TEXT,
-    labeled_at TEXT NOT NULL
+    labeled_at TEXT NOT NULL,
+    categories TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE INDEX IF NOT EXISTS ix_review_pair_lang_band ON review_pair (language, band);
@@ -122,8 +127,9 @@ class LabeledPairRow(Struct, frozen=True, forbid_unknown_fields=True):
 
     Carries only the columns the table view renders (no MARC blob, no
     evidence): the originating pair id and its denormalized ``marc_*`` /
-    ``cce_title`` columns, the current verdict and its optional note, plus the
-    ``labeled_at`` timestamp for relative-time rendering.
+    ``cce_title`` columns, the current verdict and its optional note, the
+    structured ``categories`` for chip rendering, plus the ``labeled_at``
+    timestamp for relative-time rendering.
     """
 
     pair_id: int
@@ -134,6 +140,7 @@ class LabeledPairRow(Struct, frozen=True, forbid_unknown_fields=True):
     verdict: str
     note: str | None
     labeled_at: str
+    categories: tuple[CategoryKey, ...] = ()
 
 
 SORT_DESC: str = "desc"
@@ -145,17 +152,21 @@ _VALID_SORTS: frozenset[str] = frozenset({SORT_DESC, SORT_ASC})
 class LabelFilters(Struct, frozen=True, forbid_unknown_fields=True):
     """Narrowing filters and ordering for :meth:`ReviewDb.iter_labeled_pairs`.
 
-    The narrowing fields (``verdict``, ``language``, ``q``) AND together; an
-    unset field imposes no constraint. ``q`` is a case-insensitive substring
-    matched against ``marc_title``, ``cce_title``, and ``marc_control_id``.
-    ``sort`` selects the ``labeled_at`` ordering: ``"desc"`` (default) puts the
-    most recently labeled pair first, ``"asc"`` puts the oldest first.
+    The narrowing fields (``verdict``, ``language``, ``q``, ``categories``)
+    AND together; an unset field imposes no constraint. ``q`` is a
+    case-insensitive substring matched against ``marc_title``, ``cce_title``,
+    and ``marc_control_id``. ``categories`` is a tuple of vocabulary keys; a
+    row matches when the stored ``label.categories`` JSON array contains *any*
+    of the selected keys (OR semantics within the category dimension).
+    ``sort`` selects the ``labeled_at`` ordering: ``"desc"`` (default) puts
+    the most recently labeled pair first, ``"asc"`` puts the oldest first.
     """
 
     verdict: str | None = None
     language: str | None = None
     q: str | None = None
     sort: str = SORT_DESC
+    categories: tuple[CategoryKey, ...] = ()
 
 
 _NO_LABEL_FILTERS: LabelFilters = LabelFilters()
@@ -284,6 +295,24 @@ class ProgressCounts(Struct, frozen=True, forbid_unknown_fields=True):
 def _now() -> str:
     """Return the current UTC instant as an ISO-8601 string."""
     return datetime.now(UTC).isoformat()
+
+
+def _encode_categories(categories: tuple[CategoryKey, ...]) -> str:
+    """Serialize a categories tuple to the JSON TEXT stored in ``label.categories``."""
+    return json_encode(categories).decode("utf-8")
+
+
+def _decode_categories(raw: str | None) -> tuple[CategoryKey, ...]:
+    """Decode a stored ``label.categories`` TEXT back into a typed tuple.
+
+    Returns an empty tuple for the ``'[]'`` default; raises
+    :class:`msgspec.ValidationError` if the persisted JSON carries an
+    unknown :data:`CategoryKey` value so corruption surfaces at read time
+    rather than propagating downstream.
+    """
+    if not raw:
+        return ()
+    return json_decode(raw.encode("utf-8"), type=tuple[CategoryKey, ...])
 
 
 _ADDITIVE_CCE_COLUMNS: tuple[tuple[str, str], ...] = (
@@ -678,14 +707,18 @@ class ReviewDb:
         pair_id: int,
         verdict: str,
         note: str | None = None,
+        categories: tuple[CategoryKey, ...] = (),
     ) -> LabelInsertResult:
         """Append a verdict for ``pair_id`` and return the new label's id + timestamp.
 
-        ``note`` is optional free text — the only structured signal the labeler
-        carries alongside the verdict. The returned :class:`LabelInsertResult`
-        exposes the ISO-8601 timestamp stamped onto the row so the caller
-        (review UI) can pass the exact same value to the label vault and keep
-        DB and vault in lockstep.
+        ``note`` is optional free text — the labeler's open rationale.
+        ``categories`` (default ``()``) is the structured complement: a tuple
+        of vocabulary keys recording recurring rationale patterns; it is
+        encoded as a JSON array TEXT alongside the verdict so the DB stays
+        symmetric with the label vault. The returned
+        :class:`LabelInsertResult` exposes the ISO-8601 timestamp stamped onto
+        the row so the caller (review UI) can pass the exact same value to the
+        label vault and keep DB and vault in lockstep.
 
         Raises:
             ValueError: If ``verdict`` is not one of ``match``,
@@ -695,8 +728,9 @@ class ReviewDb:
             raise ValueError(f"invalid verdict {verdict!r}")
         labeled_at = _now()
         cursor = self._conn.execute(
-            "INSERT INTO label (pair_id, verdict, note, labeled_at) VALUES (?, ?, ?, ?)",
-            (pair_id, verdict, note, labeled_at),
+            "INSERT INTO label (pair_id, verdict, note, labeled_at, categories)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (pair_id, verdict, note, labeled_at, _encode_categories(categories)),
         )
         row_id = cursor.lastrowid
         if row_id is None:  # pragma: no cover
@@ -755,13 +789,15 @@ class ReviewDb:
         verdict: str,
         labeled_at: str,
         note: str | None = None,
+        categories: tuple[CategoryKey, ...] = (),
     ) -> int:
         """Insert a label whose verdict came from outside this database.
 
         Used by ``build-queue`` to pre-apply labels carried over from the label
-        vault: the verdict / note / ``labeled_at`` come from the vault entry
-        verbatim, so a rebuilt queue still reports the pair as labeled without
-        inventing a new timestamp.
+        vault: the verdict / note / ``labeled_at`` / ``categories`` come from
+        the vault entry verbatim, so a rebuilt queue still reports the pair as
+        labeled without inventing a new timestamp and the structured
+        rationale tags survive the rebuild.
 
         Raises:
             ValueError: If ``verdict`` is not one of ``match``,
@@ -770,8 +806,9 @@ class ReviewDb:
         if verdict not in _VALID_VERDICTS:
             raise ValueError(f"invalid verdict {verdict!r}")
         cursor = self._conn.execute(
-            "INSERT INTO label (pair_id, verdict, note, labeled_at) VALUES (?, ?, ?, ?)",
-            (pair_id, verdict, note, labeled_at),
+            "INSERT INTO label (pair_id, verdict, note, labeled_at, categories)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (pair_id, verdict, note, labeled_at, _encode_categories(categories)),
         )
         row_id = cursor.lastrowid
         if row_id is None:  # pragma: no cover
@@ -826,7 +863,8 @@ class ReviewDb:
                 "rp.id AS pair_id, rp.language AS language, "
                 "rp.marc_control_id AS marc_control_id, rp.marc_title AS marc_title, "
                 "rp.cce_title AS cce_title, l.verdict AS verdict, "
-                "l.note AS note, l.labeled_at AS labeled_at"
+                "l.note AS note, l.labeled_at AS labeled_at, "
+                "l.categories AS categories"
             ),
             order_limit=f"ORDER BY l.labeled_at {direction}, rp.id {direction} LIMIT ? OFFSET ?",
         )
@@ -842,6 +880,7 @@ class ReviewDb:
                 verdict=row["verdict"],
                 note=row["note"],
                 labeled_at=row["labeled_at"],
+                categories=_decode_categories(row["categories"]),
             )
             for row in rows
         )
@@ -870,6 +909,15 @@ class ReviewDb:
                 " OR lower(rp.marc_control_id) LIKE ?)"
             )
             params.extend((pattern, pattern, pattern))
+        if filters.categories:
+            placeholders = ",".join("?" * len(filters.categories))
+            clauses.append(
+                "EXISTS ("
+                "SELECT 1 FROM json_each(l.categories) "
+                f"WHERE json_each.value IN ({placeholders})"
+                ")"
+            )
+            params.extend(filters.categories)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         sql = f"""
             SELECT {select}
