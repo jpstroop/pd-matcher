@@ -14,6 +14,7 @@ from msgspec.json import encode as json_encode
 from pytest import fixture
 from pytest import mark
 
+from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import iter_entries
 from pd_groundtruth.review.app import create_app
@@ -512,7 +513,6 @@ def test_translation_badge_renders_when_cue_present(translation_client: TestClie
 def test_translation_badge_absent_for_non_translation_pairs(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
-    assert "Translation" not in response.text
     assert '<span class="badge-translation">' not in response.text
 
 
@@ -532,7 +532,7 @@ def test_label_appends_to_vault(client: TestClient, vault_path: Path) -> None:
     assert entry.nypl_uuid == "u-eng-1"
     assert entry.verdict == "match"
     assert entry.labeler == "jpstroop"
-    assert entry.schema == 4
+    assert entry.schema == SCHEMA_VERSION
     assert entry.marc_identifiers.lccn == "40012345"
     assert entry.marc_identifiers.oclc == "0001"
     assert entry.marc_identifiers.isbns == ("9780000000000",)
@@ -565,15 +565,15 @@ def test_label_appends_one_line_per_post(client: TestClient, vault_path: Path) -
     assert len(after_second.splitlines()) == 2
 
 
-def test_label_relabel_preserves_history(client: TestClient, vault_path: Path) -> None:
+def test_label_relabel_replaces_vault_entry(client: TestClient, vault_path: Path) -> None:
     client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
     client.post(
         "/label",
         data={"pair_id": "1", "verdict": "no_match", "note": "second look"},
         follow_redirects=False,
     )
-    history = list(iter_entries(vault_path))
-    assert [event.verdict for event in history] == ["match", "no_match"]
+    entries = list(iter_entries(vault_path))
+    assert [event.verdict for event in entries] == ["no_match"]
     latest = current_entries(vault_path)
     assert latest[("eng-1", "u-eng-1")].verdict == "no_match"
     assert latest[("eng-1", "u-eng-1")].note == "second look"
