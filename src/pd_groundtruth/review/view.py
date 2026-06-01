@@ -20,6 +20,7 @@ from urllib.parse import quote
 from msgspec import Struct
 from msgspec.json import decode as json_decode
 
+from pd_groundtruth.label_vault import CategoryKey
 from pd_groundtruth.review.relative_time import format_relative
 from pd_groundtruth.review_db import CurrentLabelRow
 from pd_groundtruth.review_db import LabeledPairRow
@@ -468,6 +469,7 @@ class LabeledRow(Struct, frozen=True, forbid_unknown_fields=True):
     note_short: str
     labeled_at: str
     labeled_relative: str
+    categories: tuple[CategoryKey, ...] = ()
 
 
 def _truncate(value: str, limit: int = _TITLE_TRUNCATE) -> str:
@@ -501,6 +503,7 @@ def build_labeled_row(row: LabeledPairRow, now: datetime) -> LabeledRow:
         note_short=_truncate(note, _NOTE_TRUNCATE),
         labeled_at=row.labeled_at,
         labeled_relative=format_relative(row.labeled_at, now),
+        categories=row.categories,
     )
 
 
