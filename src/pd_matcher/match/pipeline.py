@@ -40,6 +40,7 @@ from pd_matcher.match.scorers.name import score_publisher
 from pd_matcher.match.scorers.title import score_title
 from pd_matcher.match.scorers.volume import score_volume
 from pd_matcher.match.scorers.year import score_year
+from pd_matcher.match.signals.corroboration import has_no_corroboration
 from pd_matcher.match.signals.translation import is_translation_signal
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
@@ -49,6 +50,13 @@ from pd_matcher.normalize.stopwords import load_stopwords
 _DEFAULT_LANGUAGE: str = "eng"
 _FIXED_SOURCE: tuple[str, str] = ("", "")
 _TRANSLATION_AUTHOR_MULTIPLIER: float = 0.5
+_CORROBORATION_THRESHOLD: float = 50.0
+_TITLE_ISOLATION_MULTIPLIER: float = 0.3
+_NON_CORROBORATING_SCORERS: frozenset[str] = frozenset(
+    {
+        "year.delta",  # many records share a year; year alone is too weak a corroboration signal
+    }
+)
 
 
 def _build_context(marc: MarcRecord, idf: IdfTable, config: MatchingConfig) -> ScorerContext:
@@ -77,6 +85,38 @@ def _select_best(evidences: Sequence[Evidence]) -> tuple[int, Evidence, tuple[Ev
 
 
 _GroupScorer = Callable[[str | None, str | None, ScorerContext], Evidence]
+
+
+def _apply_title_isolation_multiplier(winning: list[Evidence], title_index: int) -> None:
+    """Set the title scorer's ``weight_multiplier`` to the isolation value when
+    a strong title match is the only meaningful signal.
+
+    Mutates ``winning`` in place. The multiplier fires only when:
+
+    * A title Evidence was emitted and is not ``skipped``.
+    * The title's own score reaches ``_CORROBORATION_THRESHOLD`` — a weak
+      title doesn't justify a downweight, and downweighting it can spuriously
+      raise the combined average when the title is scoring below the
+      non-title scorers' mean.
+    * No non-title scorer outside :data:`_NON_CORROBORATING_SCORERS` reaches
+      the same threshold. The year scorer is excluded because many records
+      share a year and a year-only match doesn't distinguish a real pair
+      from a coincidence.
+    """
+    if title_index >= len(winning):
+        return
+    title_evidence = winning[title_index]
+    if title_evidence.skipped:
+        return
+    if title_evidence.score < _CORROBORATION_THRESHOLD:
+        return
+    other_evidences = tuple(
+        ev
+        for index, ev in enumerate(winning)
+        if index != title_index and ev.scorer not in _NON_CORROBORATING_SCORERS
+    )
+    if has_no_corroboration(other_evidences, _CORROBORATION_THRESHOLD):
+        winning[title_index] = _with_multiplier(title_evidence, _TITLE_ISOLATION_MULTIPLIER)
 
 
 def _with_multiplier(evidence: Evidence, multiplier: float) -> Evidence:
@@ -147,6 +187,7 @@ def _score_candidate(
     winning.append(score_isbn(marc.isbns, candidate, ctx))
     sources.append(_FIXED_SOURCE)
 
+    title_index = len(winning)
     _score_group(pairings.title, marc, candidate, ctx, winning, losing, sources)
     author_index = len(winning)
     _score_group(pairings.author, marc, candidate, ctx, winning, losing, sources)
@@ -164,6 +205,8 @@ def _score_candidate(
     sources.append(_FIXED_SOURCE)
     winning.append(score_volume(marc, candidate, ctx))
     sources.append(_FIXED_SOURCE)
+
+    _apply_title_isolation_multiplier(winning, title_index)
 
     combined = combiner.combine(tuple(winning))
     if calibrator is not None:
