@@ -263,7 +263,7 @@ Both load through `src/pd_matcher/config/loader.py` against `msgspec.Struct` sch
 
 The `pd-groundtruth` CLI builds the public-domain **ground-truth corpus**: a set of human-verified `(MARC record, CCE registration)` pairs labeled **match**, **no_match**, or **unsure**. Those labels are what we calibrate and evaluate the matcher against.
 
-The labeling workflow itself — what each verdict means, what to capture in the free-text note, how to handle translations and reprints — is in [`LABELING_GUIDE.md`](LABELING_GUIDE.md).
+Two docs cover the labeling side: [`LABELING_WORKFLOW.md`](docs/LABELING_WORKFLOW.md) is the operational playbook — the commands you run, in order, with trigger conditions; [`LABELING_GUIDE.md`](docs/LABELING_GUIDE.md) covers the per-verdict decision rules (match / no_match / unsure, translations, series-vs-volume, e-book reprints).
 
 ### Commands at a glance
 

@@ -374,6 +374,9 @@ change. Two commands:
   candidate retrieval vs scoring as separate concerns.
 - [docs/glossary.md](glossary.md) — plain-language definitions of
   every domain term.
+- [docs/LABELING_WORKFLOW.md](LABELING_WORKFLOW.md) — the labeler's
+  operational playbook: every command in order with trigger
+  conditions for queue rebuild, publishing, and the diagnostic.
 - [docs/LABELING_GUIDE.md](LABELING_GUIDE.md) — the labeler's decision
   guide for verdicts and edge cases.
 - [docs/studies/](studies/) — write-ups of one-off measurement runs

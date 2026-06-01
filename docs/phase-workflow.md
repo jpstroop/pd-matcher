@@ -1,5 +1,7 @@
 # Phase workflow
 
+> **Not the doc you want if you're labeling.** This is the workflow for shipping code changes (phase branches, regression baselines, per-pair diffs, merges). If you're labeling, see [LABELING_WORKFLOW.md](LABELING_WORKFLOW.md).
+
 How a single improvement to the matcher ships, from clean main to merged main, with all gates and the apples-to-apples per-pair diff that lets us spot regressions the aggregate metrics hide.
 
 This is the project's contributor workflow. For codebase architecture see [design.md](design.md); for matching internals see [matching-architecture.md](matching-architecture.md).
