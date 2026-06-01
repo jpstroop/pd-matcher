@@ -315,6 +315,7 @@ def _append_vault_entry(
             cce_regnum=cce_regnum,
             cce_renewal_id=cce_renewal_id,
             cce_renewal_oreg=cce_renewal_oreg,
+            categories=(),
         )
         upsert_entry(vault_path, entry)
     except Exception:

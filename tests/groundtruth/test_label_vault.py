@@ -208,9 +208,9 @@ def test_extract_marc_identifiers_handles_missing_identifiers() -> None:
     assert identifiers.isbns == ()
 
 
-def test_schema_version_is_four() -> None:
-    """New vault writes use schema 4 (adds flat CCE-side identifier fields)."""
-    assert SCHEMA_VERSION == 4
+def test_schema_version_is_five() -> None:
+    """New vault writes use schema 5 (adds the ``categories`` tuple)."""
+    assert SCHEMA_VERSION == 5
 
 
 def test_legacy_schema_entries_with_old_fields_reject_decode(tmp_path: Path) -> None:
@@ -275,3 +275,58 @@ def test_schema_3_entry_decodes_with_none_for_new_cce_fields(tmp_path: Path) -> 
     assert entry.cce_renewal_id is None
     assert entry.cce_renewal_oreg is None
     assert entry.schema == 3
+
+
+def test_default_categories_is_empty_tuple() -> None:
+    """A freshly constructed ``VaultEntry`` has an empty categories tuple."""
+    entry = _entry()
+    assert entry.categories == ()
+
+
+def test_round_trip_preserves_categories(tmp_path: Path) -> None:
+    """Categories survive encode/decode through the vault file."""
+    path = tmp_path / "vault.jsonl"
+    entry = VaultEntry(
+        schema=SCHEMA_VERSION,
+        marc_control_id="ctrl-1",
+        nypl_uuid="uuid-1",
+        verdict="no_match",
+        note=None,
+        labeled_at="2026-06-01T00:00:00+00:00",
+        labeler="jpstroop",
+        marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+        categories=("marc_whole_cce_part", "generic_title"),
+    )
+    upsert_entry(path, entry)
+    [read_back] = list(iter_entries(path))
+    assert read_back.categories == ("marc_whole_cce_part", "generic_title")
+
+
+def test_unknown_category_key_raises_validation_error(tmp_path: Path) -> None:
+    """msgspec rejects category keys outside the ``CategoryKey`` Literal."""
+    path = tmp_path / "vault.jsonl"
+    path.write_text(
+        '{"schema":5,"marc_control_id":"a","nypl_uuid":"u","verdict":"match",'
+        '"note":null,"labeled_at":"2026-06-01T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]},'
+        '"cce_regnum":null,"cce_renewal_id":null,"cce_renewal_oreg":null,'
+        '"categories":["not_a_real_category"]}\n',
+        encoding="utf-8",
+    )
+    with raises(Exception, match="categories"):
+        list(iter_entries(path))
+
+
+def test_schema_4_entry_decodes_with_empty_categories(tmp_path: Path) -> None:
+    """Forward-compat: schema-4 lines without ``categories`` decode with ``()``."""
+    path = tmp_path / "vault.jsonl"
+    path.write_text(
+        '{"schema":4,"marc_control_id":"a","nypl_uuid":"u","verdict":"match",'
+        '"note":null,"labeled_at":"2026-05-01T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]},'
+        '"cce_regnum":"A1","cce_renewal_id":null,"cce_renewal_oreg":null}\n',
+        encoding="utf-8",
+    )
+    [entry] = list(iter_entries(path))
+    assert entry.schema == 4
+    assert entry.categories == ()

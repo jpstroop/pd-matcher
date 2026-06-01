@@ -26,12 +26,13 @@ from msgspec import Struct
 from msgspec.json import decode as json_decode
 from msgspec.json import encode as json_encode
 
-from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_matcher.models import IndexedNyplRegRecord
 
 CceLookupFn = Callable[[str], IndexedNyplRegRecord | None]
 
 _SCHEMA_V3: int = 3
+_SCHEMA_V4: int = 4
+_SCHEMA_V5: int = 5
 _ARCHIVE_SUFFIX: str = ".pre-v3"
 
 
@@ -55,6 +56,17 @@ class MigrationReportV4(Struct, frozen=True, forbid_unknown_fields=True):
     total_entries: int
     enriched: int
     orphaned: int
+
+
+class MigrationReportV5(Struct, frozen=True, forbid_unknown_fields=True):
+    """Counts emitted by :func:`migrate_vault_v5` for the CLI to print.
+
+    ``migrated`` is the number of entries whose ``schema`` was below 5 and
+    that received the empty-tuple ``categories`` backfill.
+    """
+
+    total_entries: int
+    migrated: int
 
 
 def _iter_raw_entries(path: Path) -> Iterator[dict[str, object]]:
@@ -244,7 +256,7 @@ def migrate_vault_v4(
     if not vault_path.exists() or vault_path.stat().st_size == 0:
         return MigrationReportV4(total_entries=0, enriched=0, orphaned=0)
     raw_entries = list(_iter_raw_entries(vault_path))
-    if all(_schema_at_least(entry, SCHEMA_VERSION) for entry in raw_entries):
+    if all(_schema_at_least(entry, _SCHEMA_V4) for entry in raw_entries):
         return MigrationReportV4(total_entries=len(raw_entries), enriched=0, orphaned=0)
     enriched = 0
     orphaned = 0
@@ -262,7 +274,7 @@ def migrate_vault_v4(
             raw["cce_regnum"] = record.regnum
             raw["cce_renewal_id"] = record.renewal_id
             raw["cce_renewal_oreg"] = record.renewal_oreg
-        raw["schema"] = SCHEMA_VERSION
+        raw["schema"] = _SCHEMA_V4
         migrated_entries.append(raw)
     _atomic_write_jsonl(vault_path, migrated_entries)
     return MigrationReportV4(
@@ -272,10 +284,44 @@ def migrate_vault_v4(
     )
 
 
+def migrate_vault_v5(vault_path: Path) -> MigrationReportV5:
+    """Bump every entry to schema 5 and backfill ``categories`` with ``()``.
+
+    Schema 5 adds a ``categories: tuple[CategoryKey, ...]`` field to
+    :class:`VaultEntry`. The migration is uniform — no external lookup —
+    so every pre-v5 entry receives an empty tuple and a bump to ``schema=5``.
+
+    Idempotent: a vault already entirely at schema 5 returns a zero-count
+    report and is not rewritten. A missing or empty vault is also a
+    zero-count no-op.
+
+    The write itself is atomic: a temp file in the same directory is renamed
+    over the canonical path. The pre-migration vault is preserved in git
+    history rather than on disk.
+    """
+    if not vault_path.exists() or vault_path.stat().st_size == 0:
+        return MigrationReportV5(total_entries=0, migrated=0)
+    raw_entries = list(_iter_raw_entries(vault_path))
+    if all(_schema_at_least(entry, _SCHEMA_V5) for entry in raw_entries):
+        return MigrationReportV5(total_entries=len(raw_entries), migrated=0)
+    migrated = 0
+    migrated_entries: list[dict[str, object]] = []
+    for raw in raw_entries:
+        if not _schema_at_least(raw, _SCHEMA_V5):
+            raw["schema"] = _SCHEMA_V5
+            raw["categories"] = []
+            migrated += 1
+        migrated_entries.append(raw)
+    _atomic_write_jsonl(vault_path, migrated_entries)
+    return MigrationReportV5(total_entries=len(raw_entries), migrated=migrated)
+
+
 __all__ = [
     "CceLookupFn",
     "MigrationReport",
     "MigrationReportV4",
+    "MigrationReportV5",
     "migrate_vault_v3",
     "migrate_vault_v4",
+    "migrate_vault_v5",
 ]

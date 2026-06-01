@@ -12,6 +12,7 @@ from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import iter_entries
 from pd_groundtruth.vault_migration import migrate_vault_v3
 from pd_groundtruth.vault_migration import migrate_vault_v4
+from pd_groundtruth.vault_migration import migrate_vault_v5
 from pd_matcher.models import IndexedNyplRegRecord
 
 _RUNNER = CliRunner()
@@ -343,7 +344,7 @@ def test_v4_enriches_every_entry_when_all_uuids_resolve(tmp_path: Path) -> None:
     assert report.enriched == 3
     assert report.orphaned == 0
     entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
-    assert entries["a"].schema == SCHEMA_VERSION
+    assert entries["a"].schema == 4
     assert entries["a"].cce_regnum == "A1"
     assert entries["a"].cce_renewal_id == "R1"
     assert entries["a"].cce_renewal_oreg == "A1"
@@ -372,7 +373,7 @@ def test_v4_handles_orphaned_uuid_with_none_fields(tmp_path: Path) -> None:
     assert report.orphaned == 1
     entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
     assert entries["a"].cce_regnum == "A1"
-    assert entries["b"].schema == SCHEMA_VERSION
+    assert entries["b"].schema == 4
     assert entries["b"].cce_regnum is None
     assert entries["b"].cce_renewal_id is None
     assert entries["b"].cce_renewal_oreg is None
@@ -424,7 +425,7 @@ def test_v4_bumps_schema_field_in_persisted_lines(tmp_path: Path) -> None:
     migrate_vault_v4(path, _make_cce_lookup(records))
     for raw_line in path.read_bytes().splitlines():
         decoded = json_decode(raw_line, type=dict[str, object])
-        assert decoded["schema"] == SCHEMA_VERSION
+        assert decoded["schema"] == 4
 
 
 def test_cli_migrate_vault_v4_missing_file_reports_zero(tmp_path: Path) -> None:
@@ -524,3 +525,180 @@ def test_cli_migrate_vault_v4_idempotent(tmp_path: Path) -> None:
     assert "migrated 1 entries" in result.stdout
     assert "enriched 0" in result.stdout
     assert "orphaned 0" in result.stdout
+
+
+# ---- v5 migration ----------------------------------------------------------
+
+
+def _v5_line(
+    *,
+    marc_id: str,
+    nypl_uuid: str,
+    categories: tuple[str, ...] = (),
+) -> str:
+    rendered = "[" + ",".join(f'"{c}"' for c in categories) + "]"
+    return (
+        f'{{"schema":5,"marc_control_id":"{marc_id}","nypl_uuid":"{nypl_uuid}",'
+        '"verdict":"match","note":null,"labeled_at":"2026-06-01T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]},'
+        '"cce_regnum":null,"cce_renewal_id":null,"cce_renewal_oreg":null,'
+        f'"categories":{rendered}}}'
+    )
+
+
+def test_v5_migrates_v4_vault_to_schema_5_with_empty_categories(tmp_path: Path) -> None:
+    """Every v4 entry becomes a v5 entry with ``categories=[]``."""
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v4_line(
+                marc_id="a",
+                nypl_uuid="u-a",
+                cce_regnum="A1",
+                cce_renewal_id="R1",
+                cce_renewal_oreg="A1",
+            ),
+            _v4_line(
+                marc_id="b",
+                nypl_uuid="u-b",
+                cce_regnum="A2",
+                cce_renewal_id=None,
+                cce_renewal_oreg=None,
+            ),
+        ],
+    )
+    report = migrate_vault_v5(path)
+    assert report.total_entries == 2
+    assert report.migrated == 2
+    entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
+    assert entries["a"].schema == SCHEMA_VERSION == 5
+    assert entries["a"].categories == ()
+    assert entries["b"].categories == ()
+    # Pre-existing v4 fields are preserved.
+    assert entries["a"].cce_regnum == "A1"
+    assert entries["a"].cce_renewal_id == "R1"
+    assert entries["b"].cce_regnum == "A2"
+
+
+def test_v5_is_idempotent_on_already_v5_vault(tmp_path: Path) -> None:
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v5_line(marc_id="a", nypl_uuid="u-a"),
+            _v5_line(marc_id="b", nypl_uuid="u-b", categories=("translation",)),
+        ],
+    )
+    original_bytes = path.read_bytes()
+    report = migrate_vault_v5(path)
+    assert report.total_entries == 2
+    assert report.migrated == 0
+    # The file was not rewritten.
+    assert path.read_bytes() == original_bytes
+
+
+def test_v5_handles_missing_vault_file(tmp_path: Path) -> None:
+    """A missing vault is a zero-count no-op and creates no file."""
+    path = tmp_path / "absent.jsonl"
+    report = migrate_vault_v5(path)
+    assert report.total_entries == 0
+    assert report.migrated == 0
+    assert not path.exists()
+
+
+def test_v5_handles_empty_vault_file(tmp_path: Path) -> None:
+    """An empty vault file is a zero-count no-op."""
+    path = tmp_path / "empty.jsonl"
+    path.write_bytes(b"")
+    report = migrate_vault_v5(path)
+    assert report.total_entries == 0
+    assert report.migrated == 0
+
+
+def test_v5_preserves_every_v4_field_through_the_bump(tmp_path: Path) -> None:
+    """Round-trip every v4 field; only schema + categories should be added/changed."""
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v4_line(
+                marc_id="x",
+                nypl_uuid="u-x",
+                cce_regnum="A99",
+                cce_renewal_id="R99",
+                cce_renewal_oreg="A99",
+            ),
+        ],
+    )
+    migrate_vault_v5(path)
+    [entry] = list(iter_entries(path))
+    assert entry.marc_control_id == "x"
+    assert entry.nypl_uuid == "u-x"
+    assert entry.verdict == "match"
+    assert entry.note is None
+    assert entry.labeled_at == "2026-05-01T00:00:00+00:00"
+    assert entry.labeler == "jpstroop"
+    assert entry.cce_regnum == "A99"
+    assert entry.cce_renewal_id == "R99"
+    assert entry.cce_renewal_oreg == "A99"
+    assert entry.categories == ()
+    assert entry.schema == 5
+
+
+def test_v5_mixed_vault_only_bumps_the_pre_v5_entries(tmp_path: Path) -> None:
+    """A mix of v4 and v5 entries: only the v4 ones get bumped + tagged."""
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v4_line(
+                marc_id="old",
+                nypl_uuid="u-old",
+                cce_regnum=None,
+                cce_renewal_id=None,
+                cce_renewal_oreg=None,
+            ),
+            _v5_line(marc_id="new", nypl_uuid="u-new", categories=("ocr_confusion",)),
+        ],
+    )
+    report = migrate_vault_v5(path)
+    assert report.total_entries == 2
+    assert report.migrated == 1
+    entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
+    assert entries["old"].categories == ()
+    assert entries["new"].categories == ("ocr_confusion",)
+
+
+def test_cli_migrate_vault_v5_runs_and_reports(tmp_path: Path) -> None:
+    vault_path = tmp_path / "vault.jsonl"
+    _write_vault(
+        vault_path,
+        [
+            _v4_line(
+                marc_id="a",
+                nypl_uuid="u-a",
+                cce_regnum="A1",
+                cce_renewal_id=None,
+                cce_renewal_oreg=None,
+            ),
+        ],
+    )
+    result = _RUNNER.invoke(
+        app,
+        ["migrate-vault-v5", "--vault", str(vault_path)],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "migrated 1 entries" in result.stdout
+    assert "bumped 1 to schema 5" in result.stdout
+
+
+def test_cli_migrate_vault_v5_missing_file_reports_zero(tmp_path: Path) -> None:
+    vault_path = tmp_path / "absent.jsonl"
+    result = _RUNNER.invoke(
+        app,
+        ["migrate-vault-v5", "--vault", str(vault_path)],
+    )
+    assert result.exit_code == 0
+    assert "migrated 0 entries" in result.stdout
+    assert "bumped 0 to schema 5" in result.stdout

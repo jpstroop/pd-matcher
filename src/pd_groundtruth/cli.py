@@ -38,6 +38,7 @@ from pd_groundtruth.sampling import scale_budget
 from pd_groundtruth.vault_into_queue import vault_into_queue
 from pd_groundtruth.vault_migration import migrate_vault_v3
 from pd_groundtruth.vault_migration import migrate_vault_v4
+from pd_groundtruth.vault_migration import migrate_vault_v5
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
 from pd_matcher.index.lookup import NyplIndexLookup
@@ -372,6 +373,7 @@ def seed_vault_command(
                 cce_regnum=label.cce_regnum,
                 cce_renewal_id=label.cce_renewal_id,
                 cce_renewal_oreg=label.cce_renewal_oreg,
+                categories=(),
             )
             upsert_entry(vault, entry)
             seeded += 1
@@ -563,3 +565,29 @@ def migrate_vault_v4_command(
         f"enriched {report.enriched}; "
         f"orphaned {report.orphaned}"
     )
+
+
+@app.command(name="migrate-vault-v5")
+def migrate_vault_v5_command(
+    vault: Annotated[
+        Path,
+        Option("--vault", help="JSONL label vault to migrate in place."),
+    ] = _DEFAULT_VAULT_PATH,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Bump every vault entry to schema 5 and backfill ``categories`` with ``[]``.
+
+    Schema 5 adds the ``categories`` field to capture recurring rationale
+    patterns (series-vs-volume mismatches, translations, OCR confusion, etc.)
+    as structured data rather than free-text notes. The migration is
+    uniform: every pre-v5 entry gets an empty tuple. The pre-migration vault
+    lives in git history; no on-disk archive is written. Idempotent:
+    re-running on an already-migrated vault is a no-op and does not rewrite
+    the file.
+    """
+    _configure_logging("migrate-vault-v5", log_file)
+    report = migrate_vault_v5(vault)
+    echo(f"migrated {report.total_entries} entries; bumped {report.migrated} to schema 5")
