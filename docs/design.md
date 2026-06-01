@@ -557,7 +557,7 @@ Two caveats. **AUC and average precision are reported but not gated**: locking t
 
 ### Code repo vs data repo: published artifacts live elsewhere
 
-The code repo (`jpstroop/pd-matcher`) tracks code, tests, the live working vault, the regression baseline, and the NYPL submodules. It does **not** track the published consumer-facing artifacts. Those live in a separate repository at [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage) — a CC0-licensed dataset repo containing the MARCXML dump (`vault_marcs.xml`) and the reshaped linkage JSONL (`vault.jsonl`).
+The code repo (`jpstroop/pd-matcher`) tracks code, tests, the live working vault, the regression baseline, and the NYPL submodules. It does **not** track the published consumer-facing artifacts. Those live in a separate repository at [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage) — a CC0-licensed dataset repo containing the MARCXML dump (`marc.xml`) and the reshaped linkage JSONL pair (`training.jsonl` + `matches.jsonl`).
 
 The split is deliberate. The two repos have different audiences (developers vs. data consumers), different update cadences (per-feature vs. per-labeling-session), and different size trajectories (the code is bounded; the data grows with labeling effort). Bundling them would penalize one audience for the other's churn and bloat a code-only clone with data the matcher doesn't read.
 

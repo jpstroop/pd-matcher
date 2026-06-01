@@ -186,7 +186,7 @@ Skip the rebuild when the change cannot affect scoring (docs, tests, scripts, re
 
 The published linkage dataset lives in a separate repo at [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage), cloned in-tree at the gitignored `data/published/` path. Three files make up the published set:
 
-- `vault_marcs.xml` — MARCXML of every MARC referenced by the vault.
+- `marc.xml` — MARCXML of every MARC referenced by the vault.
 - `training.jsonl` — every adjudicated row (`match`, `no_match`, `unsure`). The training input for a learned matcher.
 - `matches.jsonl` — same schema, filtered to `match` rows only. The curated linkage table.
 

@@ -258,7 +258,7 @@ This code repo doesn't bundle the publishable artifacts directly —
 they're regenerated on demand and pushed to the data repo. Three files
 make up the published dataset:
 
-- `vault_marcs.xml` — MARCXML of every MARC referenced by the vault
+- `marc.xml` — MARCXML of every MARC referenced by the vault
   (from `dump-vault-marcs`).
 - `training.jsonl` — the full reshaped table with every adjudicated
   verdict (`match`, `no_match`, `unsure`). The natural training input
@@ -284,7 +284,7 @@ pdm run pd-groundtruth publish-linkage
 
 # Review what changed, then commit and push from inside the data repo:
 cd data/published
-git add vault_marcs.xml training.jsonl matches.jsonl
+git add marc.xml training.jsonl matches.jsonl
 git commit -m "regenerate from vault @ N entries"
 git push origin main
 ```
