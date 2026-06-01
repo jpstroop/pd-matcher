@@ -1291,3 +1291,77 @@ def test_empty_queue_filter_bar_marks_selected_filters(empty_client: TestClient)
     assert '<option value="eng" selected>eng</option>' in response.text
     assert '<option value="below" selected>below</option>' in response.text
     assert '<a class="clear" href="/">Clear</a>' in response.text
+
+
+def test_label_post_writes_categories_to_db(client: TestClient, tmp_path: Path) -> None:
+    response = client.post(
+        "/label",
+        data={
+            "pair_id": "1",
+            "verdict": "match",
+            "categories": ["translation", "ocr_confusion"],
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        rows = db.iter_labeled_pairs()
+    assert len(rows) == 1
+    assert rows[0].categories == ("translation", "ocr_confusion")
+
+
+@fixture
+def categories_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        a = db.insert_pair(_pair(language="eng", control_id="cat-a", nypl_uuid="u-cat-a"))
+        b = db.insert_pair(_pair(language="eng", control_id="cat-b", nypl_uuid="u-cat-b"))
+        c = db.insert_pair(_pair(language="eng", control_id="cat-c", nypl_uuid="u-cat-c"))
+        d = db.insert_pair(_pair(language="eng", control_id="cat-d", nypl_uuid="u-cat-d"))
+        db.add_label(a, "match", categories=("translation",))
+        db.add_label(b, "no_match", categories=("ocr_confusion",))
+        db.add_label(c, "match", categories=("translation", "ocr_confusion"))
+        db.add_label(d, "match", categories=("generic_title",))
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def test_labels_route_filter_by_single_category_narrows_rows(
+    categories_client: TestClient,
+) -> None:
+    response = categories_client.get("/labels", params={"categories": "translation"})
+    assert response.status_code == 200
+    ids = _labels_table_pair_ids(response.text)
+    assert set(ids) == {"1", "3"}
+
+
+def test_labels_route_filter_by_multiple_categories_uses_or_semantics(
+    categories_client: TestClient,
+) -> None:
+    response = categories_client.get(
+        "/labels",
+        params=[("categories", "translation"), ("categories", "ocr_confusion")],
+    )
+    assert response.status_code == 200
+    ids = _labels_table_pair_ids(response.text)
+    assert set(ids) == {"1", "2", "3"}
+
+
+def test_labels_route_renders_category_chips_per_row(
+    categories_client: TestClient,
+) -> None:
+    response = categories_client.get("/labels")
+    assert response.status_code == 200
+    assert response.text.count('<span class="category-chip">translation</span>') == 2
+    assert '<span class="category-chip">ocr_confusion</span>' in response.text
+    assert '<span class="category-chip">generic_title</span>' in response.text
+
+
+def test_labels_route_renders_category_filter_widget(
+    categories_client: TestClient,
+) -> None:
+    response = categories_client.get("/labels", params={"categories": "translation"})
+    assert response.status_code == 200
+    assert '<input type="checkbox" name="categories" value="translation" checked>' in response.text
+    assert '<input type="checkbox" name="categories" value="ocr_confusion">' in response.text

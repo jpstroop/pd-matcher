@@ -32,6 +32,7 @@ from pd_groundtruth.build_queue import _sample_language
 from pd_groundtruth.build_queue import _write_sample_chunks
 from pd_groundtruth.build_queue import build_queue
 from pd_groundtruth.label_vault import SCHEMA_VERSION
+from pd_groundtruth.label_vault import CategoryKey
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.review_db import PairInsert
@@ -671,6 +672,7 @@ def _vault_entry(
     verdict: str = "match",
     labeled_at: str = "2026-05-22T10:00:00+00:00",
     note: str | None = None,
+    categories: tuple[CategoryKey, ...] = (),
 ) -> VaultEntry:
     return VaultEntry(
         schema=SCHEMA_VERSION,
@@ -681,6 +683,7 @@ def _vault_entry(
         labeled_at=labeled_at,
         labeler="jpstroop",
         marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+        categories=categories,
     )
 
 
@@ -765,6 +768,45 @@ def test_writer_vault_injection_preserves_verdict_metadata(tmp_path: Path) -> No
     assert only.verdict == "no_match"
     assert only.labeled_at == "2026-05-22T11:00:00+00:00"
     assert only.note == "careful read"
+
+
+def test_writer_vault_injection_threads_categories_into_db(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    entry = _vault_entry(
+        "ctrl-cat",
+        "uuid-cat",
+        verdict="match",
+        categories=("translation", "ocr_confusion"),
+    )
+    pair = _pair_for("ctrl-cat", "uuid-cat")
+    resolved = (ResolvedVaultPair(entry=entry, pair=pair),)
+    with StratifyingResultWriter(
+        db_path=db_path,
+        budget=BudgetModel(caps={}),
+        seed=1,
+        vault_pairs=resolved,
+    ):
+        pass
+    with ReviewDb.connect(db_path) as db:
+        rows = db.iter_labeled_pairs()
+    assert rows[0].categories == ("translation", "ocr_confusion")
+
+
+def test_writer_matcher_route_threads_vault_categories_into_db(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.db"
+    budget = BudgetModel(caps={("eng", "ge90"): 1})
+    vault_entry = _vault_entry(
+        "c0",
+        "uuid-1",
+        verdict="match",
+        categories=("generic_title",),
+    )
+    vault = {("c0", "uuid-1"): vault_entry}
+    with StratifyingResultWriter(db_path=db_path, budget=budget, seed=1, vault=vault) as writer:
+        writer.write(_marc(control_id="c0"), _match(0.95), _cce())
+    with ReviewDb.connect(db_path) as db:
+        rows = db.iter_labeled_pairs()
+    assert rows[0].categories == ("generic_title",)
 
 
 def test_build_queue_carries_vault_pair_through_rebuild(
