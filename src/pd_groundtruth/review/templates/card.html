@@ -56,6 +56,16 @@
     </div>
   </div>
 
+  <div class="category-bar">
+    {%- for key, label in category_choices %}
+    <label class="category-checkbox">
+      <input type="checkbox" name="categories" value="{{ key }}"
+             {% if key in current_categories %}checked{% endif %}>
+      {{ label }}
+    </label>
+    {%- endfor %}
+  </div>
+
   <div class="meta">
     <span class="score">{{ "%.3f"|format(card.score) }}</span>
     <span class="band">{{ card.band }}</span>
