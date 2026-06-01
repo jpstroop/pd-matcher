@@ -25,11 +25,19 @@ anything else. ``cce_renewal_oreg`` exists alongside ``cce_regnum`` so future
 work matching against the renewal index independently can compare the
 renewal's transcribed original-registration cite to the matched registration's
 ``regnum`` and surface NYPL OCR errors.
+
+Schema 5 adds a ``categories: tuple[CategoryKey, ...]`` field that captures
+recurring rationale patterns the labeler used to type into ``note``
+(series-vs-volume mismatches, translations, OCR confusion, etc.). The
+vocabulary is fixed in code via the :data:`CategoryKey` ``Literal`` type;
+msgspec rejects unknown keys at decode. The default is the empty tuple,
+so v4 data still decodes via the v5 struct.
 """
 
 from collections.abc import Iterator
 from os import fsync
 from pathlib import Path
+from typing import Literal
 
 from msgspec import Struct
 from msgspec.json import decode as json_decode
@@ -37,7 +45,16 @@ from msgspec.json import encode as json_encode
 
 from pd_matcher.models import MarcRecord
 
-SCHEMA_VERSION: int = 4
+SCHEMA_VERSION: int = 5
+
+CategoryKey = Literal[
+    "marc_whole_cce_part",
+    "cce_whole_marc_part",
+    "translation",
+    "ocr_confusion",
+    "same_title_different_work",
+    "generic_title",
+]
 
 
 class MarcIdentifiers(Struct, frozen=True, forbid_unknown_fields=True):
@@ -52,10 +69,9 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     """The current verdict for one ``(marc_control_id, nypl_uuid)`` pair.
 
     Exactly one entry exists per pair; re-submitting a verdict replaces the
-    existing entry in place. Free-text ``note`` is the only structured
-    signal the labeler carries alongside the verdict — the pre-schema-3
-    ``reasons`` and ``field_annotations`` fields have been retired in favor
-    of letting accumulated notes surface patterns naturally.
+    existing entry in place. Free-text ``note`` is the labeler's open
+    rationale; ``categories`` (schema 5) is the structured complement —
+    a multi-select list of recurring patterns the verdict reflects.
 
     Schema 4 adds three flat top-level CCE-side identifier fields:
     ``cce_regnum`` (the registration's Copyright Office number),
@@ -63,6 +79,27 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     renewed), and ``cce_renewal_oreg`` (the original registration cite copied
     from the renewal). All three default to ``None`` so schema-3 entries
     decode cleanly during forward-compat reads.
+
+    Schema 5 adds the ``categories`` tuple — zero or more
+    :data:`CategoryKey` values capturing recurring rationale patterns:
+
+    * ``marc_whole_cce_part`` — MARC describes a whole series/set; CCE
+      registers a single member (usually ``no_match``).
+    * ``cce_whole_marc_part`` — CCE is the series-level registration;
+      MARC is one member (``match`` by inference per the labeling guide).
+    * ``translation`` — one side registers a translation, the other the
+      original.
+    * ``ocr_confusion`` — match obscured by an OCR transcription error.
+    * ``same_title_different_work`` — full title agreement with author /
+      publisher / year all contradicting.
+    * ``generic_title`` — the title is generic enough that title-only
+      match is unreliable.
+
+    Unknown category keys raise ``msgspec.ValidationError`` at decode time
+    because ``CategoryKey`` is a ``Literal`` type; the v1 vocabulary is
+    extended by appending new keys to that type, which is forward-compat
+    for old data (which has empty tuples) but not backward-compat for
+    new keys read by old code.
     """
 
     schema: int
@@ -76,6 +113,7 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     cce_regnum: str | None = None
     cce_renewal_id: str | None = None
     cce_renewal_oreg: str | None = None
+    categories: tuple[CategoryKey, ...] = ()
 
 
 def upsert_entry(path: Path, entry: VaultEntry) -> None:
@@ -157,6 +195,7 @@ def extract_marc_identifiers(marc: MarcRecord) -> MarcIdentifiers:
 
 __all__ = [
     "SCHEMA_VERSION",
+    "CategoryKey",
     "MarcIdentifiers",
     "VaultEntry",
     "current_entries",
