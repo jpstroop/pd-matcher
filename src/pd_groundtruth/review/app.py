@@ -66,6 +66,7 @@ _VAULT_PATH_ATTR: str = "label_vault_path"
 _LABELER: str = "jpstroop"
 _SKIP_QUERY: list[int] = Query([])
 _CATEGORIES_FORM: list[str] = Form([])
+_CATEGORIES_QUERY: list[str] = Query([])
 _LANGUAGE_CHOICES: tuple[str, ...] = ("eng", "fre", "ger", "spa", "ita")
 _BAND_CHOICES: tuple[str, ...] = (BAND_GE90, BAND_80_90, BAND_70_80, BAND_60_70, BAND_BELOW)
 _VERDICT_CHOICES: tuple[str, ...] = ("match", "no_match", "unsure")
@@ -212,7 +213,7 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
         clean_categories = _filter_known_categories(categories)
         with ReviewDb.connect(_db_path(request)) as db:
             pair = db.get_pair(pair_id)
-            result = db.add_label(pair_id, verdict, note=clean_note)
+            result = db.add_label(pair_id, verdict, note=clean_note, categories=clean_categories)
         if pair is not None:
             _append_vault_entry(
                 vault_path=_vault_path(request),
@@ -252,8 +253,9 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
         q: str | None = None,
         sort: str | None = None,
         page: int = 1,
+        categories: list[str] = _CATEGORIES_QUERY,
     ) -> HTMLResponse:
-        label_filters = parse_label_filters(verdict, language, q, sort)
+        label_filters = parse_label_filters(verdict, language, q, sort, categories)
         current_page = max(page, 1)
         with ReviewDb.connect(_db_path(request)) as db:
             counts = db.progress()
@@ -282,6 +284,8 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 "language_choices": _LANGUAGE_CHOICES,
                 "verdict_choices": _VERDICT_CHOICES,
                 "sort_choices": _SORT_CHOICES,
+                "category_choices": _CATEGORY_CHOICES,
+                "selected_categories": frozenset(label_filters.categories),
                 "query_string": label_filters_query_string(label_filters),
                 "query_string_for": lambda drop=None: label_filters_query_string(
                     label_filters, drop=drop
