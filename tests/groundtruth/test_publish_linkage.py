@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from pd_groundtruth.cli import app
 from pd_groundtruth.label_vault import SCHEMA_VERSION
+from pd_groundtruth.label_vault import CategoryKey
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import upsert_entry
@@ -29,6 +30,7 @@ def _entry(
     cce_regnum: str | None = "A12345",
     cce_renewal_id: str | None = "R67890",
     cce_renewal_oreg: str | None = "A12345",
+    categories: tuple[CategoryKey, ...] = (),
 ) -> VaultEntry:
     return VaultEntry(
         schema=SCHEMA_VERSION,
@@ -42,6 +44,7 @@ def _entry(
         cce_regnum=cce_regnum,
         cce_renewal_id=cce_renewal_id,
         cce_renewal_oreg=cce_renewal_oreg,
+        categories=categories,
     )
 
 
@@ -238,3 +241,42 @@ def test_cli_publish_linkage_writes_both_files(tmp_path: Path) -> None:
     assert "1 matches also written" in result.stdout
     assert len(_rows(training)) == 2
     assert len(_rows(matches)) == 1
+
+
+def test_empty_categories_serialize_as_empty_array(tmp_path: Path) -> None:
+    """A vault entry with no categories produces ``"categories":[]`` in the JSONL."""
+    vault, training, matches = _paths(tmp_path)
+    upsert_entry(vault, _entry())
+
+    publish_linkage(vault, training, matches)
+
+    row = _rows(training)[0]
+    assert row["categories"] == []
+
+
+def test_categories_round_trip_through_publication(tmp_path: Path) -> None:
+    """Multi-category vault entries land in the published JSONL with the same values."""
+    vault, training, matches = _paths(tmp_path)
+    upsert_entry(
+        vault,
+        _entry(
+            verdict="no_match",
+            categories=("marc_whole_cce_part", "generic_title"),
+        ),
+    )
+
+    publish_linkage(vault, training, matches)
+
+    row = _rows(training)[0]
+    assert row["categories"] == ["marc_whole_cce_part", "generic_title"]
+
+
+def test_categories_appear_in_both_training_and_matches_files(tmp_path: Path) -> None:
+    """A ``match`` row with categories shows up identically in both outputs."""
+    vault, training, matches = _paths(tmp_path)
+    upsert_entry(vault, _entry(verdict="match", categories=("ocr_confusion",)))
+
+    publish_linkage(vault, training, matches)
+
+    assert _rows(training)[0]["categories"] == ["ocr_confusion"]
+    assert _rows(matches)[0]["categories"] == ["ocr_confusion"]
