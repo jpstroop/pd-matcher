@@ -75,7 +75,21 @@ Trains a small LightGBM classifier against the current vault and writes a markdo
 
 **Trigger:** at meaningful corpus growth milestones — every ~200 new labels is typical. Output goes to `docs/findings/`; you can commit the file separately.
 
-## 6. Rare: rebuild the CCE index
+## 6. Loop back: code changes from the diagnostic
+
+The diagnostic often surfaces things worth shipping — a scorer that's under- or over-weighted vs. data-learned importance, a missing signal, a cluster of false positives with a recognizable shape. Acting on those is **not your job** as the labeler; it's a code-change job that goes through [phase-workflow.md](phase-workflow.md).
+
+What you actually do: tell Claude (or whoever is in the developer seat) what the diagnostic showed and what's worth chasing. They ship the change. When they finish, their completion message tells you whether the queue needs a rebuild — if so, you loop back to step 3 before your next labeling session.
+
+The cycle in shorthand:
+
+```
+label → commit vault → [rebuild queue] → publish → diagnostic
+                            ↑                          │
+                            └── code changes ←─────────┘
+```
+
+## 7. Rare: rebuild the CCE index
 
 ```bash
 pdm run pd-matcher index build \
@@ -86,7 +100,7 @@ pdm run pd-matcher index build \
 
 **Trigger:** the NYPL submodules (`data/nypl-reg/`, `data/nypl-ren/`) updated since the last index build. Rare — these submodules change infrequently.
 
-## 7. Rare: re-acquire MARCs
+## 8. Rare: re-acquire MARCs
 
 ```bash
 pdm run pd-groundtruth acquire --out-dir data/candidates
