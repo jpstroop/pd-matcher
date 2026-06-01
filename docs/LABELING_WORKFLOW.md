@@ -36,13 +36,16 @@ Just the vault — no other files. Whenever you stop labeling; once a day at a m
 ### Run the LightGBM diagnostic
 
 ```bash
-pdm run python scripts/learned_scorer_diagnostic.py \
-    > docs/findings/learned_scorer_diagnostic_<YYYY-MM-DD>.md
+DYLD_LIBRARY_PATH="$PWD/.venv/lib/python3.14/site-packages/sklearn/.dylibs" \
+  pdm run python scripts/learned_scorer_diagnostic.py \
+  > docs/findings/learned_scorer_diagnostic_<YYYY-MM-DD>.md
 ```
 
 Trains a small LightGBM classifier against your current vault and writes a markdown report: feature importance vs current weights, per-pair disagreements, AUC. ~30 sec.
 
 Useful for catching your own labeling mistakes and surfacing scoring/feature nuances. Run as often as you want — the output is a dated snapshot.
+
+> The `DYLD_LIBRARY_PATH` prefix points at scikit-learn's bundled `libomp.dylib`. LightGBM needs OpenMP at runtime, and on macOS without `brew install libomp` the loader can't find it. Pointing at the sklearn-shipped copy avoids needing the brew package.
 
 ### Regenerate + publish the dataset
 
