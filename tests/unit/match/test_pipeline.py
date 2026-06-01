@@ -15,6 +15,7 @@ from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import build_idf_table
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
+from pd_matcher.match.pipeline import _apply_title_isolation_multiplier
 from pd_matcher.match.pipeline import _with_multiplier
 from pd_matcher.match.pipeline import match_record
 from pd_matcher.models import MarcRecord
@@ -38,7 +39,7 @@ def _idf(lookup: NyplIndexLookup) -> IdfTable:
     return build_idf_table(lookup)
 
 
-def _config(*, min_score: float = 30.0) -> MatchingConfig:
+def _config(*, min_score: float = 30.0, year_window: int = 2) -> MatchingConfig:
     return MatchingConfig(
         title_weight=0.40,
         author_weight=0.20,
@@ -49,7 +50,7 @@ def _config(*, min_score: float = 30.0) -> MatchingConfig:
         isbn_weight=0.05,
         extent_weight=0.0,
         volume_weight=0.0,
-        year_window=2,
+        year_window=year_window,
         min_combined_score=min_score,
         scorer="weighted_mean",
     )
@@ -539,3 +540,191 @@ def test_match_record_author_via_sor_pairing_recovers_match(
     author_evidence = next(ev for ev in result.best.evidence if ev.scorer == "name.author")
     assert author_evidence.skipped is False
     assert author_evidence.score > 0.0
+
+
+def _ev(score: float, *, scorer: str = "test.scorer", skipped: bool = False) -> Evidence:
+    return Evidence(
+        scorer=scorer,
+        score=score,
+        max=100.0,
+        skipped=skipped,
+        decisive=False,
+        features=(),
+    )
+
+
+def test_apply_title_isolation_multiplier_skips_when_title_index_out_of_range() -> None:
+    """When no title Evidence was emitted, the helper is a no-op."""
+    winning = [_ev(0.0, scorer="lccn.exact")]
+    _apply_title_isolation_multiplier(winning, title_index=5)
+    assert winning[0].weight_multiplier == 1.0
+
+
+def test_apply_title_isolation_multiplier_skips_when_title_evidence_skipped() -> None:
+    """A skipped title Evidence is left untouched."""
+    winning = [
+        _ev(0.0, scorer="title.token_set", skipped=True),
+        _ev(0.0, scorer="name.author"),
+    ]
+    _apply_title_isolation_multiplier(winning, title_index=0)
+    assert winning[0].weight_multiplier == 1.0
+
+
+def test_apply_title_isolation_multiplier_fires_when_no_other_scorer_corroborates() -> None:
+    winning = [
+        _ev(100.0, scorer="title.token_set"),
+        _ev(0.0, scorer="name.author"),
+        _ev(0.0, scorer="year.exact"),
+    ]
+    _apply_title_isolation_multiplier(winning, title_index=0)
+    assert winning[0].weight_multiplier == 0.3
+
+
+def test_apply_title_isolation_multiplier_holds_when_one_other_scorer_corroborates() -> None:
+    winning = [
+        _ev(100.0, scorer="title.token_set"),
+        _ev(75.0, scorer="name.author"),
+        _ev(0.0, scorer="name.publisher"),
+    ]
+    _apply_title_isolation_multiplier(winning, title_index=0)
+    assert winning[0].weight_multiplier == 1.0
+
+
+def test_apply_title_isolation_multiplier_treats_year_as_non_corroborating() -> None:
+    """Year alone does not corroborate: many records share a year."""
+    winning = [
+        _ev(100.0, scorer="title.token_set"),
+        _ev(100.0, scorer="year.delta"),
+        _ev(0.0, scorer="name.author"),
+    ]
+    _apply_title_isolation_multiplier(winning, title_index=0)
+    assert winning[0].weight_multiplier == 0.3
+
+
+def test_apply_title_isolation_multiplier_does_not_fire_when_title_score_is_low() -> None:
+    """A weak title match is not downweighted — that would just raise the average."""
+    winning = [
+        _ev(20.0, scorer="title.token_set"),
+        _ev(0.0, scorer="name.author"),
+        _ev(0.0, scorer="name.publisher"),
+    ]
+    _apply_title_isolation_multiplier(winning, title_index=0)
+    assert winning[0].weight_multiplier == 1.0
+
+
+def test_match_record_downweights_title_when_no_other_scorer_corroborates(
+    tmp_path: Path, compiled_pairings: CompiledPairings
+) -> None:
+    """A title-only match with no corroborating signal gets weight_multiplier 0.3.
+
+    The CCE entry has a title that overlaps strongly with the MARC title, but
+    every other field disagrees: different author, different year (outside the
+    window), different publisher. No non-title scorer reaches the corroboration
+    threshold (50.0), so the title's weight_multiplier drops to 0.3.
+    """
+    reg_dir = tmp_path / "reg"
+    ren_dir = tmp_path / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "iso_reg.xml").write_text(
+        (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<copyrightEntries>\n"
+            '  <copyrightEntry regnum="A222222" id="UUID-ISO-1">'
+            "<author><authorName>Smith, John</authorName></author>"
+            "<title>Selected widgets.</title>"
+            '<regDate date="1920-01-01">Jan. 1, 1920</regDate>'
+            '<publisher><pubName claimant="yes">Acme Press</pubName>'
+            "<pubPlace>NYC</pubPlace></publisher>"
+            "<desc>312 p.</desc>"
+            "</copyrightEntry>\n"
+            "</copyrightEntries>\n"
+        ),
+        encoding="utf-8",
+    )
+    (ren_dir / "empty.tsv").write_text("", encoding="utf-8")
+    out_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    with NyplIndexLookup(out_path) as lookup:
+        idf = _idf(lookup)
+        # Year window 5 lets the CCE candidate (1920) be retrieved for the MARC
+        # (1925), but the 5-year delta drives the year scorer to zero, leaving
+        # the title scorer alone with no corroborating signal.
+        config = _config(min_score=0.0, year_window=5)
+        marc = MarcRecord(
+            control_id="m",
+            title="Selected widgets",
+            title_main="Selected widgets",
+            main_author="Different, Name",
+            publisher="Penguin Books",
+            publication_year=1925,
+        )
+        result = match_record(
+            marc,
+            lookup=lookup,
+            config=config,
+            idf=idf,
+            calibrator=None,
+            combiner=WeightedMeanCombiner(config=config),
+            pairings=compiled_pairings,
+        )
+    assert result.best is not None
+    title_evidence = next(ev for ev in result.best.evidence if ev.scorer == "title.token_set")
+    assert title_evidence.weight_multiplier == 0.3
+
+
+def test_match_record_keeps_full_title_weight_when_author_corroborates(
+    tmp_path: Path, compiled_pairings: CompiledPairings
+) -> None:
+    """A title match with author corroboration keeps full title weight.
+
+    Author + title + year all match here, so corroboration is present and
+    the title scorer's weight_multiplier stays at the default 1.0. Year
+    alone would not corroborate (it is excluded from the corroboration
+    set), but author does.
+    """
+    reg_dir = tmp_path / "reg"
+    ren_dir = tmp_path / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "corr_reg.xml").write_text(
+        (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<copyrightEntries>\n"
+            '  <copyrightEntry regnum="A333333" id="UUID-CORR-1">'
+            "<author><authorName>Smith, John</authorName></author>"
+            "<title>Widget studies.</title>"
+            '<regDate date="1955-01-01">Jan. 1, 1955</regDate>'
+            '<publisher><pubName claimant="yes">House</pubName>'
+            "<pubPlace>NYC</pubPlace></publisher>"
+            "<desc>312 p.</desc>"
+            "</copyrightEntry>\n"
+            "</copyrightEntries>\n"
+        ),
+        encoding="utf-8",
+    )
+    (ren_dir / "empty.tsv").write_text("", encoding="utf-8")
+    out_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    with NyplIndexLookup(out_path) as lookup:
+        idf = _idf(lookup)
+        config = _config(min_score=0.0)
+        marc = MarcRecord(
+            control_id="m",
+            title="Widget studies",
+            title_main="Widget studies",
+            main_author="Smith, John",
+            publication_year=1955,
+        )
+        result = match_record(
+            marc,
+            lookup=lookup,
+            config=config,
+            idf=idf,
+            calibrator=None,
+            combiner=WeightedMeanCombiner(config=config),
+            pairings=compiled_pairings,
+        )
+    assert result.best is not None
+    title_evidence = next(ev for ev in result.best.evidence if ev.scorer == "title.token_set")
+    assert title_evidence.weight_multiplier == 1.0
