@@ -1,52 +1,50 @@
 # Labeling workflow
 
-This is the labeler's operational guide — every command you actually run, in the order you run it, with the trigger conditions for each. If you're shipping code changes, you want [phase-workflow.md](phase-workflow.md) instead.
+The labeler's operational guide. If you're shipping code changes, see [phase-workflow.md](phase-workflow.md) instead.
 
-## 1. Label
+The shape:
+
+- **Routine** — two steps you do every session.
+- **Discretionary** — tools you reach for whenever they're useful.
+- **Required when** — rebuilds that fire only on a specific condition.
+
+---
+
+## Routine — every session
+
+### 1. Label
 
 ```bash
 pdm run pd-groundtruth review
 ```
 
-Opens the local review UI at <http://127.0.0.1:8000>. Verdicts auto-save to both `data/review.db` and `data/label_vault.jsonl`. Ctrl-C stops the server; nothing is lost.
+Opens the local review UI at <http://127.0.0.1:8000>. Verdicts auto-save to both `data/review.db` and `data/label_vault.jsonl`. Ctrl-C stops the server; nothing is lost. For verdict decisions, see [LABELING_GUIDE.md](LABELING_GUIDE.md).
 
-For verdict decisions (match vs. no_match vs. unsure, series-vs-volume rules, translation rules) see [LABELING_GUIDE.md](LABELING_GUIDE.md).
-
-## 2. End of labeling session — commit the vault
+### 2. Commit the vault
 
 ```bash
 git add data/label_vault.jsonl
 git commit -m "vault: <N> labels"
 ```
 
-Just the vault. No other files. Frequency: any time you stop labeling and want the labels durable in git. Once a day at a minimum.
+Just the vault — no other files. Whenever you stop labeling; once a day at a minimum.
 
-You don't need to push the code repo. The vault is git-tracked locally and gets re-published via the data repo (step 4 below).
+---
 
-## 3. Rebuild the queue — when scoring changed
+## Discretionary — run whenever useful
+
+### Run the LightGBM diagnostic
 
 ```bash
-pdm run pd-groundtruth build-queue --rebuild
+pdm run python scripts/learned_scorer_diagnostic.py \
+    > docs/findings/learned_scorer_diagnostic_<YYYY-MM-DD>.md
 ```
 
-Runs the matcher against the full pool, re-scores every pair, writes a fresh `data/review.db`. Vault verdicts pre-apply automatically — you don't lose any labels.
+Trains a small LightGBM classifier against your current vault and writes a markdown report: feature importance vs current weights, per-pair disagreements, AUC. ~30 sec.
 
-**Trigger:** any time the matcher's scoring code changed since your last rebuild. Concretely, any merge that touched:
+Useful for catching your own labeling mistakes and surfacing scoring/feature nuances. Run as often as you want — the output is a dated snapshot.
 
-- `src/pd_matcher/scorers/`
-- `src/pd_matcher/signals/`
-- `src/pd_matcher/normalize/`
-- `src/pd_matcher/config/defaults/`
-- `src/pd_matcher/match/` (including `combiners/` and `pairing_compiler.py`)
-- `src/pd_matcher/idf.py` or any IDF table rebuild
-
-Doc-only or test-only changes do not stale the queue.
-
-**Cadence:** when the user (you) wants, but at minimum before the next labeling session after the matcher changed. Batchable — defer until a cluster of merges has all landed; one rebuild covers all of them.
-
-**Runtime:** ~5–10 min depending on pool size.
-
-## 4. Regenerate and publish the dataset — when the vault grew
+### Regenerate + publish the dataset
 
 ```bash
 pdm run pd-groundtruth dump-vault-marcs
@@ -58,38 +56,31 @@ git push origin main
 cd -
 ```
 
-Writes the three published files (`marc.xml`, `training.jsonl`, `matches.jsonl`) into the in-tree clone of the [cce-marc-linkage](https://github.com/jpstroop/cce-marc-linkage) data repo, then commits and pushes them there.
+Writes `marc.xml`, `training.jsonl`, and `matches.jsonl` into the [cce-marc-linkage](https://github.com/jpstroop/cce-marc-linkage) data repo, commits, and pushes. Run whenever you want the public artifact current.
 
-**Trigger:** the vault grew by enough labels that re-publishing is worth the noise — usually a few hundred new entries, or whenever you specifically want the public dataset current.
+Read-only against the code repo's vault and pool. Safe to run mid-session.
 
-**Read-only against the code repo's vault and pool.** Safe to run mid-session if you want.
+---
 
-## 5. Run the LightGBM diagnostic — every few hundred new labels
+## Required when — only fires on a condition
+
+### Rebuild the queue
 
 ```bash
-pdm run python scripts/learned_scorer_diagnostic.py \
-    > docs/findings/learned_scorer_diagnostic_<YYYY-MM-DD>.md
+pdm run pd-groundtruth build-queue --rebuild
 ```
 
-Trains a small LightGBM classifier against the current vault and writes a markdown report covering feature importance vs. current weights, per-pair disagreements, and AUC. ~30 sec. Useful as a periodic sanity check on the hand-tuned scoring; gives the next concrete signal about which scorers are under- or over-weighted.
+**When:** the matcher's scoring code changed since your last rebuild. Specifically, any merge touching:
 
-**Trigger:** at meaningful corpus growth milestones — every ~200 new labels is typical. Output goes to `docs/findings/`; you can commit the file separately.
+- `src/pd_matcher/match/` — scorers, signals, combiners, pipeline, IDF, pairing compiler.
+- `src/pd_matcher/normalize/` — tokenization, stemming, stopwords, numbers, script detection.
+- `src/pd_matcher/config/defaults/` — `field_pairings.yaml` and other matcher configs.
 
-## 6. Loop back: code changes from the diagnostic
+**Skip when:** doc-only, test-only, or unrelated code changes. Without a scoring change, the queue isn't stale.
 
-The diagnostic often surfaces things worth shipping — a scorer that's under- or over-weighted vs. data-learned importance, a missing signal, a cluster of false positives with a recognizable shape. Acting on those is **not your job** as the labeler; it's a code-change job that goes through [phase-workflow.md](phase-workflow.md).
+Vault verdicts pre-apply automatically — no labels are lost. Runtime: ~5–10 min.
 
-What you actually do: tell Claude (or whoever is in the developer seat) what the diagnostic showed and what's worth chasing. They ship the change. When they finish, their completion message tells you whether the queue needs a rebuild — if so, you loop back to step 3 before your next labeling session.
-
-The cycle in shorthand:
-
-```
-label → commit vault → [rebuild queue] → publish → diagnostic
-                            ↑                          │
-                            └── code changes ←─────────┘
-```
-
-## 7. Rare: rebuild the CCE index
+### Rebuild the CCE index
 
 ```bash
 pdm run pd-matcher index build \
@@ -98,30 +89,48 @@ pdm run pd-matcher index build \
   --out caches/cce.lmdb
 ```
 
-**Trigger:** the NYPL submodules (`data/nypl-reg/`, `data/nypl-ren/`) updated since the last index build. Rare — these submodules change infrequently.
+**When:** the NYPL submodules (`data/nypl-reg/`, `data/nypl-ren/`) updated, OR parser code (`src/pd_matcher/parsers/nypl_reg.py`, `parsers/nypl_ren.py`) changed.
 
-## 8. Rare: re-acquire MARCs
+Rare. After rebuilding the index, also rebuild the queue.
+
+### Re-acquire MARCs
 
 ```bash
 pdm run pd-groundtruth acquire --out-dir data/candidates
 ```
 
-**Trigger:** Princeton's bibdata published a new dump, OR a filter changed in the acquire stage (e.g., the moving wall advanced). After re-acquire you'll want to step 3 (rebuild the queue).
+**When:** Princeton's bibdata published a new dump, or the acquire filter changed (e.g., the moving wall advanced).
 
-## Where state lives — quick map
+Rare. After re-acquire, rebuild the queue.
+
+---
+
+## The cycle
+
+The diagnostic surfaces things worth shipping — under-weighted scorers, missing signals, false-positive clusters. Acting on those is a code-shipping job (ask whoever is in the developer seat), not a labeler's job. When the change lands, it usually means a queue rebuild before your next session.
+
+```
+label → commit vault → [diagnostic] → ask for code changes → [rebuild queue]
+   ↑                                                              │
+   └──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Where state lives
 
 | File / dir | What it is | Who writes it | Stales when... |
 |---|---|---|---|
 | `data/label_vault.jsonl` | Source of truth for verdicts | You (via review UI) | Never — append-and-upsert |
 | `data/review.db` | The queue you label against | `build-queue` | Matcher scoring code changes |
 | `data/candidates/` | Filtered MARC pool | `acquire` | Princeton publishes new dump |
-| `caches/cce.lmdb` | CCE index | `index build` | NYPL submodules update |
+| `caches/cce.lmdb` | CCE index | `index build` | Parser code or NYPL submodules change |
 | `data/published/` | Published dataset (separate git repo) | `dump-vault-marcs` + `publish-linkage` | Vault grew |
 
 ## Where to find more
 
 - Per-verdict decision rules — [LABELING_GUIDE.md](LABELING_GUIDE.md)
 - Algorithm internals — [design.md](design.md)
-- Matching vs. scoring separation — [matching-architecture.md](matching-architecture.md)
+- Matching vs scoring separation — [matching-architecture.md](matching-architecture.md)
 - Term definitions — [glossary.md](glossary.md)
 - Code-shipping workflow (not for labelers) — [phase-workflow.md](phase-workflow.md)
