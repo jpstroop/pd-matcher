@@ -22,6 +22,7 @@ from datetime import UTC
 from datetime import datetime
 from logging import getLogger
 from pathlib import Path
+from typing import cast
 
 from fastapi import FastAPI
 from fastapi import Form
@@ -33,7 +34,9 @@ from fastapi.templating import Jinja2Templates
 from msgspec.json import decode as json_decode
 
 from pd_groundtruth.label_vault import SCHEMA_VERSION
+from pd_groundtruth.label_vault import CategoryKey
 from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.label_vault import upsert_entry
 from pd_groundtruth.review import nav_history
@@ -62,9 +65,18 @@ _DB_PATH_ATTR: str = "review_db_path"
 _VAULT_PATH_ATTR: str = "label_vault_path"
 _LABELER: str = "jpstroop"
 _SKIP_QUERY: list[int] = Query([])
+_CATEGORIES_FORM: list[str] = Form([])
 _LANGUAGE_CHOICES: tuple[str, ...] = ("eng", "fre", "ger", "spa", "ita")
 _BAND_CHOICES: tuple[str, ...] = (BAND_GE90, BAND_80_90, BAND_70_80, BAND_60_70, BAND_BELOW)
 _VERDICT_CHOICES: tuple[str, ...] = ("match", "no_match", "unsure")
+_CATEGORY_CHOICES: tuple[tuple[str, str], ...] = (
+    ("marc_whole_cce_part", "MARC=whole / CCE=part"),
+    ("cce_whole_marc_part", "CCE=whole / MARC=part"),
+    ("translation", "Translation"),
+    ("ocr_confusion", "OCR confusion"),
+    ("same_title_different_work", "Same title, different work"),
+    ("generic_title", "Generic title"),
+)
 _SORT_CHOICES: tuple[tuple[str, str], ...] = (("desc", "newest first"), ("asc", "oldest first"))
 _LABELS_PAGE_SIZE: int = 100
 
@@ -114,6 +126,9 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
         """Render one card, threading the cookie nav history through context."""
         history = nav_history.read_history(request)
         history = nav_history.advance(history, row.id)
+        current_categories = _vault_categories_for_pair(
+            _vault_path(request), row.marc_control_id, row.nypl_uuid
+        )
         response = templates.TemplateResponse(
             request,
             "card.html",
@@ -125,6 +140,8 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 "forward_id": nav_history.forward_id(history),
                 "language_choices": _LANGUAGE_CHOICES,
                 "band_choices": _BAND_CHOICES,
+                "category_choices": _CATEGORY_CHOICES,
+                "current_categories": current_categories,
             },
         )
         nav_history.write_history(response, history)
@@ -188,9 +205,11 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
         note: str | None = Form(None),
         language: str | None = Form(None),
         band: str | None = Form(None),
+        categories: list[str] = _CATEGORIES_FORM,
     ) -> RedirectResponse:
         filters = parse_filters(language, band)
         clean_note = note.strip() if note is not None and note.strip() else None
+        clean_categories = _filter_known_categories(categories)
         with ReviewDb.connect(_db_path(request)) as db:
             pair = db.get_pair(pair_id)
             result = db.add_label(pair_id, verdict, note=clean_note)
@@ -205,6 +224,7 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 cce_regnum=pair.cce_regnum,
                 cce_renewal_id=pair.cce_renewal_id,
                 cce_renewal_oreg=pair.cce_renewal_oreg,
+                categories=clean_categories,
             )
         return _redirect_to_next(filters)
 
@@ -282,6 +302,39 @@ def set_vault_path(app: FastAPI, vault_path: Path) -> None:
     setattr(app.state, _VAULT_PATH_ATTR, vault_path)
 
 
+def _filter_known_categories(values: list[str]) -> tuple[CategoryKey, ...]:
+    """Drop any submitted category keys outside the known vocabulary.
+
+    The HTML form is the source of the values, so all keys should be in the
+    allowed set under normal use; this guard catches tampering and
+    typos. Order is preserved from the form submission so the labeler's
+    click order survives into the vault.
+    """
+    allowed = {key for key, _label in _CATEGORY_CHOICES}
+    return tuple(cast("CategoryKey", value) for value in values if value in allowed)
+
+
+def _vault_categories_for_pair(
+    vault_path: Path,
+    marc_control_id: str,
+    nypl_uuid: str,
+) -> tuple[CategoryKey, ...]:
+    """Return any previously-saved categories for ``(marc_control_id, nypl_uuid)``.
+
+    Reads the vault directly (the DB doesn't carry categories). An I/O
+    failure or a vault miss returns ``()`` so the form still renders
+    cleanly even when the vault is unavailable or the pair has never been
+    labeled.
+    """
+    try:
+        entries = current_entries(vault_path)
+    except Exception:
+        _LOGGER.exception("vault read failed during card render")
+        return ()
+    entry = entries.get((marc_control_id, nypl_uuid))
+    return entry.categories if entry is not None else ()
+
+
 def _append_vault_entry(
     *,
     vault_path: Path,
@@ -293,6 +346,7 @@ def _append_vault_entry(
     cce_regnum: str | None,
     cce_renewal_id: str | None,
     cce_renewal_oreg: str | None,
+    categories: tuple[CategoryKey, ...],
 ) -> None:
     """Append one verdict to the vault, swallowing and logging any I/O failure.
 
@@ -315,7 +369,7 @@ def _append_vault_entry(
             cce_regnum=cce_regnum,
             cce_renewal_id=cce_renewal_id,
             cce_renewal_oreg=cce_renewal_oreg,
-            categories=(),
+            categories=categories,
         )
         upsert_entry(vault_path, entry)
     except Exception:

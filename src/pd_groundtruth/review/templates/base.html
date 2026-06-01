@@ -104,6 +104,15 @@
                             min-height: 4.5rem; line-height: 1.4; }
     .note-block textarea:focus { outline: none; border-color: var(--accent);
                                   box-shadow: 0 0 0 2px rgba(41, 98, 255, .15); }
+    .category-bar { display: flex; flex-wrap: wrap; gap: .5rem .9rem;
+                    margin: .6rem 0 1.1rem; padding: .55rem .75rem;
+                    background: #fafafa; border: 1px solid var(--line);
+                    border-radius: 10px; font-size: .85rem; }
+    .category-checkbox { display: inline-flex; align-items: center;
+                          gap: .35rem; cursor: pointer; color: var(--ink);
+                          user-select: none; }
+    .category-checkbox input { margin: 0; cursor: pointer; }
+    .category-checkbox:hover { color: var(--accent); }
     .hint { color: var(--muted); font-size: .82rem; margin-top: .8rem; }
     table.stats { border-collapse: collapse; width: 100%; }
     table.stats th, table.stats td { text-align: left; padding: .4rem .8rem;
