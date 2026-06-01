@@ -10,7 +10,9 @@ at the tail of each row.
 
 The labeler's free-text note is intentionally dropped on publication —
 the verdict is the durable signal; notes are working-state for our own
-analysis.
+analysis. The structured ``categories`` tuple (vault schema v5+) is
+projected through unchanged, so consumers see exactly the rationale
+tags the labeler attached.
 
 Two files are emitted on each invocation, sharing the same schema:
 
@@ -35,6 +37,7 @@ from pathlib import Path
 from msgspec import Struct
 from msgspec.json import encode as json_encode
 
+from pd_groundtruth.label_vault import CategoryKey
 from pd_groundtruth.label_vault import current_entries
 
 
@@ -43,6 +46,9 @@ class PublishedRow(Struct, frozen=True, forbid_unknown_fields=True):
 
     Field declaration order is the JSONL serialization order — universal
     identifiers lead, Princeton-local ``marc_control_id`` is at the tail.
+    ``categories`` carries zero or more structured rationale tags
+    (vault schema v5+); the allowed values are the :data:`CategoryKey`
+    Literal from :mod:`pd_groundtruth.label_vault`.
     """
 
     lccn: str | None
@@ -53,6 +59,7 @@ class PublishedRow(Struct, frozen=True, forbid_unknown_fields=True):
     cce_renewal_oreg: str | None
     nypl_uuid: str
     verdict: str
+    categories: tuple[CategoryKey, ...]
     labeled_at: str
     labeler: str
     marc_control_id: str
@@ -104,6 +111,7 @@ def publish_linkage(
                 cce_renewal_oreg=entry.cce_renewal_oreg,
                 nypl_uuid=entry.nypl_uuid,
                 verdict=entry.verdict,
+                categories=entry.categories,
                 labeled_at=entry.labeled_at,
                 labeler=entry.labeler,
                 marc_control_id=entry.marc_control_id,
