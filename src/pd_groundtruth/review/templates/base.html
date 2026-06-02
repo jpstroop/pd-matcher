@@ -104,7 +104,9 @@
                             min-height: 4.5rem; line-height: 1.4; }
     .note-block textarea:focus { outline: none; border-color: var(--accent);
                                   box-shadow: 0 0 0 2px rgba(41, 98, 255, .15); }
-    .category-bar { display: flex; flex-wrap: wrap; gap: .5rem .9rem;
+    .category-bar { display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                    gap: .35rem .9rem;
                     margin: .6rem 0 1.1rem; padding: .55rem .75rem;
                     background: #fafafa; border: 1px solid var(--line);
                     border-radius: 10px; font-size: .85rem; }
