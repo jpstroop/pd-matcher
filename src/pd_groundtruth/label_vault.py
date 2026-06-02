@@ -51,6 +51,7 @@ CategoryKey = Literal[
     "marc_whole_cce_part",
     "cce_whole_marc_part",
     "translation",
+    "different_edition",
     "ocr_confusion",
     "same_title_different_work",
     "generic_title",
@@ -89,6 +90,9 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
       MARC is one member (``match`` by inference per the labeling guide).
     * ``translation`` — one side registers a translation, the other the
       original.
+    * ``different_edition`` — same work, different edition / printing
+      (typically year or publisher mismatch on otherwise identical title
+      + author).
     * ``ocr_confusion`` — match obscured by an OCR transcription error.
     * ``same_title_different_work`` — full title agreement with author /
       publisher / year all contradicting.
