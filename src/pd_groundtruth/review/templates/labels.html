@@ -9,6 +9,7 @@
         {% if label_filters.verdict %}· verdict={{ label_filters.verdict }}{% endif %}
         {% if label_filters.language %}· lang={{ label_filters.language }}{% endif %}
         {% if label_filters.q %}· q={{ label_filters.q }}{% endif %}
+        {% if label_filters.categories %}· categories={{ label_filters.categories | join(",") }}{% endif %}
       </span>
       · <a href="/labels{% if label_filters.sort != 'desc' %}?sort={{ label_filters.sort }}{% endif %}">Clear filters</a>
     {% else %}
@@ -48,6 +49,14 @@
       </select>
     </label>
     <button type="submit">Filter</button>
+    <div class="category-bar category-bar-filter">
+      {% for key, label in category_choices %}
+      <label class="category-checkbox">
+        <input type="checkbox" name="categories" value="{{ key }}"{% if key in selected_categories %} checked{% endif %}>
+        {{ label }}
+      </label>
+      {% endfor %}
+    </div>
   </form>
 
   {% if rows %}
@@ -58,6 +67,7 @@
         <th>MARC title</th>
         <th>CCE title</th>
         <th>verdict</th>
+        <th>categories</th>
         <th>note</th>
         <th>lang</th>
         <th>labeled</th>
@@ -70,6 +80,11 @@
         <td title="{{ row.marc_title }}">{{ row.marc_title_short }}</td>
         <td title="{{ row.cce_title }}">{{ row.cce_title_short }}</td>
         <td><span class="verdict verdict-{{ row.verdict }}">{{ row.verdict }}</span></td>
+        <td class="categories-cell">
+          {% for category in row.categories %}
+          <span class="category-chip">{{ category }}</span>
+          {% endfor %}
+        </td>
         <td class="note-cell" title="{{ row.note }}">{{ row.note_short }}</td>
         <td>{{ row.language }}</td>
         <td title="{{ row.labeled_at }}">{{ row.labeled_relative }}</td>

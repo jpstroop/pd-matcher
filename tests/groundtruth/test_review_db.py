@@ -934,3 +934,109 @@ def test_init_schema_adds_evidence_sources_json_to_legacy_pair_table(tmp_path: P
         row = db.get_pair(1)
     assert row is not None
     assert row.evidence_sources_json == "{}"
+
+
+def test_add_label_defaults_categories_to_empty_tuple(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair())
+        db.add_label(pair_id, VERDICT_MATCH)
+        rows = db.iter_labeled_pairs()
+    assert rows[0].categories == ()
+
+
+def test_add_label_round_trips_categories(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair())
+        db.add_label(
+            pair_id,
+            VERDICT_MATCH,
+            categories=("translation", "ocr_confusion"),
+        )
+        rows = db.iter_labeled_pairs()
+    assert rows[0].categories == ("translation", "ocr_confusion")
+
+
+def test_insert_existing_label_round_trips_categories(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair_id = db.insert_pair(_pair())
+        db.insert_existing_label(
+            pair_id=pair_id,
+            verdict=VERDICT_MATCH,
+            labeled_at="2024-01-01T00:00:00+00:00",
+            categories=("generic_title",),
+        )
+        rows = db.iter_labeled_pairs()
+    assert rows[0].categories == ("generic_title",)
+
+
+def test_iter_labeled_pairs_filters_to_single_category(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        a = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        b = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        c = db.insert_pair(_pair(control_id="c", nypl_uuid="u-c"))
+        db.add_label(a, VERDICT_MATCH, categories=("translation",))
+        db.add_label(b, VERDICT_NO_MATCH, categories=("ocr_confusion",))
+        db.add_label(c, VERDICT_MATCH)
+        rows = db.iter_labeled_pairs(LabelFilters(categories=("translation",)))
+    assert {row.pair_id for row in rows} == {a}
+
+
+def test_iter_labeled_pairs_categories_filter_uses_or_semantics(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        a = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        b = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        c = db.insert_pair(_pair(control_id="c", nypl_uuid="u-c"))
+        d = db.insert_pair(_pair(control_id="d", nypl_uuid="u-d"))
+        db.add_label(a, VERDICT_MATCH, categories=("translation",))
+        db.add_label(b, VERDICT_NO_MATCH, categories=("ocr_confusion",))
+        db.add_label(c, VERDICT_MATCH, categories=("translation", "ocr_confusion"))
+        db.add_label(d, VERDICT_MATCH, categories=("generic_title",))
+        rows = db.iter_labeled_pairs(LabelFilters(categories=("translation", "ocr_confusion")))
+    assert {row.pair_id for row in rows} == {a, b, c}
+
+
+def test_count_labeled_pairs_matches_iter_under_categories_filter(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        a = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        b = db.insert_pair(_pair(control_id="b", nypl_uuid="u-b"))
+        c = db.insert_pair(_pair(control_id="c", nypl_uuid="u-c"))
+        db.add_label(a, VERDICT_MATCH, categories=("translation",))
+        db.add_label(b, VERDICT_NO_MATCH, categories=("ocr_confusion",))
+        db.add_label(c, VERDICT_MATCH)
+        filters = LabelFilters(categories=("translation", "ocr_confusion"))
+        assert db.count_labeled_pairs(filters) == len(db.iter_labeled_pairs(filters))
+
+
+def test_decoding_unknown_category_raises(tmp_path: Path) -> None:
+    from msgspec import ValidationError
+
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        pair_id = db.insert_pair(_pair())
+        db.add_label(pair_id, VERDICT_MATCH)
+        db._conn.execute(
+            "UPDATE label SET categories = ? WHERE pair_id = ?",
+            ('["not_a_real_category"]', pair_id),
+        )
+    with ReviewDb.connect(db_path) as db, raises(ValidationError):
+        db.iter_labeled_pairs()
+
+
+def test_decoding_empty_categories_text_collapses_to_empty_tuple(tmp_path: Path) -> None:
+    """A legacy/empty ``categories`` TEXT decodes to ``()`` rather than crashing.
+
+    The column defaults to ``'[]'`` but the safety branch in ``_decode_categories``
+    returns ``()`` when the stored text is empty so a hand-edited row or a
+    pre-default value does not trip the JSON decoder.
+    """
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        pair_id = db.insert_pair(_pair())
+        db.add_label(pair_id, VERDICT_MATCH)
+        db._conn.execute(
+            "UPDATE label SET categories = '' WHERE pair_id = ?",
+            (pair_id,),
+        )
+    with ReviewDb.connect(db_path) as db:
+        rows = db.iter_labeled_pairs()
+    assert rows[0].categories == ()

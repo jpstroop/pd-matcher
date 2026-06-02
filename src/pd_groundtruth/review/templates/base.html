@@ -104,7 +104,9 @@
                             min-height: 4.5rem; line-height: 1.4; }
     .note-block textarea:focus { outline: none; border-color: var(--accent);
                                   box-shadow: 0 0 0 2px rgba(41, 98, 255, .15); }
-    .category-bar { display: flex; flex-wrap: wrap; gap: .5rem .9rem;
+    .category-bar { display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                    gap: .35rem .9rem;
                     margin: .6rem 0 1.1rem; padding: .55rem .75rem;
                     background: #fafafa; border: 1px solid var(--line);
                     border-radius: 10px; font-size: .85rem; }
@@ -136,6 +138,11 @@
     table.labels-table a { color: var(--accent); text-decoration: none; }
     table.labels-table a:hover { text-decoration: underline; }
     .note-cell { color: var(--muted); font-size: .82rem; max-width: 28rem; }
+    .categories-cell { font-size: .78rem; max-width: 16rem; }
+    .category-chip { display: inline-block; padding: .05rem .45rem; margin: .05rem .15rem .05rem 0;
+                      border-radius: 999px; background: #eef1ff; color: var(--accent);
+                      font-size: .72rem; font-weight: 500; }
+    .category-bar-filter { flex-basis: 100%; margin: .35rem 0 0; }
     .filters-bar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: end;
                     margin: .6rem 0 .9rem; }
     .filters-bar label { display: flex; flex-direction: column; font-size: .72rem;

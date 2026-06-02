@@ -163,3 +163,42 @@ def test_label_filters_query_string_preserves_sort_when_dropping_a_filter() -> N
 def test_label_filters_active_ignores_sort() -> None:
     assert not label_filters_active(parse_label_filters(None, None, None, "asc"))
     assert not label_filters_active(parse_label_filters(None, None, None, "desc"))
+
+
+def test_parse_label_filters_accepts_categories_list() -> None:
+    filters = parse_label_filters(None, None, None, None, ["translation", "ocr_confusion"])
+    assert filters.categories == ("translation", "ocr_confusion")
+
+
+def test_parse_label_filters_drops_unknown_category_keys() -> None:
+    filters = parse_label_filters(None, None, None, None, ["translation", "bogus", "generic_title"])
+    assert filters.categories == ("translation", "generic_title")
+
+
+def test_parse_label_filters_empty_categories_collapse_to_empty_tuple() -> None:
+    assert parse_label_filters(None, None, None, None, None).categories == ()
+    assert parse_label_filters(None, None, None, None, []).categories == ()
+
+
+def test_label_filters_active_detects_categories() -> None:
+    assert label_filters_active(parse_label_filters(None, None, None, None, ["translation"]))
+
+
+def test_label_filters_query_string_renders_each_category_as_own_pair() -> None:
+    filters = parse_label_filters(None, None, None, None, ["translation", "ocr_confusion"])
+    qs = label_filters_query_string(filters)
+    assert qs == "categories=translation&categories=ocr_confusion"
+
+
+def test_label_filters_query_string_drops_categories_when_requested() -> None:
+    filters = parse_label_filters("match", None, None, None, ["translation"])
+    qs = label_filters_query_string(filters, drop="categories")
+    assert "categories" not in qs
+    assert "verdict=match" in qs
+
+
+def test_label_filters_query_string_preserves_categories_when_dropping_other_filter() -> None:
+    filters = parse_label_filters("match", None, None, None, ["translation"])
+    qs = label_filters_query_string(filters, drop="verdict")
+    assert "categories=translation" in qs
+    assert "verdict" not in qs

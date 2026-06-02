@@ -14,16 +14,29 @@ URL (not the database) so a fresh tab — i.e. a fresh attention session —
 starts with no skips.
 """
 
+from typing import cast
 from urllib.parse import urlencode
 
 from msgspec import Struct
 
+from pd_groundtruth.label_vault import CategoryKey
 from pd_groundtruth.review_db import SORT_ASC
 from pd_groundtruth.review_db import SORT_DESC
 from pd_groundtruth.review_db import LabelFilters
 
 _DEFAULT_SORT: str = SORT_DESC
 _VALID_SORTS: frozenset[str] = frozenset({SORT_DESC, SORT_ASC})
+_VALID_CATEGORY_KEYS: frozenset[str] = frozenset(
+    {
+        "marc_whole_cce_part",
+        "cce_whole_marc_part",
+        "translation",
+        "different_edition",
+        "ocr_confusion",
+        "same_title_different_work",
+        "generic_title",
+    }
+)
 
 
 class ReviewFilters(Struct, frozen=True, forbid_unknown_fields=True):
@@ -125,11 +138,26 @@ def _clean_sort(value: str | None) -> str:
     return _DEFAULT_SORT
 
 
+def _clean_categories(values: list[str] | None) -> tuple[CategoryKey, ...]:
+    """Normalize a raw categories list, dropping unknown vocabulary keys.
+
+    Mirrors :func:`pd_groundtruth.review.app._filter_known_categories`:
+    the HTML form is the source of values under normal use, so anything
+    outside the fixed :data:`pd_groundtruth.label_vault.CategoryKey` vocabulary
+    is treated as tampering or a typo and silently dropped. Order is preserved
+    so the user's selection order survives into the URL.
+    """
+    if not values:
+        return ()
+    return tuple(cast("CategoryKey", value) for value in values if value in _VALID_CATEGORY_KEYS)
+
+
 def parse_label_filters(
     verdict: str | None,
     language: str | None,
     q: str | None,
     sort: str | None = None,
+    categories: list[str] | None = None,
 ) -> LabelFilters:
     """Normalize raw ``/labels`` query values into typed :class:`LabelFilters`.
 
@@ -138,12 +166,15 @@ def parse_label_filters(
     in its raw case here; the DB layer lower-cases it for matching. ``sort``
     is clamped to ``"asc"`` / ``"desc"`` with garbage falling back to the
     default (``"desc"``) so a stray query parameter cannot break the page.
+    ``categories`` accepts a list of vocabulary keys; unknown values are
+    silently dropped so a tampered URL cannot break the page.
     """
     return LabelFilters(
         verdict=_clean(verdict),
         language=_clean(language),
         q=_clean(q),
         sort=_clean_sort(sort),
+        categories=_clean_categories(categories),
     )
 
 
@@ -155,7 +186,9 @@ def label_filters_query_string(filters: LabelFilters, *, drop: str | None = None
     the filter it represents while preserving the rest. ``sort`` is omitted
     when it equals the default to keep canonical URLs short, but is always
     preserved (even when ``drop`` is passed) so per-filter clears do not also
-    reset the order.
+    reset the order. Each selected category renders as its own
+    ``categories=<key>`` pair so the URL round-trips multi-select selections
+    losslessly.
     """
     params: list[tuple[str, str]] = []
     if filters.verdict is not None and drop != "verdict":
@@ -164,6 +197,9 @@ def label_filters_query_string(filters: LabelFilters, *, drop: str | None = None
         params.append(("language", filters.language))
     if filters.q is not None and drop != "q":
         params.append(("q", filters.q))
+    if drop != "categories":
+        for category in filters.categories:
+            params.append(("categories", category))
     if filters.sort != _DEFAULT_SORT:
         params.append(("sort", filters.sort))
     return urlencode(params)
@@ -176,7 +212,12 @@ def label_filters_active(filters: LabelFilters) -> bool:
     flag — the "Showing N of M / Clear filters" header stays accurate when the
     user only changed the order.
     """
-    return any(value is not None for value in (filters.verdict, filters.language, filters.q))
+    return (
+        filters.verdict is not None
+        or filters.language is not None
+        or filters.q is not None
+        or bool(filters.categories)
+    )
 
 
 __all__ = [
