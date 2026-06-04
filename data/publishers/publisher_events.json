@@ -487,6 +487,9 @@
       {"type": "founded", "year": 1791, "evidence": "French scientific and technical publisher; traces to the 1791 Mme. Vve. Courcier mathematics imprint."},
       {"type": "renamed", "year": 1858, "to": "Dunod", "evidence": "named Dunod from 1858."},
       {"type": "acquired_by", "year": 1999, "actor": "Hachette Livre", "evidence": "Acquired by Hachette Livre in 1999."}
+    ],
+    "SCM Press": [
+      {"type": "acquired_by", "year": 1997, "actor": "Hymns Ancient & Modern", "evidence": "The company was purchased by Hymns Ancient and Modern in 1997."}
     ]
   }
 }
