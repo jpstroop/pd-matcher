@@ -1772,6 +1772,130 @@
       "sources": [
         "https://en.wikipedia.org/wiki/Johns_Hopkins_University_Press"
       ]
+    },
+    {
+      "canonical": "Victor Gollancz Ltd",
+      "aliases": [
+        "Victor Gollancz",
+        "V. Gollancz",
+        "V. Gollancz Ltd",
+        "Gollancz",
+        "Gollancz Ltd"
+      ],
+      "imprints": [
+        {
+          "name": "Left Book Club",
+          "active": "1936-1948",
+          "notes": "Subscription book club / imprint specializing in left-political nonfiction, co-founded by Gollancz with Stafford Cripps and John Strachey."
+        }
+      ],
+      "active": "1927-1998",
+      "notes": "British publisher founded 1927 by Victor Gollancz. Trade and political nonfiction; known for the yellow dust-jacket house style. Acquired by Houghton Mifflin in 1989; sold to Cassell in 1992, then Orion in 1998; now an imprint of Hachette UK's Gollancz (SF/F).",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Victor_Gollancz_Ltd"
+      ]
+    },
+    {
+      "canonical": "J. M. Dent & Sons",
+      "aliases": [
+        "Dent",
+        "J. M. Dent",
+        "J.M. Dent",
+        "Dent & Sons",
+        "J. M. Dent and Sons",
+        "J. M. Dent & Sons, Ltd."
+      ],
+      "imprints": [
+        {
+          "name": "Everyman's Library",
+          "active": "1906-present",
+          "notes": "Affordable hardcover series of canonical literature; originally a Dent series, now an imprint of Knopf Doubleday (since 1991)."
+        }
+      ],
+      "active": "1888-1988",
+      "notes": "British publisher founded 1888 by Joseph Malaby Dent. Launched Everyman's Library in 1906. Acquired by Weidenfeld & Nicolson in 1988; the Dent imprint persists under Orion/Hachette.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/J._M._Dent"
+      ]
+    },
+    {
+      "canonical": "McClelland and Stewart",
+      "aliases": [
+        "McClelland & Stewart",
+        "McClelland Stewart",
+        "M & S",
+        "McClelland and Stewart Limited",
+        "McClelland & Stewart, Ltd."
+      ],
+      "imprints": [
+        {
+          "name": "New Canadian Library",
+          "active": "1958-present",
+          "notes": "Series of paperback editions of Canadian-literature classics, edited by Malcolm Ross."
+        }
+      ],
+      "active": "1906-present",
+      "notes": "Canada's leading independent trade publisher, founded 1906 in Toronto by John McClelland and Frederick Goodchild (Goodchild left in 1918; Stewart joined 1919). Sold 75% interest to Random House Canada in 2000; acquired wholly in 2011.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/McClelland_%26_Stewart"
+      ]
+    },
+    {
+      "canonical": "Literary Guild of America",
+      "aliases": [
+        "Literary Guild",
+        "The Literary Guild",
+        "Doubleday Literary Guild"
+      ],
+      "imprints": [],
+      "active": "1927-present",
+      "notes": "U.S. subscription book club founded 1927 by Samuel W. Craig and Harold Guinzburg. Acquired by Doubleday in 1934; club selections often co-imprinted with the original trade publisher. Now Bookspan.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Literary_Guild"
+      ]
+    },
+    {
+      "canonical": "Julian Press",
+      "aliases": [
+        "Julian Press, Inc.",
+        "Julian"
+      ],
+      "imprints": [],
+      "active": "1949-1986",
+      "notes": "U.S. publisher founded 1949 by Arthur Ceppos in New York. Specialized in psychology, esoterica, and Eastern religion. Acquired by Crown Publishers in 1986.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Julian_Press"
+      ]
+    },
+    {
+      "canonical": "American Society for Testing and Materials",
+      "aliases": [
+        "ASTM",
+        "ASTM International",
+        "A.S.T.M.",
+        "American Society for Testing Materials"
+      ],
+      "imprints": [],
+      "active": "1898-present",
+      "notes": "Standards-development organization founded 1898 (as American Society for Testing Materials; current name from 1961). Publishes voluminous engineering standards under both the long form and the ASTM acronym; the two are routinely treated as interchangeable in catalog records.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/ASTM_International"
+      ]
+    },
+    {
+      "canonical": "Dunod",
+      "aliases": [
+        "Dunod, Éditeur",
+        "Editions Dunod",
+        "Éditions Dunod",
+        "Dunod Editeur"
+      ],
+      "imprints": [],
+      "active": "1791-present",
+      "notes": "French scientific and technical publisher; traces to the 1791 Mme. Vve. Courcier mathematics imprint, named Dunod from 1858. Acquired by Hachette Livre in 1999.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Dunod"
+      ]
     }
   ]
 }
