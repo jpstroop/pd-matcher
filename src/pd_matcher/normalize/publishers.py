@@ -1,8 +1,8 @@
 """Publisher imprint / alias lookup table backing the publisher scorer.
 
-The shipped ``data/publisher_imprints.json`` records canonical publisher
-names, their commercial aliases, and the imprint-level child names that
-historically published under each house. The matcher uses this table to
+The shipped ``data/publishers/publisher_imprints.json`` records canonical
+publisher names, their commercial aliases, and the imprint-level child names
+that historically published under each house. The matcher uses this table to
 lift the publisher score on pairs where a MARC record cites an imprint
 (``Whittlesey House``) and the CCE record cites the parent
 (``McGraw-Hill Book Company``) — a class of mismatch the fuzzy scorer
@@ -68,7 +68,7 @@ class PublisherTable(Struct, frozen=True, forbid_unknown_fields=True):
 
 
 DEFAULT_PUBLISHER_TABLE_PATH: Path = (
-    Path(__file__).resolve().parents[3] / "data" / "publisher_imprints.json"
+    Path(__file__).resolve().parents[3] / "data" / "publishers" / "publisher_imprints.json"
 )
 
 _PUBLISHER_STOPWORDS: frozenset[str] = frozenset(
