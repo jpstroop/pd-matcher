@@ -44,6 +44,7 @@ from pd_matcher.match.signals.corroboration import has_no_corroboration
 from pd_matcher.match.signals.translation import is_translation_signal
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
+from pd_matcher.normalize.publishers import get_default_alias_index
 from pd_matcher.normalize.stemming import stemmer_for
 from pd_matcher.normalize.stopwords import load_stopwords
 
@@ -67,6 +68,7 @@ def _build_context(marc: MarcRecord, idf: IdfTable, config: MatchingConfig) -> S
         stemmer=stemmer_for(language),
         idf=idf,
         config=config,
+        publisher_alias_index=get_default_alias_index(),
     )
 
 
