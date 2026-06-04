@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Publisher Consolidation, 1820–2025</title>
+<style>
+  :root {
+    --bg: #faf9f6;
+    --panel: #fff;
+    --ink: #1d1d1f;
+    --muted: #6b6b70;
+    --line: #e2e2e2;
+    --accent: #2962ff;
+    --active: #1e7d34;
+    --acquired: #b07d2a;
+    --defunct: #8a8a8a;
+    --external: #888;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--ink);
+               font-family: -apple-system, "Segoe UI", system-ui, sans-serif; font-size: 14px; }
+  body { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; }
+  header { background: var(--panel); border-bottom: 1px solid var(--line); padding: .9rem 1.2rem; }
+  header h1 { margin: 0 0 .25rem; font-size: 1.05rem; letter-spacing: .01em; }
+  header .blurb { color: var(--muted); font-size: .85rem; max-width: 65rem; margin: 0; }
+  #year-control { display: flex; align-items: center; gap: .7rem; margin-top: .8rem; }
+  #year-control label { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; }
+  #year-slider { flex: 1; max-width: 38rem; accent-color: var(--accent); }
+  #year-display { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.2rem; min-width: 3.5rem; text-align: right; color: var(--accent); }
+  #playback { display: inline-flex; gap: .3rem; }
+  #playback button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+                      padding: .25rem .55rem; font: inherit; color: var(--ink); cursor: pointer; }
+  #playback button:hover { border-color: var(--accent); color: var(--accent); }
+  main { display: grid; grid-template-columns: 1fr 22rem; min-height: 0; }
+  #graph { background: var(--bg); position: relative; overflow: hidden; min-height: 0; }
+  #graph svg { width: 100%; height: 100%; display: block; cursor: grab; }
+  #graph svg:active { cursor: grabbing; }
+  #legend { position: absolute; top: 1rem; left: 1rem; background: rgba(255,255,255,.94);
+            border: 1px solid var(--line); border-radius: 8px; padding: .55rem .75rem;
+            font-size: .78rem; line-height: 1.6; pointer-events: none; }
+  #legend .swatch { display: inline-block; width: .75rem; height: .75rem; border-radius: 50%;
+                    vertical-align: -2px; margin-right: .3rem; border: 1px solid rgba(0,0,0,.15); }
+  #stats { position: absolute; top: 1rem; right: 1rem; background: rgba(255,255,255,.94);
+           border: 1px solid var(--line); border-radius: 8px; padding: .55rem .75rem;
+           font-size: .78rem; pointer-events: none; }
+  #stats .num { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); }
+  aside { background: var(--panel); border-left: 1px solid var(--line); padding: 1rem 1.2rem;
+          overflow-y: auto; min-height: 0; }
+  aside.empty { color: var(--muted); }
+  aside h2 { margin: 0; font-size: 1rem; }
+  aside .active-range { color: var(--muted); font-size: .8rem; margin-top: .15rem; }
+  aside .notes { margin: .8rem 0 1rem; line-height: 1.5; }
+  aside h3 { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+             margin: 1rem 0 .35rem; padding-bottom: .15rem; border-bottom: 1px solid var(--line); }
+  aside .event { margin: .35rem 0; font-size: .85rem; line-height: 1.45; }
+  aside .event .yr { display: inline-block; font-variant-numeric: tabular-nums;
+                      font-weight: 700; color: var(--accent); width: 3rem; }
+  aside .event .what { color: var(--muted); }
+  aside .event .who { font-weight: 600; }
+  aside .imprint { margin: .4rem 0; font-size: .85rem; }
+  aside .imprint .name { font-weight: 600; }
+  aside .imprint .range { color: var(--muted); font-size: .78rem; margin-left: .35rem; }
+  aside .imprint .note { color: var(--muted); font-size: .8rem; margin-top: .15rem; }
+  aside .sources { font-size: .75rem; color: var(--muted); margin-top: 1rem; word-break: break-all; }
+  aside .sources a { color: var(--accent); text-decoration: none; }
+  aside .sources a:hover { text-decoration: underline; }
+  .node-label { font-size: 9px; fill: var(--ink); pointer-events: none;
+                paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+  .node-label.major { font-size: 11px; font-weight: 600; }
+  .node-label.external { fill: var(--muted); font-style: italic; }
+  .link { stroke-opacity: .55; fill: none; }
+  .link.acquired { stroke: var(--acquired); stroke-width: 1.3px; }
+  .link.merged_with { stroke: #5a3aa8; stroke-width: 1.5px; stroke-dasharray: 4 2; }
+  .link.merger_formed { stroke: #5a3aa8; stroke-width: 1.5px; }
+  .link.sold_to { stroke: var(--acquired); stroke-width: 1.3px; stroke-dasharray: 2 2; }
+  .node circle { stroke: rgba(0,0,0,.35); stroke-width: .8px; cursor: pointer; }
+  .node.selected circle { stroke: var(--accent); stroke-width: 2.5px; }
+  .node.faded { opacity: .25; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Publisher Consolidation, 1820–2025</h1>
+  <p class="blurb">Each circle is a book publisher; edges trace acquisitions and mergers. Drag the slider to watch the early-20th-century landscape collapse into a handful of conglomerates. Data hand-curated from <code>data/publisher_imprints.json</code>; see <code>data/PUBLISHERS.md</code> for methodology.</p>
+  <div id="year-control">
+    <label for="year-slider">Year</label>
+    <input id="year-slider" type="range" min="1820" max="2025" step="1" value="2025">
+    <span id="year-display">2025</span>
+    <span id="playback">
+      <button id="play" title="Play / pause animation">▶</button>
+      <button id="rewind" title="Rewind to 1820">⏮</button>
+    </span>
+  </div>
+</header>
+<main>
+  <div id="graph">
+    <svg></svg>
+    <div id="legend">
+      <div><span class="swatch" style="background: var(--active)"></span>Independent</div>
+      <div><span class="swatch" style="background: var(--acquired)"></span>Acquired (still operating)</div>
+      <div><span class="swatch" style="background: var(--defunct)"></span>Defunct</div>
+      <div><span class="swatch" style="background: var(--external)"></span>External acquirer</div>
+    </div>
+    <div id="stats">
+      <div><span class="num" id="stat-active">0</span> active</div>
+      <div><span class="num" id="stat-acquired">0</span> acquired</div>
+      <div><span class="num" id="stat-defunct">0</span> defunct</div>
+    </div>
+  </div>
+  <aside id="detail-panel" class="empty">
+    Click a node for details — publisher history, imprints, source citations.
+  </aside>
+</main>
+<script src="data.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ---------- Data preparation ----------
+  // Build node + edge sets from PUBLISHERS (the reference table) and EVENTS (the consolidation events).
+
+  const publisherByCanonical = {};
+  PUBLISHERS.publishers.forEach(p => { publisherByCanonical[p.canonical] = p; });
+  const knownCanonicals = new Set(Object.keys(publisherByCanonical));
+
+  // Founding-year lookup, with fallback to the entity's first event year.
+  function inferFounding(name) {
+    const events = EVENTS.entities[name] || [];
+    const founded = events.find(e => e.type === "founded" || e.type === "merger_formed");
+    if (founded) return founded.year;
+    // External acquirers don't have entries — infer from first time they appear as actor.
+    let earliest = null;
+    for (const ents of Object.values(EVENTS.entities)) {
+      for (const ev of ents) {
+        const actor = ev.actor || (ev.actors && ev.actors[0]) || (ev.predecessors && ev.predecessors[0]);
+        if (actor === name && (earliest === null || ev.year < earliest)) earliest = ev.year;
+      }
+    }
+    return earliest;
+  }
+
+  function inferDefunct(name) {
+    const events = EVENTS.entities[name] || [];
+    const d = events.find(e => e.type === "defunct");
+    return d ? d.year : null;
+  }
+
+  // Build node universe: all entities + all external actors referenced anywhere.
+  const externalActors = new Set();
+  for (const events of Object.values(EVENTS.entities)) {
+    for (const ev of events) {
+      if (ev.actor && !knownCanonicals.has(ev.actor)) externalActors.add(ev.actor);
+      if (ev.actors) ev.actors.forEach(a => { if (!knownCanonicals.has(a)) externalActors.add(a); });
+      if (ev.predecessors) ev.predecessors.forEach(a => { if (!knownCanonicals.has(a)) externalActors.add(a); });
+    }
+  }
+
+  const nodes = [];
+  for (const name of Object.keys(EVENTS.entities)) {
+    nodes.push({ id: name, kind: "publisher", founded: inferFounding(name), defunct: inferDefunct(name) });
+  }
+  for (const name of externalActors) {
+    nodes.push({ id: name, kind: "external", founded: inferFounding(name), defunct: null });
+  }
+
+  // Build edges. Each event involving two entities yields one edge.
+  const links = [];
+  for (const [name, events] of Object.entries(EVENTS.entities)) {
+    for (const ev of events) {
+      if (ev.type === "acquired_by" || ev.type === "sold_to") {
+        links.push({ source: name, target: ev.actor, year: ev.year, type: ev.type, evidence: ev.evidence });
+      } else if (ev.type === "merged_with") {
+        (ev.actors || []).forEach(a => {
+          links.push({ source: name, target: a, year: ev.year, type: "merged_with", evidence: ev.evidence });
+        });
+      } else if (ev.type === "merger_formed") {
+        (ev.predecessors || []).forEach(a => {
+          links.push({ source: a, target: name, year: ev.year, type: "merger_formed", evidence: ev.evidence });
+        });
+      } else if (ev.type === "acquired") {
+        links.push({ source: ev.target, target: name, year: ev.year, type: "acquired_by", evidence: ev.evidence });
+      }
+    }
+  }
+
+  // ---------- Rendering ----------
+  const svg = d3.select("#graph svg");
+  let width = 0, height = 0;
+  function measure() {
+    const rect = document.getElementById("graph").getBoundingClientRect();
+    width = rect.width; height = rect.height;
+    svg.attr("viewBox", [0, 0, width, height]);
+  }
+  measure();
+  window.addEventListener("resize", () => { measure(); simulation.alpha(0.3).restart(); });
+
+  const gZoom = svg.append("g");
+  svg.call(d3.zoom().scaleExtent([0.25, 5]).on("zoom", e => gZoom.attr("transform", e.transform)));
+
+  const gLinks = gZoom.append("g").attr("class", "links");
+  const gNodes = gZoom.append("g").attr("class", "nodes");
+
+  // Build node degree (in-degree as acquirer) — bigger nodes for major aggregators.
+  const inDegree = {};
+  links.forEach(l => { inDegree[l.target] = (inDegree[l.target] || 0) + 1; });
+  function radius(d) {
+    const deg = inDegree[d.id] || 0;
+    return 3.5 + Math.sqrt(deg) * 2.2;
+  }
+  function nodeColor(d, year) {
+    if (d.kind === "external") return "var(--external)";
+    if (d.defunct && d.defunct <= year) return "var(--defunct)";
+    // acquired if any acquired_by/sold_to/merger event has fired by year
+    const events = EVENTS.entities[d.id] || [];
+    const acquired = events.some(e => (e.type === "acquired_by" || e.type === "sold_to" || e.type === "merged_with") && e.year <= year);
+    return acquired ? "var(--acquired)" : "var(--active)";
+  }
+
+  // d3 force simulation
+  const simulation = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(d => d.id).distance(80).strength(0.4))
+    .force("charge", d3.forceManyBody().strength(-110))
+    .force("center", d3.forceCenter(0, 0))
+    .force("collide", d3.forceCollide(d => radius(d) + 3))
+    .alpha(0.6);
+
+  // Initial draw — full timespan
+  let currentYear = 2025;
+  const linkSel = gLinks.selectAll("line").data(links).join("line").attr("class", d => "link " + d.type);
+  const nodeSel = gNodes.selectAll("g").data(nodes).join("g").attr("class", "node");
+  nodeSel.append("circle").attr("r", d => radius(d));
+  nodeSel.append("text").attr("class", d => "node-label" + (d.kind === "external" ? " external" : "") + (inDegree[d.id] >= 3 ? " major" : ""))
+    .attr("dy", d => -radius(d) - 4)
+    .attr("text-anchor", "middle")
+    .text(d => d.id);
+
+  // Drag
+  function drag(sim) {
+    return d3.drag()
+      .on("start", (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
+      .on("end", (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; });
+  }
+  nodeSel.call(drag(simulation));
+
+  // Click → detail panel
+  nodeSel.on("click", (event, d) => {
+    nodeSel.classed("selected", n => n.id === d.id);
+    renderDetail(d);
+    event.stopPropagation();
+  });
+  svg.on("click", () => { nodeSel.classed("selected", false); clearDetail(); });
+
+  simulation.on("tick", () => {
+    gZoom.attr("transform", gZoom.attr("transform") || "translate(" + (width / 2) + "," + (height / 2) + ")");
+    linkSel.attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    nodeSel.attr("transform", d => "translate(" + d.x + "," + d.y + ")");
+  });
+
+  // Center the zoomable group once we know the layout has run for a beat.
+  setTimeout(() => {
+    const t = d3.zoomIdentity.translate(width / 2, height / 2).scale(0.85);
+    svg.call(d3.zoom().transform, t);
+    gZoom.attr("transform", t);
+  }, 40);
+
+  // ---------- Year filter ----------
+  function applyYear(year) {
+    currentYear = year;
+    document.getElementById("year-display").textContent = year;
+
+    // Node visibility: born <= year AND (not external OR has had any activity)
+    nodeSel.attr("display", d => {
+      if (d.founded === null || d.founded === undefined) return null; // unknown founding — always show
+      return d.founded <= year ? null : "none";
+    }).select("circle").attr("fill", d => nodeColor(d, year));
+
+    nodeSel.classed("faded", d => d.defunct && d.defunct <= year);
+
+    linkSel.attr("display", d => d.year <= year ? null : "none");
+
+    // Recount stats
+    let active = 0, acquired = 0, defunct = 0;
+    nodes.forEach(d => {
+      if (d.kind !== "publisher") return;
+      if (d.founded > year) return;
+      if (d.defunct && d.defunct <= year) { defunct++; return; }
+      const events = EVENTS.entities[d.id] || [];
+      const acq = events.some(e => (e.type === "acquired_by" || e.type === "sold_to" || e.type === "merged_with") && e.year <= year);
+      if (acq) acquired++;
+      else active++;
+    });
+    document.getElementById("stat-active").textContent = active;
+    document.getElementById("stat-acquired").textContent = acquired;
+    document.getElementById("stat-defunct").textContent = defunct;
+  }
+
+  const slider = document.getElementById("year-slider");
+  slider.addEventListener("input", e => applyYear(+e.target.value));
+  applyYear(2025);
+
+  // ---------- Playback ----------
+  let playing = false, playTimer = null;
+  document.getElementById("play").addEventListener("click", () => {
+    playing = !playing;
+    document.getElementById("play").textContent = playing ? "⏸" : "▶";
+    if (playing) {
+      playTimer = setInterval(() => {
+        let y = +slider.value;
+        if (y >= 2025) { playing = false; document.getElementById("play").textContent = "▶"; clearInterval(playTimer); return; }
+        y = Math.min(2025, y + 2);
+        slider.value = y; applyYear(y);
+      }, 110);
+    } else if (playTimer) {
+      clearInterval(playTimer);
+    }
+  });
+  document.getElementById("rewind").addEventListener("click", () => {
+    slider.value = 1820; applyYear(1820);
+  });
+
+  // ---------- Detail panel ----------
+  function clearDetail() {
+    const aside = document.getElementById("detail-panel");
+    aside.className = "empty";
+    aside.innerHTML = "Click a node for details — publisher history, imprints, source citations.";
+  }
+
+  function renderDetail(d) {
+    const aside = document.getElementById("detail-panel");
+    aside.className = "";
+    const isPublisher = d.kind === "publisher";
+    const pub = publisherByCanonical[d.id];
+    const events = EVENTS.entities[d.id] || [];
+
+    let html = "<h2>" + escapeHtml(d.id) + "</h2>";
+    if (isPublisher && pub) {
+      html += '<div class="active-range">' + escapeHtml(pub.active || "") + "</div>";
+      if (pub.notes) html += '<div class="notes">' + escapeHtml(pub.notes) + "</div>";
+    } else {
+      html += '<div class="active-range">External actor (not in the publisher reference table)</div>';
+    }
+
+    if (events.length) {
+      html += "<h3>Timeline</h3>";
+      events.slice().sort((a, b) => a.year - b.year).forEach(ev => {
+        html += '<div class="event"><span class="yr">' + ev.year + "</span>";
+        html += renderEvent(ev);
+        html += "</div>";
+      });
+    }
+
+    if (isPublisher && pub && pub.imprints && pub.imprints.length) {
+      html += "<h3>Imprints</h3>";
+      pub.imprints.forEach(imp => {
+        html += '<div class="imprint"><span class="name">' + escapeHtml(imp.name) + "</span>";
+        html += '<span class="range">' + escapeHtml(imp.active || "") + "</span>";
+        if (imp.notes) html += '<div class="note">' + escapeHtml(imp.notes) + "</div>";
+        html += "</div>";
+      });
+    }
+
+    if (isPublisher && pub && pub.sources && pub.sources.length) {
+      html += "<h3>Sources</h3><div class=\"sources\">";
+      pub.sources.forEach((s, i) => {
+        if (i) html += "<br>";
+        if (s.startsWith("http")) {
+          html += '<a href="' + escapeAttr(s) + '" target="_blank" rel="noopener">' + escapeHtml(s) + "</a>";
+        } else {
+          html += escapeHtml(s);
+        }
+      });
+      html += "</div>";
+    }
+
+    aside.innerHTML = html;
+  }
+
+  function renderEvent(ev) {
+    switch (ev.type) {
+      case "founded": return '<span class="what">Founded</span>' + (ev.founders ? ' <span class="who">by ' + escapeHtml(ev.founders.join(", ")) + "</span>" : "");
+      case "merger_formed": return '<span class="what">Formed by merger of</span> <span class="who">' + escapeHtml((ev.predecessors || []).join(", ")) + "</span>";
+      case "renamed": return '<span class="what">Renamed to</span> <span class="who">' + escapeHtml(ev.to || "") + "</span>";
+      case "merged_with": return '<span class="what">Merged with</span> <span class="who">' + escapeHtml((ev.actors || []).join(", ")) + "</span>";
+      case "acquired_by": return '<span class="what">Acquired by</span> <span class="who">' + escapeHtml(ev.actor || "") + "</span>";
+      case "sold_to": return '<span class="what">Sold to</span> <span class="who">' + escapeHtml(ev.actor || "") + "</span>";
+      case "acquired": return '<span class="what">Acquired</span> <span class="who">' + escapeHtml(ev.target || "") + "</span>";
+      case "defunct": return '<span class="what">Defunct</span>';
+      default: return '<span class="what">' + escapeHtml(ev.type) + "</span>";
+    }
+  }
+
+  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  function escapeAttr(s) { return escapeHtml(s); }
+})();
+</script>
+</body>
+</html>
