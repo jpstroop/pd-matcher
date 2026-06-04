@@ -26,6 +26,9 @@ class ScorerContext(Struct, frozen=True, forbid_unknown_fields=True):
         stemmer: Single-token stemmer callable for ``language``.
         idf: IDF table built once over the NYPL corpus.
         config: The active :class:`MatchingConfig`.
+        publisher_alias_index: Optional ``{normalized_name: normalized_canonical}``
+            lookup used by the publisher scorer to lift the score on
+            curated imprint / alias hits. ``None`` disables the alias path.
     """
 
     language: str
@@ -33,6 +36,7 @@ class ScorerContext(Struct, frozen=True, forbid_unknown_fields=True):
     stemmer: Callable[[str], str]
     idf: IdfTable
     config: MatchingConfig
+    publisher_alias_index: dict[str, str] | None = None
 
 
 __all__ = [

@@ -1,8 +1,41 @@
 """Tests for :mod:`pd_matcher.match.scorers.name`."""
 
+from pytest import fixture
+
+from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.scorers.context import ScorerContext
 from pd_matcher.match.scorers.name import score_author
 from pd_matcher.match.scorers.name import score_publisher
+from pd_matcher.normalize.publishers import DEFAULT_PUBLISHER_TABLE_PATH
+from pd_matcher.normalize.publishers import build_alias_index
+from pd_matcher.normalize.publishers import get_default_alias_index
+from pd_matcher.normalize.publishers import load_publisher_table
+from pd_matcher.normalize.stemming import stemmer_for
+from pd_matcher.normalize.stopwords import load_stopwords
+
+
+@fixture
+def alias_index() -> dict[str, str]:
+    """Return the bundled alias index for the publisher scorer tests."""
+    return build_alias_index(load_publisher_table(DEFAULT_PUBLISHER_TABLE_PATH))
+
+
+@fixture
+def alias_scorer_context(
+    matching_config: MatchingConfig,
+    idf_table: IdfTable,
+    alias_index: dict[str, str],
+) -> ScorerContext:
+    """Return an English :class:`ScorerContext` with the bundled alias index."""
+    return ScorerContext(
+        language="eng",
+        stopwords=load_stopwords("eng"),
+        stemmer=stemmer_for("eng"),
+        idf=idf_table,
+        config=matching_config,
+        publisher_alias_index=alias_index,
+    )
 
 
 def test_score_author_identical_inputs(scorer_context: ScorerContext) -> None:
@@ -114,3 +147,141 @@ def test_score_publisher_overlapping_tokens_unaffected(
     ev = score_publisher("Macmillan", "Macmillan & Co", scorer_context)
     assert ev.score == 100.0
     assert dict(ev.features)["token_overlap"] >= 1.0
+
+
+def test_score_publisher_alias_hit_lifts_imprint_to_parent(
+    scorer_context: ScorerContext,
+    alias_index: dict[str, str],
+) -> None:
+    """``Whittlesey House`` / ``McGraw-Hill`` resolve to the same canonical."""
+    ev = score_publisher(
+        "Whittlesey House",
+        "McGraw-Hill Book Company",
+        scorer_context,
+        alias_index=alias_index,
+    )
+    assert ev.score >= 95.0
+
+
+def test_score_publisher_alias_hit_does_not_lift_mismatched_canonicals(
+    scorer_context: ScorerContext,
+    alias_index: dict[str, str],
+) -> None:
+    """Different canonicals fall through to the fuzzy baseline."""
+    with_alias = score_publisher(
+        "Whittlesey House",
+        "Random House",
+        scorer_context,
+        alias_index=alias_index,
+    )
+    without_alias = score_publisher(
+        "Whittlesey House",
+        "Random House",
+        scorer_context,
+    )
+    assert with_alias.score == without_alias.score
+    assert with_alias.score < 95.0
+
+
+def test_score_publisher_default_path_unchanged_without_alias_index(
+    scorer_context: ScorerContext,
+) -> None:
+    """Omitting ``alias_index`` keeps the legacy fuzzy baseline."""
+    ev = score_publisher("Whittlesey House", "McGraw-Hill", scorer_context)
+    assert ev.score < 95.0
+
+
+def test_score_publisher_perfect_match_preserved_under_alias_path(
+    scorer_context: ScorerContext,
+    alias_index: dict[str, str],
+) -> None:
+    """``max(fuzzy, floor)`` keeps perfect matches at 100.0."""
+    ev = score_publisher(
+        "McGraw-Hill Book Company",
+        "McGraw-Hill Book Company",
+        scorer_context,
+        alias_index=alias_index,
+    )
+    assert ev.score == 100.0
+
+
+def test_score_publisher_alias_path_via_context(
+    alias_scorer_context: ScorerContext,
+) -> None:
+    """A populated ``ctx.publisher_alias_index`` lifts the score without a kwarg."""
+    ev = score_publisher(
+        "Whittlesey House",
+        "McGraw-Hill Book Company",
+        alias_scorer_context,
+    )
+    assert ev.score >= 95.0
+
+
+def test_score_publisher_kwarg_overrides_context_alias_index(
+    alias_scorer_context: ScorerContext,
+) -> None:
+    """Passing an empty alias index disables the lift even when ctx has one."""
+    ev = score_publisher(
+        "Whittlesey House",
+        "McGraw-Hill Book Company",
+        alias_scorer_context,
+        alias_index={},
+    )
+    assert ev.score < 95.0
+
+
+def test_score_publisher_alias_skipped_when_input_normalizes_empty(
+    scorer_context: ScorerContext,
+    alias_index: dict[str, str],
+) -> None:
+    """A stopword-only input never matches a canonical and stays on fuzzy."""
+    ev = score_publisher(
+        "The Company & Co.",
+        "McGraw-Hill",
+        scorer_context,
+        alias_index=alias_index,
+    )
+    assert ev.score < 95.0
+
+
+def test_score_publisher_alias_skipped_when_publisher_unknown(
+    scorer_context: ScorerContext,
+    alias_index: dict[str, str],
+) -> None:
+    """A publisher not in the table receives no lift."""
+    ev = score_publisher(
+        "Whittlesey House",
+        "Some Unknown House",
+        scorer_context,
+        alias_index=alias_index,
+    )
+    assert ev.score < 95.0
+
+
+def test_score_publisher_skipped_evidence_not_lifted(
+    scorer_context: ScorerContext,
+    alias_index: dict[str, str],
+) -> None:
+    """Skipped evidence (empty input) is never lifted by the alias path."""
+    ev = score_publisher(
+        None,
+        "McGraw-Hill Book Company",
+        scorer_context,
+        alias_index=alias_index,
+    )
+    assert ev.skipped is True
+    assert ev.score == 0.0
+
+
+def test_get_default_alias_index_resolves_anchor_pairs(
+    scorer_context: ScorerContext,
+) -> None:
+    """The bundled default index lifts the known anchor pairs."""
+    index = get_default_alias_index()
+    ev = score_publisher(
+        "Aldus Books",
+        "Doubleday & Company",
+        scorer_context,
+        alias_index=index,
+    )
+    assert ev.score >= 95.0
