@@ -18,7 +18,7 @@
       {"type": "founded", "year": 1885, "founders": ["Daniel Collamore Heath"], "evidence": "U.S. educational publisher founded by Daniel Collamore Heath."},
       {"type": "acquired_by", "year": 1966, "actor": "Raytheon", "evidence": "Acquired by Raytheon in 1966."},
       {"type": "sold_to", "year": 1995, "actor": "Houghton Mifflin Company", "evidence": "sold to Houghton Mifflin and absorbed."},
-      {"type": "defunct", "year": 1995, "evidence": "absorbed [into Houghton Mifflin]."}
+      {"type": "defunct", "year": 1995, "evidence": "sold to Houghton Mifflin and absorbed."}
     ],
     "Oxford University Press": [
       {"type": "founded", "year": 1586, "evidence": "Department of the University of Oxford."}
