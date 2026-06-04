@@ -166,72 +166,94 @@
   }
 
   // Build edges. Each event involving two entities yields one edge.
-  const links = [];
+  // Some acquisition events reference imprint targets (Coward-McCann etc.) that don't have
+  // standalone entries; we silently drop links to unknown ids so one missing node doesn't kill
+  // the whole simulation. The `unresolved` list is exposed for ad-hoc debugging.
+  const nodeIds = new Set(nodes.map(n => n.id));
+  const rawLinks = [];
   for (const [name, events] of Object.entries(EVENTS.entities)) {
     for (const ev of events) {
       if (ev.type === "acquired_by" || ev.type === "sold_to") {
-        links.push({ source: name, target: ev.actor, year: ev.year, type: ev.type, evidence: ev.evidence });
+        rawLinks.push({ source: name, target: ev.actor, year: ev.year, type: ev.type, evidence: ev.evidence });
       } else if (ev.type === "merged_with") {
         (ev.actors || []).forEach(a => {
-          links.push({ source: name, target: a, year: ev.year, type: "merged_with", evidence: ev.evidence });
+          rawLinks.push({ source: name, target: a, year: ev.year, type: "merged_with", evidence: ev.evidence });
         });
       } else if (ev.type === "merger_formed") {
         (ev.predecessors || []).forEach(a => {
-          links.push({ source: a, target: name, year: ev.year, type: "merger_formed", evidence: ev.evidence });
+          rawLinks.push({ source: a, target: name, year: ev.year, type: "merger_formed", evidence: ev.evidence });
         });
       } else if (ev.type === "acquired") {
-        links.push({ source: ev.target, target: name, year: ev.year, type: "acquired_by", evidence: ev.evidence });
+        rawLinks.push({ source: ev.target, target: name, year: ev.year, type: "acquired_by", evidence: ev.evidence });
       }
     }
   }
+  const unresolved = [];
+  const links = rawLinks.filter(l => {
+    if (nodeIds.has(l.source) && nodeIds.has(l.target)) return true;
+    unresolved.push(l);
+    return false;
+  });
+  window.UNRESOLVED_LINKS = unresolved;
 
   // ---------- Rendering ----------
+  const COLOR_ACTIVE   = "#1e7d34";
+  const COLOR_ACQUIRED = "#b07d2a";
+  const COLOR_DEFUNCT  = "#8a8a8a";
+  const COLOR_EXTERNAL = "#888888";
+
   const svg = d3.select("#graph svg");
   let width = 0, height = 0;
   function measure() {
     const rect = document.getElementById("graph").getBoundingClientRect();
-    width = rect.width; height = rect.height;
+    width = Math.max(rect.width, 100);
+    height = Math.max(rect.height, 100);
     svg.attr("viewBox", [0, 0, width, height]);
   }
   measure();
-  window.addEventListener("resize", () => { measure(); simulation.alpha(0.3).restart(); });
+  window.addEventListener("resize", () => { measure(); centerView(); simulation.alpha(0.3).restart(); });
 
   const gZoom = svg.append("g");
-  svg.call(d3.zoom().scaleExtent([0.25, 5]).on("zoom", e => gZoom.attr("transform", e.transform)));
+  const zoom = d3.zoom().scaleExtent([0.25, 5]).on("zoom", e => gZoom.attr("transform", e.transform));
+  svg.call(zoom);
 
   const gLinks = gZoom.append("g").attr("class", "links");
   const gNodes = gZoom.append("g").attr("class", "nodes");
 
   // Build node degree (in-degree as acquirer) — bigger nodes for major aggregators.
   const inDegree = {};
-  links.forEach(l => { inDegree[l.target] = (inDegree[l.target] || 0) + 1; });
+  links.forEach(l => {
+    const tgt = typeof l.target === "string" ? l.target : l.target.id;
+    inDegree[tgt] = (inDegree[tgt] || 0) + 1;
+  });
   function radius(d) {
     const deg = inDegree[d.id] || 0;
-    return 3.5 + Math.sqrt(deg) * 2.2;
+    return 4 + Math.sqrt(deg) * 2.4;
   }
   function nodeColor(d, year) {
-    if (d.kind === "external") return "var(--external)";
-    if (d.defunct && d.defunct <= year) return "var(--defunct)";
-    // acquired if any acquired_by/sold_to/merger event has fired by year
+    if (d.kind === "external") return COLOR_EXTERNAL;
+    if (d.defunct && d.defunct <= year) return COLOR_DEFUNCT;
     const events = EVENTS.entities[d.id] || [];
     const acquired = events.some(e => (e.type === "acquired_by" || e.type === "sold_to" || e.type === "merged_with") && e.year <= year);
-    return acquired ? "var(--acquired)" : "var(--active)";
+    return acquired ? COLOR_ACQUIRED : COLOR_ACTIVE;
   }
 
   // d3 force simulation
   const simulation = d3.forceSimulation(nodes)
-    .force("link", d3.forceLink(links).id(d => d.id).distance(80).strength(0.4))
-    .force("charge", d3.forceManyBody().strength(-110))
-    .force("center", d3.forceCenter(0, 0))
+    .force("link", d3.forceLink(links).id(d => d.id).distance(70).strength(0.35))
+    .force("charge", d3.forceManyBody().strength(-140))
+    .force("x", d3.forceX(0).strength(0.04))
+    .force("y", d3.forceY(0).strength(0.04))
     .force("collide", d3.forceCollide(d => radius(d) + 3))
-    .alpha(0.6);
+    .alpha(0.9);
 
   // Initial draw — full timespan
   let currentYear = 2025;
   const linkSel = gLinks.selectAll("line").data(links).join("line").attr("class", d => "link " + d.type);
   const nodeSel = gNodes.selectAll("g").data(nodes).join("g").attr("class", "node");
-  nodeSel.append("circle").attr("r", d => radius(d));
-  nodeSel.append("text").attr("class", d => "node-label" + (d.kind === "external" ? " external" : "") + (inDegree[d.id] >= 3 ? " major" : ""))
+  nodeSel.append("circle").attr("r", d => radius(d)).attr("fill", d => nodeColor(d, currentYear));
+  nodeSel.append("text")
+    .attr("class", d => "node-label" + (d.kind === "external" ? " external" : "") + (inDegree[d.id] >= 3 ? " major" : ""))
     .attr("dy", d => -radius(d) - 4)
     .attr("text-anchor", "middle")
     .text(d => d.id);
@@ -254,17 +276,18 @@
   svg.on("click", () => { nodeSel.classed("selected", false); clearDetail(); });
 
   simulation.on("tick", () => {
-    gZoom.attr("transform", gZoom.attr("transform") || "translate(" + (width / 2) + "," + (height / 2) + ")");
-    linkSel.attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    linkSel
+      .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
     nodeSel.attr("transform", d => "translate(" + d.x + "," + d.y + ")");
   });
 
-  // Center the zoomable group once we know the layout has run for a beat.
-  setTimeout(() => {
-    const t = d3.zoomIdentity.translate(width / 2, height / 2).scale(0.85);
-    svg.call(d3.zoom().transform, t);
-    gZoom.attr("transform", t);
-  }, 40);
+  function centerView() {
+    const t = d3.zoomIdentity.translate(width / 2, height / 2).scale(0.7);
+    svg.call(zoom.transform, t);
+  }
+  // Wait a frame so the SVG has its real layout size, then center.
+  requestAnimationFrame(() => { measure(); centerView(); });
 
   // ---------- Year filter ----------
   function applyYear(year) {

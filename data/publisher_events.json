@@ -79,7 +79,6 @@
       {"type": "founded", "year": 1838, "founders": ["George Palmer Putnam"], "evidence": "Founded 1838 by George Palmer Putnam."},
       {"type": "acquired", "year": 1936, "target": "Coward-McCann", "evidence": "Acquired by Putnam in 1936."},
       {"type": "acquired", "year": 1965, "target": "Berkley Books", "evidence": "acquired by Putnam in 1965."},
-      {"type": "acquired", "year": 1973, "target": "D. Appleton-Century Company", "evidence": "Acquired Appleton-Century-Crofts in 1973."},
       {"type": "sold_to", "year": 1975, "actor": "MCA", "evidence": "Sold to MCA in 1975."},
       {"type": "sold_to", "year": 1996, "actor": "Penguin Books", "evidence": "to Penguin Group in 1996."}
     ],
