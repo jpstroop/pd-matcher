@@ -57,6 +57,11 @@
           "name": "Crime Club",
           "active": "1928-1991",
           "notes": "Mystery / detective fiction imprint and subscription book club."
+        },
+        {
+          "name": "Image Books",
+          "active": "1954-present",
+          "notes": "Roman Catholic paperback imprint."
         }
       ],
       "active": "1897-present",
@@ -980,6 +985,792 @@
       "notes": "Founded 1947 by Jeremiah Kaplan in Glencoe, Illinois (as The Free Press of Glencoe) for academic-nonfiction. Acquired by Macmillan in 1960; eventually became a Simon & Schuster imprint after the 1994 Macmillan dissolution. Cross-listed here for the pre-1960 independent era.",
       "sources": [
         "https://en.wikipedia.org/wiki/Free_Press_(publisher)"
+      ]
+    },
+    {
+      "canonical": "Ballantine Books",
+      "aliases": [
+        "Ballantine",
+        "Ballantine Books, Inc."
+      ],
+      "imprints": [
+        {
+          "name": "Del Rey Books",
+          "active": "1977-present",
+          "notes": "Science-fiction and fantasy imprint, named for editors Lester and Judy-Lynn del Rey."
+        }
+      ],
+      "active": "1952-present",
+      "notes": "Founded 1952 by Ian and Betty Ballantine after Ian left Bantam Books. One of the first U.S. publishers to do simultaneous hardcover-and-paperback editions; influential in science fiction. Acquired by Random House in 1973; now part of the Random House Publishing Group.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Ballantine_Books"
+      ]
+    },
+    {
+      "canonical": "Bantam Books",
+      "aliases": [
+        "Bantam",
+        "Bantam Books, Inc."
+      ],
+      "imprints": [],
+      "active": "1945-present",
+      "notes": "Founded 1945 by Walter B. Pitkin Jr., Sidney B. Kramer, and Ian Ballantine, with backing from Grosset & Dunlap, Curtis Publishing, and others. Mass-market paperback house. Acquired by National General in 1968, by IFI International in 1974, by Bertelsmann in 1980; merged into the Bantam Doubleday Dell group, now part of Penguin Random House.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Bantam_Books"
+      ]
+    },
+    {
+      "canonical": "Ace Books",
+      "aliases": [
+        "Ace",
+        "Ace Publishing",
+        "Ace Publishing Corporation"
+      ],
+      "imprints": [],
+      "active": "1952-present",
+      "notes": "Founded 1952 by A. A. Wyn. Known for the Ace Doubles format (two short novels back-to-back) and as the first U.S. publisher of science-fiction paperback originals. Acquired by Charter Communications in 1972, by Grosset & Dunlap in 1975, by Berkley/Putnam in 1981; now an imprint of Penguin Random House.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Ace_Books"
+      ]
+    },
+    {
+      "canonical": "Avon Books",
+      "aliases": [
+        "Avon",
+        "Avon Publications",
+        "Avon Pocket-Size Books"
+      ],
+      "imprints": [],
+      "active": "1941-present",
+      "notes": "Founded 1941 by Joseph Meyers and Edna Williams Meyers as Avon Pocket-Size Books, to compete with Pocket Books. Acquired by the Hearst Corporation in 1959; sold to News Corp in 1999 and folded into HarperCollins.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Avon_(publisher)"
+      ]
+    },
+    {
+      "canonical": "Fawcett Publications",
+      "aliases": [
+        "Fawcett",
+        "Fawcett Books",
+        "Fawcett Publications, Inc."
+      ],
+      "imprints": [
+        {
+          "name": "Gold Medal Books",
+          "active": "1950-1980",
+          "notes": "Mass-market paperback original-fiction imprint."
+        },
+        {
+          "name": "Fawcett Crest",
+          "active": "1955-1982",
+          "notes": "Mass-market reprint paperback imprint."
+        },
+        {
+          "name": "Fawcett Premier",
+          "active": "1956-1982",
+          "notes": "Quality-paperback nonfiction imprint."
+        }
+      ],
+      "active": "1919-1982",
+      "notes": "Founded 1919 by Wilford Hamilton Fawcett (Captain Billy) as a magazine publisher (Captain Billy's Whiz Bang). Entered paperback publishing in 1950 with Gold Medal. Acquired by CBS in 1977; book imprints sold to Random House in 1982.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Fawcett_Publications"
+      ]
+    },
+    {
+      "canonical": "Dell Publishing",
+      "aliases": [
+        "Dell",
+        "Dell Books",
+        "Dell Publishing Co.",
+        "Dell Publishing Company"
+      ],
+      "imprints": [
+        {
+          "name": "Laurel Editions",
+          "active": "1959-1990",
+          "notes": "Quality-paperback imprint for literary classics."
+        },
+        {
+          "name": "Delacorte Press",
+          "active": "1964-present",
+          "notes": "Hardcover trade imprint founded by George T. Delacorte Jr. within Dell."
+        },
+        {
+          "name": "Dial Press",
+          "active": "1924-present",
+          "notes": "Originally independent (1924-1980), then a Dell imprint. Acquired with Dell by Doubleday in 1976; now a Random House imprint."
+        }
+      ],
+      "active": "1921-present",
+      "notes": "Founded 1921 by George T. Delacorte Jr. as a magazine publisher; entered paperbacks in 1942. Acquired by Doubleday in 1976; now part of the Random House Publishing Group within Penguin Random House.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Dell_Publishing"
+      ]
+    },
+    {
+      "canonical": "Grosset & Dunlap",
+      "aliases": [
+        "Grosset and Dunlap",
+        "Grosset & Dunlap, Inc."
+      ],
+      "imprints": [],
+      "active": "1898-present",
+      "notes": "Founded 1898 by Alexander Grosset and George T. Dunlap. Best known for inexpensive hardcover reprints and children's-series fiction (Nancy Drew, Hardy Boys, Tom Swift via the Stratemeyer Syndicate). Was a major Bantam Books shareholder. Acquired by National General in 1968, by Filmways in 1974, by Putnam in 1982; now an imprint of Penguin Random House.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Grosset_%26_Dunlap"
+      ]
+    },
+    {
+      "canonical": "New Directions Publishing",
+      "aliases": [
+        "New Directions",
+        "New Directions Books",
+        "James Laughlin"
+      ],
+      "imprints": [],
+      "active": "1936-present",
+      "notes": "Founded 1936 by James Laughlin in Norfolk, Connecticut. Independent literary publisher with a poetry- and translation-heavy list (Pound, Williams, Stein, Borges, Neruda). Remains independent.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/New_Directions_Publishing"
+      ]
+    },
+    {
+      "canonical": "Harvard University Press",
+      "aliases": [
+        "HUP",
+        "Harvard U. Press",
+        "Harvard Univ. Press"
+      ],
+      "imprints": [
+        {
+          "name": "Belknap Press",
+          "active": "1949-present",
+          "notes": "Imprint for major scholarly works of long-term importance, established by a bequest from Waldron Phoenix Belknap Jr."
+        }
+      ],
+      "active": "1913-present",
+      "notes": "Founded 1913. The publishing arm of Harvard University.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Harvard_University_Press"
+      ]
+    },
+    {
+      "canonical": "Yale University Press",
+      "aliases": [
+        "YUP",
+        "Yale U. Press",
+        "Yale Univ. Press"
+      ],
+      "imprints": [],
+      "active": "1908-present",
+      "notes": "Founded 1908. The publishing arm of Yale University; operates a London office that publishes for the broader scholarly market.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Yale_University_Press"
+      ]
+    },
+    {
+      "canonical": "University of Chicago Press",
+      "aliases": [
+        "Chicago Univ. Press",
+        "University of Chicago Press, Books Division",
+        "Chicago U. Press"
+      ],
+      "imprints": [],
+      "active": "1891-present",
+      "notes": "Founded 1891 as part of the new University of Chicago. Largest U.S. university press; publishes The Chicago Manual of Style.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/University_of_Chicago_Press"
+      ]
+    },
+    {
+      "canonical": "Princeton University Press",
+      "aliases": [
+        "Princeton U. Press",
+        "Princeton Univ. Press"
+      ],
+      "imprints": [
+        {
+          "name": "Bollingen Series",
+          "active": "1943-1967",
+          "notes": "Foundation-funded series in philosophy, religion, art, mythology. Published by Pantheon 1943-1966, transferred to Princeton University Press in 1967."
+        }
+      ],
+      "active": "1905-present",
+      "notes": "Founded 1905. The publishing arm of Princeton University; legally separate as a private nonprofit.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Princeton_University_Press"
+      ]
+    },
+    {
+      "canonical": "Columbia University Press",
+      "aliases": [
+        "Columbia U. Press",
+        "Columbia Univ. Press"
+      ],
+      "imprints": [],
+      "active": "1893-present",
+      "notes": "Founded 1893. The publishing arm of Columbia University.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Columbia_University_Press"
+      ]
+    },
+    {
+      "canonical": "MIT Press",
+      "aliases": [
+        "M.I.T. Press",
+        "Massachusetts Institute of Technology Press",
+        "The MIT Press",
+        "The M.I.T. Press",
+        "M. I. T. Press"
+      ],
+      "imprints": [],
+      "active": "1932-present",
+      "notes": "Began 1932 as the Technology Press of MIT; renamed The MIT Press in 1962 after taking over its own distribution. Strong in technology, design, science studies, and architecture.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/MIT_Press"
+      ]
+    },
+    {
+      "canonical": "Western Publishing",
+      "aliases": [
+        "Western Printing and Lithographing",
+        "Western Publishing Company",
+        "Western Publishing Co., Inc."
+      ],
+      "imprints": [
+        {
+          "name": "Little Golden Books",
+          "active": "1942-present",
+          "notes": "Inexpensive children's-book imprint launched 1942 jointly with Simon & Schuster; Western took full ownership in 1958. The most enduring and recognizable U.S. children's hardcover series of the period."
+        },
+        {
+          "name": "Big Golden Books",
+          "active": "1944-present",
+          "notes": "Larger-format children's-book imprint within the Golden Books line."
+        }
+      ],
+      "active": "1907-1996",
+      "notes": "Founded 1907 in Racine, Wisconsin, as Western Printing and Lithographing. Co-launched Little Golden Books with Simon & Schuster in 1942; bought out S&S's share in 1958. Renamed Western Publishing in 1960. Acquired by Mattel in 1996 and split up.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Western_Publishing"
+      ]
+    },
+    {
+      "canonical": "Time-Life Books",
+      "aliases": [
+        "Time Life Books",
+        "Time-Life",
+        "Time Life",
+        "Time Inc. Book Division"
+      ],
+      "imprints": [],
+      "active": "1961-2003",
+      "notes": "Founded 1961 as the book-publishing division of Time Inc. Specialized in illustrated reference and how-to series sold by mail subscription. Closed in 2003.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Time_Life"
+      ]
+    },
+    {
+      "canonical": "Encyclopaedia Britannica, Inc.",
+      "aliases": [
+        "Encyclopedia Britannica",
+        "Britannica",
+        "Encyclopaedia Britannica",
+        "Encyclopedia Britannica, Inc.",
+        "Encyclopedia Britannica Press"
+      ],
+      "imprints": [],
+      "active": "1768-present",
+      "notes": "Founded 1768 in Edinburgh. Acquired by Sears, Roebuck in 1920; sold to William Benton in 1943 (operating under the University of Chicago's auspices via the Benton Foundation). Now privately held; ceased the print edition in 2012.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Encyclop%C3%A6dia_Britannica,_Inc."
+      ]
+    },
+    {
+      "canonical": "World Book, Inc.",
+      "aliases": [
+        "World Book",
+        "World Book Encyclopedia",
+        "World Book Company",
+        "Field Enterprises Educational Corporation"
+      ],
+      "imprints": [],
+      "active": "1917-present",
+      "notes": "World Book Encyclopedia originated 1917 with the Hanson-Roach-Fowler Company. Published under various names (Quarrie Corporation, Field Enterprises Educational, World Book Inc.) Now owned by Berkshire Hathaway via Scott Fetzer.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/World_Book_Encyclopedia"
+      ]
+    },
+    {
+      "canonical": "W. B. Saunders Company",
+      "aliases": [
+        "Saunders",
+        "W.B. Saunders",
+        "W. B. Saunders Co.",
+        "Saunders Company"
+      ],
+      "imprints": [],
+      "active": "1888-present",
+      "notes": "Founded 1888 by Walter Burns Saunders in Philadelphia. Major medical and scientific publisher. Acquired by CBS in 1968, sold to Holt, Rinehart and Winston in 1980, then to Harcourt Brace Jovanovich in 1986; now part of Elsevier.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/W._B._Saunders_Company"
+      ]
+    },
+    {
+      "canonical": "Beacon Press",
+      "aliases": [
+        "Beacon",
+        "Beacon Press, Boston"
+      ],
+      "imprints": [],
+      "active": "1854-present",
+      "notes": "Founded 1854 by the American Unitarian Association; now owned by the Unitarian Universalist Association. Independent nonprofit publisher; notable for first publishing the Pentagon Papers in 1971.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Beacon_Press"
+      ]
+    },
+    {
+      "canonical": "G. Schirmer, Inc.",
+      "aliases": [
+        "G. Schirmer",
+        "Schirmer",
+        "Gustav Schirmer",
+        "G. Schirmer Inc.",
+        "Schirmer's"
+      ],
+      "imprints": [],
+      "active": "1861-present",
+      "notes": "Founded 1861 by Gustav Schirmer in New York. Leading U.S. classical-music publisher (sheet music, scores, music textbooks). Acquired by Macmillan in 1968; sold to Music Sales Group in 1986; now part of Wise Music Group.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/G._Schirmer,_Inc."
+      ]
+    },
+    {
+      "canonical": "Arnoldo Mondadori Editore",
+      "aliases": [
+        "Mondadori",
+        "A. Mondadori",
+        "Mondadori Editore",
+        "Casa Editrice Mondadori"
+      ],
+      "imprints": [],
+      "active": "1907-present",
+      "notes": "Italy's largest book publisher, founded 1907 by Arnoldo Mondadori in Ostiglia. The Mondadori family retained control through Fininvest (Berlusconi) ownership from 1991. Many U.S.-registered Italian-language titles in our era bear the Mondadori imprint.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Arnoldo_Mondadori_Editore"
+      ]
+    },
+    {
+      "canonical": "Espasa-Calpe",
+      "aliases": [
+        "Espasa Calpe",
+        "Editorial Espasa-Calpe",
+        "Espasa-Calpe, S.A.",
+        "Espasa"
+      ],
+      "imprints": [],
+      "active": "1925-present",
+      "notes": "Spanish reference and trade publisher formed 1925 by merger of Editorial Espasa (Barcelona) and Compañía Anónima de Librería y Publicaciones Españolas (Madrid). Best known for the Enciclopedia Universal Ilustrada Europeo-Americana. Now part of Grupo Planeta.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Espasa-Calpe"
+      ]
+    },
+    {
+      "canonical": "The Limited Editions Club",
+      "aliases": [
+        "Limited Editions Club",
+        "LEC"
+      ],
+      "imprints": [
+        {
+          "name": "Heritage Press",
+          "active": "1935-present",
+          "notes": "Trade-edition reprint imprint making the LEC titles available in less-expensive bindings."
+        }
+      ],
+      "active": "1929-present",
+      "notes": "Founded 1929 by George Macy as a subscription book club producing illustrated, limited-edition classics designed by leading typographers and illustrators. The standalone Heritage Press sister-imprint (1935) reissued LEC titles to a broader market. Continues under new ownership since 1985.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Limited_Editions_Club"
+      ]
+    },
+    {
+      "canonical": "Quadrangle Books",
+      "aliases": [
+        "Quadrangle",
+        "Quadrangle/The New York Times Book Co.",
+        "Quadrangle Books, Inc."
+      ],
+      "imprints": [],
+      "active": "1958-1979",
+      "notes": "Founded 1958 in Chicago by Melvin Brisk and Ivan von Auw. Acquired by The New York Times Company in 1969, becoming Quadrangle/The New York Times Book Co. Folded into Times Books in 1979; the Times Books name was later sold to Random House.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Quadrangle_Books"
+      ]
+    },
+    {
+      "canonical": "Abingdon Press",
+      "aliases": [
+        "Abingdon",
+        "Abingdon-Cokesbury Press",
+        "Abingdon Cokesbury"
+      ],
+      "imprints": [],
+      "active": "1789-present",
+      "notes": "The book-publishing arm of the United Methodist Publishing House. Traces to 1789 (Methodist Book Concern); the Abingdon Press name dates from 1908. Operated as Abingdon-Cokesbury Press 1939-1954 after a merger.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Abingdon_Press"
+      ]
+    },
+    {
+      "canonical": "Westminster Press",
+      "aliases": [
+        "Westminster",
+        "The Westminster Press",
+        "Westminster John Knox Press"
+      ],
+      "imprints": [],
+      "active": "1838-present",
+      "notes": "Publishing arm of the Presbyterian Church (U.S.A.) and its predecessors. Merged with the John Knox Press in 1988 to form Westminster John Knox Press. Religious scholarship and trade.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Westminster_John_Knox_Press"
+      ]
+    },
+    {
+      "canonical": "Wm. B. Eerdmans Publishing Co.",
+      "aliases": [
+        "Eerdmans",
+        "William B. Eerdmans",
+        "Wm. B. Eerdmans",
+        "Eerdmans Publishing",
+        "W. B. Eerdmans"
+      ],
+      "imprints": [],
+      "active": "1911-present",
+      "notes": "Founded 1911 by William B. Eerdmans in Grand Rapids, Michigan. Independent Christian-academic publisher, ecumenical in scope. Still family-owned.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/William_B._Eerdmans_Publishing_Company"
+      ]
+    },
+    {
+      "canonical": "Sheed & Ward",
+      "aliases": [
+        "Sheed and Ward",
+        "Sheed Ward",
+        "Sheed & Ward, Inc.",
+        "Sheed & Ward Ltd"
+      ],
+      "imprints": [],
+      "active": "1926-present",
+      "notes": "Roman Catholic publisher founded 1926 in London by Frank Sheed and Maisie Ward; opened a New York office in 1933. Both branches eventually sold separately: the U.S. branch to Andrews McMeel in 1973, then to Rowman & Littlefield; the UK branch persists as an imprint of Continuum / Bloomsbury.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Sheed_%26_Ward"
+      ]
+    },
+    {
+      "canonical": "Éditions Gallimard",
+      "aliases": [
+        "Gallimard",
+        "Gallimard, Éditions",
+        "Editions Gallimard",
+        "Librairie Gallimard",
+        "NRF",
+        "Nouvelle Revue Française"
+      ],
+      "imprints": [
+        {
+          "name": "Bibliothèque de la Pléiade",
+          "active": "1931-present",
+          "notes": "Prestigious series of leather-bound editions of canonical literature."
+        },
+        {
+          "name": "Série Noire",
+          "active": "1945-present",
+          "notes": "Crime / noir fiction imprint founded by Marcel Duhamel."
+        },
+        {
+          "name": "Folio",
+          "active": "1972-present",
+          "notes": "Trade-paperback imprint."
+        }
+      ],
+      "active": "1911-present",
+      "notes": "France's leading independent literary publisher, founded 1911 by Gaston Gallimard, Jean Schlumberger, and André Gide (originally as Éditions de la Nouvelle Revue Française; renamed Librairie Gallimard 1919, Éditions Gallimard 1961). Many U.S.-registered French-language and translated titles in our era bear the Gallimard imprint.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/%C3%89ditions_Gallimard"
+      ]
+    },
+    {
+      "canonical": "Springer-Verlag",
+      "aliases": [
+        "Springer",
+        "Springer Verlag",
+        "Julius Springer",
+        "Springer Berlin",
+        "Springer Berlin Heidelberg",
+        "Springer Science+Business Media",
+        "Springer Science"
+      ],
+      "imprints": [],
+      "active": "1842-present",
+      "notes": "Founded 1842 in Berlin by Julius Springer. Renamed Springer-Verlag in 1949. Major STEM publisher; many U.S.-registered scientific titles in our era are German-language Springer editions. Acquired by Kluwer in 2003 forming Springer Science+Business Media, merged with Macmillan Science & Education in 2015 to form Springer Nature.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Springer-Verlag",
+        "niu:Springer"
+      ]
+    },
+    {
+      "canonical": "Academic Press",
+      "aliases": [
+        "Academic Press, Inc.",
+        "Academic"
+      ],
+      "imprints": [],
+      "active": "1942-present",
+      "notes": "Founded 1942 in New York by Kurt Jacoby and Walter J. Johnson, originally to reprint European scientific texts disrupted by the war. Acquired by Harcourt Brace Jovanovich in 1969; now part of Elsevier.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Academic_Press"
+      ]
+    },
+    {
+      "canonical": "Flammarion",
+      "aliases": [
+        "Éditions Flammarion",
+        "Editions Flammarion",
+        "Ernest Flammarion",
+        "Flammarion et Cie",
+        "Librairie Flammarion"
+      ],
+      "imprints": [],
+      "active": "1875-present",
+      "notes": "French general-interest publisher founded 1875 by Ernest Flammarion. Family-owned until 2000; acquired by RCS MediaGroup, then by Madrigall (Gallimard's parent) in 2012.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Flammarion_(publisher)"
+      ]
+    },
+    {
+      "canonical": "Hachette Livre",
+      "aliases": [
+        "Hachette",
+        "Librairie Hachette",
+        "Hachette et Cie",
+        "Hachette Book Group"
+      ],
+      "imprints": [],
+      "active": "1826-present",
+      "notes": "French publishing group founded 1826 by Louis Hachette. Long-running French general-interest publisher; the modern Hachette Livre is a subsidiary of Lagardère Group and the world's third-largest publisher of consumer books.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hachette_Livre"
+      ]
+    },
+    {
+      "canonical": "Éditions Albin Michel",
+      "aliases": [
+        "Albin Michel",
+        "A. Michel",
+        "Editions Albin Michel",
+        "Librairie Albin Michel"
+      ],
+      "imprints": [],
+      "active": "1900-present",
+      "notes": "French independent literary publisher founded 1900 by Albin Michel in Paris. Still family-owned.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Albin_Michel"
+      ]
+    },
+    {
+      "canonical": "Éditions Bernard Grasset",
+      "aliases": [
+        "Grasset",
+        "B. Grasset",
+        "Bernard Grasset",
+        "Editions Grasset",
+        "Grasset & Fasquelle"
+      ],
+      "imprints": [],
+      "active": "1907-present",
+      "notes": "French literary publisher founded 1907 by Bernard Grasset. Acquired by Hachette in 1959; now operates as Grasset & Fasquelle within the Hachette Livre group.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/%C3%89ditions_Grasset"
+      ]
+    },
+    {
+      "canonical": "Éditions Robert Laffont",
+      "aliases": [
+        "Robert Laffont",
+        "R. Laffont",
+        "Editions Robert Laffont",
+        "Laffont"
+      ],
+      "imprints": [],
+      "active": "1941-present",
+      "notes": "French publisher founded 1941 by Robert Laffont in Marseille (moved to Paris 1945). Strong in popular fiction and translated U.S. fiction; acquired by Generale Occidentale in 1979, then Editis in 2004.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Robert_Laffont"
+      ]
+    },
+    {
+      "canonical": "La Table Ronde",
+      "aliases": [
+        "Éditions de la Table Ronde",
+        "Editions de la Table Ronde"
+      ],
+      "imprints": [],
+      "active": "1944-present",
+      "notes": "French literary publisher founded 1944 by Roland Laudenbach. Acquired by Gallimard in 1998.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/%C3%89ditions_de_la_Table_ronde"
+      ]
+    },
+    {
+      "canonical": "William Morrow and Company",
+      "aliases": [
+        "Morrow",
+        "William Morrow",
+        "William Morrow & Co.",
+        "Wm. Morrow",
+        "Morrow & Company"
+      ],
+      "imprints": [],
+      "active": "1926-present",
+      "notes": "Founded 1926 by William Morrow in New York. Acquired by Scott, Foresman in 1967, by Hearst in 1981, by News Corp in 1999 and folded into HarperCollins.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/William_Morrow_and_Company"
+      ]
+    },
+    {
+      "canonical": "Rinehart & Company",
+      "aliases": [
+        "Rinehart",
+        "Rinehart and Company",
+        "Rinehart & Co.",
+        "Farrar & Rinehart",
+        "Farrar and Rinehart"
+      ],
+      "imprints": [],
+      "active": "1929-1960",
+      "notes": "Founded 1929 by Stanley M. Rinehart Jr., Frederick R. Rinehart, and John C. Farrar as Farrar & Rinehart. After Farrar left in 1946 to start Farrar, Straus & Company, it became Rinehart & Company. Merged with Henry Holt and John C. Winston Company in 1960 to form Holt, Rinehart and Winston.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Rinehart_%26_Company"
+      ]
+    },
+    {
+      "canonical": "Duell, Sloan and Pearce",
+      "aliases": [
+        "Duell Sloan and Pearce",
+        "Duell, Sloan & Pearce",
+        "Duell, Sloan and Pearce, Inc."
+      ],
+      "imprints": [],
+      "active": "1939-1961",
+      "notes": "Founded 1939 by Charles Halliwell Duell, Samuel Sloan, and Charles Pearce, after they left Harcourt Brace. Acquired by Meredith Publishing in 1961 and merged into Meredith Press.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Duell,_Sloan_and_Pearce"
+      ]
+    },
+    {
+      "canonical": "Pergamon Press",
+      "aliases": [
+        "Pergamon",
+        "Pergamon Press Ltd",
+        "Pergamon Institute"
+      ],
+      "imprints": [],
+      "active": "1948-1991",
+      "notes": "British scientific and technical publisher founded 1948 by Robert Maxwell, originally Butterworth-Springer (a joint venture with Springer-Verlag). Renamed Pergamon Press 1951. Acquired by Elsevier in 1991 after Maxwell's death.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Pergamon_Press"
+      ]
+    },
+    {
+      "canonical": "William Collins, Sons",
+      "aliases": [
+        "Collins",
+        "William Collins",
+        "Collins, Sons",
+        "Collins & Sons",
+        "William Collins Sons & Co.",
+        "Wm. Collins"
+      ],
+      "imprints": [
+        {
+          "name": "Fontana Books",
+          "active": "1953-present",
+          "notes": "Mass-market paperback imprint."
+        }
+      ],
+      "active": "1819-1989",
+      "notes": "British publisher founded 1819 in Glasgow by William Collins. Acquired by News Corp in 1989; merged with Harper & Row to form HarperCollins.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/HarperCollins"
+      ]
+    },
+    {
+      "canonical": "Thames & Hudson",
+      "aliases": [
+        "Thames and Hudson",
+        "Thames & Hudson Ltd"
+      ],
+      "imprints": [],
+      "active": "1949-present",
+      "notes": "British illustrated-books publisher founded 1949 by Walter Neurath and Eva Feuchtwang. Name signals trans-Atlantic distribution (London / New York). Remains independent.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Thames_%26_Hudson"
+      ]
+    },
+    {
+      "canonical": "University of California Press",
+      "aliases": [
+        "UC Press",
+        "U.C. Press",
+        "California Univ. Press"
+      ],
+      "imprints": [],
+      "active": "1893-present",
+      "notes": "Publishing arm of the University of California, founded 1893; reorganized as a true scholarly press in 1933.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/University_of_California_Press"
+      ]
+    },
+    {
+      "canonical": "University of Minnesota Press",
+      "aliases": [
+        "Minnesota Univ. Press",
+        "U. of Minnesota Press"
+      ],
+      "imprints": [],
+      "active": "1925-present",
+      "notes": "Publishing arm of the University of Minnesota.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/University_of_Minnesota_Press"
+      ]
+    },
+    {
+      "canonical": "Stanford University Press",
+      "aliases": [
+        "Stanford Univ. Press",
+        "Stanford U. Press"
+      ],
+      "imprints": [],
+      "active": "1892-present",
+      "notes": "Publishing arm of Stanford University.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Stanford_University_Press"
+      ]
+    },
+    {
+      "canonical": "Johns Hopkins University Press",
+      "aliases": [
+        "Johns Hopkins Press",
+        "Johns Hopkins U. Press",
+        "JHU Press"
+      ],
+      "imprints": [],
+      "active": "1878-present",
+      "notes": "The oldest continuously operating university press in the United States. Publishing arm of Johns Hopkins University.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Johns_Hopkins_University_Press"
       ]
     }
   ]
