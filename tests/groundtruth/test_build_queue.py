@@ -88,7 +88,13 @@ def _marc(control_id: str = "ctrl-1", year: int | None = 1953) -> MarcRecord:
     )
 
 
-def _evidence(scorer: str, score: float, *, skipped: bool = False) -> Evidence:
+def _evidence(
+    scorer: str,
+    score: float,
+    *,
+    skipped: bool = False,
+    note: str | None = None,
+) -> Evidence:
     return Evidence(
         scorer=scorer,
         score=score,
@@ -96,6 +102,7 @@ def _evidence(scorer: str, score: float, *, skipped: bool = False) -> Evidence:
         skipped=skipped,
         decisive=False,
         features=(),
+        note=note,
     )
 
 
@@ -228,6 +235,24 @@ def test_evidence_sources_payload_returns_empty_when_sources_misaligned() -> Non
 def test_evidence_sources_payload_returns_empty_when_sources_omitted() -> None:
     payload = _evidence_sources_payload((_evidence("title.token_set", 0.9),), ())
     assert payload == {}
+
+
+def test_evidence_sources_payload_overrides_note_with_alias_breadcrumb() -> None:
+    """An Evidence with ``note`` set surfaces ``imprint alias → <note>``."""
+    payload = _evidence_sources_payload(
+        (_evidence("name.publisher", 0.95, note="McGraw-Hill Book Company"),),
+        (("publisher", "publishers"),),
+    )
+    assert payload == {"name.publisher": "imprint alias → McGraw-Hill Book Company"}
+
+
+def test_evidence_sources_payload_note_wins_over_empty_field_pair() -> None:
+    """A note-bearing Evidence reaches the card even with sentinel sources."""
+    payload = _evidence_sources_payload(
+        (_evidence("name.publisher", 0.95, note="Doubleday & Company"),),
+        (("", ""),),
+    )
+    assert payload == {"name.publisher": "imprint alias → Doubleday & Company"}
 
 
 def test_iter_language_dirs_yields_only_subdirs(tmp_path: Path) -> None:

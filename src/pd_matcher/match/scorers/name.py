@@ -125,12 +125,13 @@ def score_publisher(
         ctx: Per-record scorer context. When ``alias_index`` is ``None``
             and ``ctx.publisher_alias_index`` is populated, the latter is
             used instead.
-        alias_index: Optional explicit ``{normalized_name: normalized_canonical}``
+        alias_index: Optional explicit ``{normalized_name: human_canonical}``
             lookup. When supplied (or available on ``ctx``), both sides
             are run through :func:`normalize_publisher` and resolved; on
             a canonical hit the returned score is at least
             :data:`_ALIAS_HIT_FLOOR`, leaving fuzzy-or-higher scores
-            unchanged.
+            unchanged, and the canonical house name is stamped on
+            :attr:`pd_matcher.match.evidence.Evidence.note`.
     """
     base = _evidence(
         _PUBLISHER_SCORER,
@@ -159,6 +160,7 @@ def score_publisher(
         decisive=base.decisive,
         features=base.features,
         weight_multiplier=base.weight_multiplier,
+        note=marc_canonical,
     )
 
 

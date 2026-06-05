@@ -113,6 +113,7 @@ def _evidence_payload(evidence: tuple[Evidence, ...]) -> dict[str, float]:
 
 
 _SOURCE_SEPARATOR: str = " ↔ "
+_ALIAS_NOTE_PREFIX: str = "imprint alias → "
 
 
 def _evidence_sources_payload(
@@ -128,12 +129,22 @@ def _evidence_sources_payload(
     between ``evidence`` and ``sources`` (e.g. an Evidence tuple from a
     pre-#50 cache) collapses to an empty payload so the persisted column is
     still valid JSON.
+
+    Evidence whose :attr:`Evidence.note` is set has its source string
+    replaced with ``"imprint alias → <note>"`` so the review UI surfaces
+    the alias breadcrumb (e.g. ``"imprint alias → McGraw-Hill Book
+    Company"``) instead of the bare field pair. The override applies
+    even when the field-pair sentinel is empty, so a note-bearing
+    Evidence always reaches the card.
     """
     if len(sources) != len(evidence):
         return {}
     payload: dict[str, str] = {}
     for ev, source in zip(evidence, sources, strict=True):
         if ev.skipped:
+            continue
+        if ev.note:
+            payload[ev.scorer] = f"{_ALIAS_NOTE_PREFIX}{ev.note}"
             continue
         marc_field, cce_field = source
         if not marc_field or not cce_field:
