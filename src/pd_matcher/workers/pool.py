@@ -23,6 +23,7 @@ from multiprocessing.synchronize import Event as EventType
 from os import cpu_count
 from pathlib import Path
 from time import monotonic
+from typing import Protocol
 
 from msgspec import Struct
 from structlog import get_logger
@@ -60,6 +61,36 @@ class RunReport(Struct, frozen=True, forbid_unknown_fields=True):
     records_enqueued: int
     duration_seconds: float
     interrupted: bool
+
+
+class _TerminableProcess(Protocol):
+    """Subset of :class:`SpawnProcess` used by :func:`_terminate_if_alive`."""
+
+    def is_alive(self) -> bool: ...  # pragma: no cover
+    def terminate(self) -> None: ...  # pragma: no cover
+    def kill(self) -> None: ...  # pragma: no cover
+    def join(self, timeout: float | None = ...) -> None: ...  # pragma: no cover
+
+
+def _terminate_if_alive(process: _TerminableProcess, timeout: float) -> None:
+    """Escalate shutdown so atexit has no live children to block on.
+
+    A bounded ``join`` in the happy path can fall through with the child
+    still alive (e.g. a writer stuck on its ``QueueFeederThread`` because
+    nothing is reading the stats pipe any more). When ``run_match``
+    returns, ``multiprocessing.util._exit_function`` joins every surviving
+    child *without a timeout* in atexit — which is the hang reported in
+    issue #69. Escalating here (terminate → join → kill → join) ensures
+    every child is reaped before the function returns.
+    """
+    if not process.is_alive():
+        return
+    process.terminate()
+    process.join(timeout=timeout)
+    if not process.is_alive():
+        return
+    process.kill()
+    process.join()
 
 
 def _default_workers() -> int:
@@ -337,8 +368,10 @@ def run_match(
             input_queue.put(None)
         for process in worker_processes:
             process.join(timeout=_WORKER_JOIN_TIMEOUT_SECONDS)
+            _terminate_if_alive(process, _WORKER_JOIN_TIMEOUT_SECONDS)
         output_queue.put(None)
         writer_process.join(timeout=_WORKER_JOIN_TIMEOUT_SECONDS)
+        _terminate_if_alive(writer_process, _WORKER_JOIN_TIMEOUT_SECONDS)
         stats_queue.put(encode_stats_event(ShutdownEvent(reason="completed")))
     snapshot = reporter.totals.snapshot()
     duration = monotonic() - started_at
