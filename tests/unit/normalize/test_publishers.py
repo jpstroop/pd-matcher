@@ -83,22 +83,20 @@ def test_normalize_publisher_keeps_alphanumeric_tokens() -> None:
 
 
 def test_build_alias_index_maps_imprint_to_parent_canonical() -> None:
-    """``Whittlesey House`` resolves to the McGraw-Hill canonical form."""
+    """``Whittlesey House`` resolves to the McGraw-Hill human canonical."""
     table = load_publisher_table(DEFAULT_PUBLISHER_TABLE_PATH)
     index = build_alias_index(table)
     whittlesey = normalize_publisher("Whittlesey House")
-    mcgraw = normalize_publisher("McGraw-Hill Book Company")
     assert whittlesey in index
-    assert index[whittlesey] == mcgraw
+    assert index[whittlesey] == "McGraw-Hill Book Company"
 
 
 def test_build_alias_index_maps_alias_to_canonical() -> None:
-    """``Aldus Books`` (an imprint) resolves to the Doubleday canonical."""
+    """``Aldus Books`` (an imprint) resolves to the Doubleday human canonical."""
     table = load_publisher_table(DEFAULT_PUBLISHER_TABLE_PATH)
     index = build_alias_index(table)
     aldus = normalize_publisher("Aldus Books")
-    doubleday = normalize_publisher("Doubleday & Company")
-    assert index[aldus] == doubleday
+    assert index[aldus] == "Doubleday & Company"
 
 
 def test_build_alias_index_maps_clarendon_to_oxford() -> None:
@@ -106,18 +104,17 @@ def test_build_alias_index_maps_clarendon_to_oxford() -> None:
     table = load_publisher_table(DEFAULT_PUBLISHER_TABLE_PATH)
     index = build_alias_index(table)
     clarendon = normalize_publisher("Clarendon Press")
-    oxford = normalize_publisher("Oxford University Press")
-    assert index[clarendon] == oxford
+    assert index[clarendon] == "Oxford University Press"
 
 
 def test_build_alias_index_includes_canonicals_themselves() -> None:
-    """Each canonical form maps to itself."""
+    """Each canonical form maps to its human-readable entry name."""
     table = load_publisher_table(DEFAULT_PUBLISHER_TABLE_PATH)
     index = build_alias_index(table)
     for entry in table.publishers:
         canonical_key = normalize_publisher(entry.canonical)
         if canonical_key:
-            assert index[canonical_key] == canonical_key
+            assert index[canonical_key] == entry.canonical
 
 
 def test_build_alias_index_skips_empty_canonical_entries() -> None:
@@ -150,7 +147,7 @@ def test_build_alias_index_skips_empty_alias_keys() -> None:
     )
     index = build_alias_index(table)
     canonical_key = normalize_publisher("Real House")
-    assert index == {canonical_key: canonical_key}
+    assert index == {canonical_key: "Real House"}
 
 
 def test_bundled_canonicals_are_unique() -> None:
@@ -179,5 +176,4 @@ def test_get_default_alias_index_contains_known_pairs() -> None:
     """The cached default index resolves the analytical-pass anchors."""
     index = get_default_alias_index()
     whittlesey = normalize_publisher("Whittlesey House")
-    mcgraw = normalize_publisher("McGraw-Hill Book Company")
-    assert index[whittlesey] == mcgraw
+    assert index[whittlesey] == "McGraw-Hill Book Company"

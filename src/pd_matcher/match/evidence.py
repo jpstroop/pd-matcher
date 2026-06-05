@@ -37,6 +37,12 @@ class Evidence(Struct, frozen=True, forbid_unknown_fields=True):
             -cutting signals (e.g. translation-aware author downweight)
             adjust one scorer's contribution to the weighted mean
             without inventing a new scorer or weight.
+        note: Optional short string a scorer can emit to annotate why it
+            produced the score it did. Surfaced verbatim in the review
+            UI's per-scorer evidence breadcrumb. Currently used by
+            :func:`pd_matcher.match.scorers.name.score_publisher` to
+            record the canonical house when a curated alias hit fires
+            (e.g. ``"McGraw-Hill"`` on a Whittlesey/McGraw-Hill pair).
     """
 
     scorer: str
@@ -46,6 +52,7 @@ class Evidence(Struct, frozen=True, forbid_unknown_fields=True):
     decisive: bool
     features: tuple[tuple[str, float], ...]
     weight_multiplier: float = 1.0
+    note: str | None = None
 
     @property
     def normalized(self) -> float:

@@ -285,3 +285,39 @@ def test_get_default_alias_index_resolves_anchor_pairs(
         alias_index=index,
     )
     assert ev.score >= 95.0
+
+
+def test_score_publisher_alias_hit_stamps_canonical_on_note(
+    scorer_context: ScorerContext,
+    alias_index: dict[str, str],
+) -> None:
+    """An alias-lifted Evidence carries the human canonical on ``note``."""
+    ev = score_publisher(
+        "Whittlesey House",
+        "McGraw-Hill Book Company",
+        scorer_context,
+        alias_index=alias_index,
+    )
+    assert ev.note == "McGraw-Hill Book Company"
+
+
+def test_score_publisher_no_alias_hit_leaves_note_none(
+    scorer_context: ScorerContext,
+) -> None:
+    """The legacy fuzzy path emits ``note=None`` (no breadcrumb to surface)."""
+    ev = score_publisher("Whittlesey House", "McGraw-Hill", scorer_context)
+    assert ev.note is None
+
+
+def test_score_publisher_perfect_match_does_not_overwrite_note(
+    scorer_context: ScorerContext,
+    alias_index: dict[str, str],
+) -> None:
+    """A perfect literal match short-circuits before the note-stamping path."""
+    ev = score_publisher(
+        "McGraw-Hill Book Company",
+        "McGraw-Hill Book Company",
+        scorer_context,
+        alias_index=alias_index,
+    )
+    assert ev.note is None

@@ -156,30 +156,38 @@ def build_alias_index(table: PublisherTable) -> dict[str, str]:
     """Flatten every canonical / alias / imprint name into a lookup dict.
 
     Each key is the *normalized* form of a name (via
-    :func:`normalize_publisher`) and each value is the *normalized*
-    canonical of the owning :class:`PublisherEntry`. Empty normalized
-    forms are skipped so a stopword-only alias cannot poison the table.
+    :func:`normalize_publisher`); each value is the *human-readable*
+    canonical (``entry.canonical`` verbatim) of the owning
+    :class:`PublisherEntry`. Empty normalized forms are skipped so a
+    stopword-only alias cannot poison the table. Two keys collide iff
+    they belong to the same publisher entry, so equality of looked-up
+    values remains a valid "same canonical house" test.
+
+    The value carries the human form (rather than the normalized form)
+    so the publisher scorer can surface it verbatim in
+    :attr:`pd_matcher.match.evidence.Evidence.note` for the review UI's
+    per-scorer breadcrumb.
 
     Args:
         table: A loaded :class:`PublisherTable`.
 
     Returns:
-        A ``{normalized_name: normalized_canonical}`` dict.
+        A ``{normalized_name: human_canonical}`` dict.
     """
     index: dict[str, str] = {}
     for entry in table.publishers:
         canonical_key = normalize_publisher(entry.canonical)
         if not canonical_key:
             continue
-        index[canonical_key] = canonical_key
+        index[canonical_key] = entry.canonical
         for alias in entry.aliases:
             alias_key = normalize_publisher(alias)
             if alias_key:
-                index[alias_key] = canonical_key
+                index[alias_key] = entry.canonical
         for imprint in entry.imprints:
             imprint_key = normalize_publisher(imprint.name)
             if imprint_key:
-                index[imprint_key] = canonical_key
+                index[imprint_key] = entry.canonical
     return index
 
 

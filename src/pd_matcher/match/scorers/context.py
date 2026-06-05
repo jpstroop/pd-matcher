@@ -26,9 +26,12 @@ class ScorerContext(Struct, frozen=True, forbid_unknown_fields=True):
         stemmer: Single-token stemmer callable for ``language``.
         idf: IDF table built once over the NYPL corpus.
         config: The active :class:`MatchingConfig`.
-        publisher_alias_index: Optional ``{normalized_name: normalized_canonical}``
+        publisher_alias_index: Optional ``{normalized_name: human_canonical}``
             lookup used by the publisher scorer to lift the score on
-            curated imprint / alias hits. ``None`` disables the alias path.
+            curated imprint / alias hits. The value is the human-readable
+            canonical (e.g. ``"McGraw-Hill Book Company"``) so it can be
+            surfaced verbatim in the review UI. ``None`` disables the
+            alias path.
     """
 
     language: str
