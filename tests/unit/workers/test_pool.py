@@ -26,6 +26,7 @@ from pd_matcher.workers.pool import _build_csv_writer
 from pd_matcher.workers.pool import _default_workers
 from pd_matcher.workers.pool import _resolve_source
 from pd_matcher.workers.pool import _shutdown_predicate
+from pd_matcher.workers.pool import _terminate_if_alive
 from pd_matcher.workers.pool import _worker_entry
 from pd_matcher.workers.pool import _writer_entry
 from pd_matcher.workers.pool import run_match
@@ -201,6 +202,58 @@ def test_resolve_source_returns_prepared_iterator(tmp_path: Path) -> None:
     prepare_marc(_FIXTURES / "tiny.marcxml", prepared, chunk_size=3)
     records = list(_resolve_source(None, prepared))
     assert records == list(iter_marc_records(_FIXTURES / "tiny.marcxml"))
+
+
+class _FakeProcess:
+    """Stand-in for :class:`SpawnProcess` used by ``_terminate_if_alive`` tests.
+
+    ``alive_sequence`` drives successive ``is_alive`` answers so a single
+    test can model the live → terminate → dead transitions deterministically.
+    """
+
+    __slots__ = ("_index", "alive_sequence", "calls")
+
+    def __init__(self, alive_sequence: list[bool]) -> None:
+        self.alive_sequence: list[bool] = alive_sequence
+        self.calls: list[tuple[str, float | None]] = []
+        self._index: int = 0
+
+    def is_alive(self) -> bool:
+        value = self.alive_sequence[self._index]
+        self._index += 1
+        return value
+
+    def terminate(self) -> None:
+        self.calls.append(("terminate", None))
+
+    def kill(self) -> None:
+        self.calls.append(("kill", None))
+
+    def join(self, timeout: float | None = None) -> None:
+        self.calls.append(("join", timeout))
+
+
+def test_terminate_if_alive_noop_when_already_exited() -> None:
+    process = _FakeProcess(alive_sequence=[False])
+    _terminate_if_alive(process, timeout=5.0)
+    assert process.calls == []
+
+
+def test_terminate_if_alive_terminates_then_returns_when_join_succeeds() -> None:
+    process = _FakeProcess(alive_sequence=[True, False])
+    _terminate_if_alive(process, timeout=5.0)
+    assert process.calls == [("terminate", None), ("join", 5.0)]
+
+
+def test_terminate_if_alive_escalates_to_kill_when_terminate_does_not_take() -> None:
+    process = _FakeProcess(alive_sequence=[True, True])
+    _terminate_if_alive(process, timeout=5.0)
+    assert process.calls == [
+        ("terminate", None),
+        ("join", 5.0),
+        ("kill", None),
+        ("join", None),
+    ]
 
 
 def test_run_match_consumes_prepared_chunks(
