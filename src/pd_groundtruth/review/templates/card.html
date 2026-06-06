@@ -80,6 +80,26 @@
     {% if card.cce_renewal_id %}<span>ren id <code>{{ card.cce_renewal_id }}</code></span>{% endif %}
   </div>
 
+  <section class="panel evidence">
+    <h2>Evidence (per-scorer normalized)</h2>
+    {% if card.evidence %}
+      <div class="ev-grid">
+      {% for ev in card.evidence %}
+      <div class="ev-entry">
+        <div class="ev-row">
+          <span>{{ ev.scorer }}</span>
+          <span class="ev-bar"><span class="ev-fill" style="width: {{ (ev.normalized * 100) | round(1) }}%"></span></span>
+          <span class="ev-score">{{ "%.2f"|format(ev.normalized) }}</span>
+        </div>
+        {% if ev.source %}<div class="ev-source-row"><span class="ev-source">via {{ ev.source }}</span></div>{% endif %}
+      </div>
+      {% endfor %}
+      </div>
+    {% else %}
+      <p class="hint">No per-scorer evidence recorded for this pair.</p>
+    {% endif %}
+  </section>
+
   <div class="comparison-grid">
     <section class="panel">
       <h2>MARC (Princeton)</h2>
@@ -180,24 +200,6 @@
       </div>
     </section>
   </div>
-
-  <section class="panel evidence">
-    <h2>Evidence (per-scorer normalized)</h2>
-    {% if card.evidence %}
-      {% for ev in card.evidence %}
-      <div class="ev-entry">
-        <div class="ev-row">
-          <span>{{ ev.scorer }}</span>
-          <span class="ev-bar"><span class="ev-fill" style="width: {{ (ev.normalized * 100) | round(1) }}%"></span></span>
-          <span class="ev-score">{{ "%.2f"|format(ev.normalized) }}</span>
-        </div>
-        {% if ev.source %}<div class="ev-source-row"><span class="ev-source">via {{ ev.source }}</span></div>{% endif %}
-      </div>
-      {% endfor %}
-    {% else %}
-      <p class="hint">No per-scorer evidence recorded for this pair.</p>
-    {% endif %}
-  </section>
 
 </form>
 <p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}{% if forward_id is not none %} · <strong>f</strong> or <strong>&rarr;</strong> forward{% endif %}. The note field captures whatever you think is worth flagging about the pair; accumulated notes will be analyzed later to surface patterns.</p>
