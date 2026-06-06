@@ -73,14 +73,29 @@
     .cce-new-matter { font-style: italic; }
     .cce-notes { margin: .2rem 0 0; padding-left: 1.2rem; }
     .cce-notes li { margin: .15rem 0; }
-    .evidence { margin-top: 1rem; }
-    .ev-entry { margin: .3rem 0; }
-    .ev-row { display: grid; grid-template-columns: 180px 1fr auto; gap: .6rem;
-              align-items: center; font-size: .85rem; }
-    .ev-bar { display: block; width: 100%; background: #ececef; border-radius: 5px; height: 12px; overflow: hidden; }
+    .evidence { margin: .2rem 0 .8rem; padding: .5rem .75rem;
+                background: #fafafa; border: 1px solid var(--line);
+                border-radius: 10px; }
+    .evidence h2 { font-size: .82rem; margin: 0 0 .35rem;
+                   text-transform: uppercase; letter-spacing: .06em;
+                   color: var(--muted); font-weight: 600; }
+    .ev-grid { display: grid;
+               grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+               gap: .15rem .9rem; }
+    .ev-entry { min-width: 0; }
+    .ev-row { display: grid;
+              grid-template-columns: minmax(0, max-content) minmax(30px, 1fr) auto;
+              gap: .45rem; align-items: center; font-size: .78rem;
+              line-height: 1.3; }
+    .ev-row > span:first-child { white-space: nowrap; overflow: hidden;
+                                 text-overflow: ellipsis; }
+    .ev-bar { display: block; width: 100%; background: #ececef;
+              border-radius: 4px; height: 8px; overflow: hidden; }
     .ev-fill { display: block; background: var(--accent); height: 100%; min-width: 1px; }
-    .ev-score { white-space: nowrap; font-variant-numeric: tabular-nums; }
-    .ev-source-row { padding-left: calc(180px + .6rem); font-size: .8rem; line-height: 1.25; margin-top: .1rem; }
+    .ev-score { white-space: nowrap; font-variant-numeric: tabular-nums;
+                font-size: .76rem; color: var(--muted); }
+    .ev-source-row { padding-left: .8rem; font-size: .72rem;
+                     line-height: 1.2; margin: 0 0 .15rem; }
     .ev-source { color: var(--muted); font-style: italic; }
     .action-bar { position: sticky; top: var(--header-h); z-index: 10;
                   background: var(--bg); padding: .8rem 1.2rem;
