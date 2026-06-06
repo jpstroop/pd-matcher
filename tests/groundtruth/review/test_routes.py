@@ -360,7 +360,7 @@ def test_index_language_filter_selects_french(client: TestClient) -> None:
 
 def test_label_writes_row_and_redirects(client: TestClient) -> None:
     card = client.get("/")
-    assert "pair #1" in card.text
+    assert "pair #<strong>1</strong>" in card.text
     response = client.post(
         "/label",
         data={"pair_id": "1", "verdict": "match", "language": "eng"},
@@ -1226,8 +1226,8 @@ def test_card_renders_filter_bar_with_language_and_band_selects(client: TestClie
     response = client.get("/")
     assert response.status_code == 200
     assert '<form class="filters-bar" method="get" action="/">' in response.text
-    assert '<select name="language">' in response.text
-    assert '<select name="band">' in response.text
+    assert '<select name="language"' in response.text
+    assert '<select name="band"' in response.text
     for choice in ("eng", "fre", "ger", "spa", "ita"):
         assert f'<option value="{choice}">{choice}</option>' in response.text
     for choice in ("ge90", "b80_90", "b70_80", "b60_70", "below"):
@@ -1237,7 +1237,7 @@ def test_card_renders_filter_bar_with_language_and_band_selects(client: TestClie
 def test_card_filter_bar_renders_b60_70_between_b70_80_and_below(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
-    band_section = response.text.split('<select name="band">')[1].split("</select>")[0]
+    band_section = response.text.split('<select name="band"')[1].split("</select>")[0]
     b70_index = band_section.index('value="b70_80"')
     b60_index = band_section.index('value="b60_70"')
     below_index = band_section.index('value="below"')
@@ -1281,8 +1281,8 @@ def test_empty_queue_renders_filter_bar(empty_client: TestClient) -> None:
     assert response.status_code == 200
     assert "All done" in response.text
     assert '<form class="filters-bar" method="get" action="/">' in response.text
-    assert '<select name="language">' in response.text
-    assert '<select name="band">' in response.text
+    assert '<select name="language"' in response.text
+    assert '<select name="band"' in response.text
 
 
 def test_empty_queue_filter_bar_marks_selected_filters(empty_client: TestClient) -> None:

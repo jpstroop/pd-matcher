@@ -1,26 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
 <form class="filters-bar" method="get" action="/">
-  <label>
-    <span>language</span>
-    <select name="language">
-      <option value="">any</option>
-      {% for choice in language_choices %}
-      <option value="{{ choice }}"{% if filters.language == choice %} selected{% endif %}>{{ choice }}</option>
-      {% endfor %}
-    </select>
-  </label>
-  <label>
-    <span>band</span>
-    <select name="band">
-      <option value="">any</option>
-      {% for choice in band_choices %}
-      <option value="{{ choice }}"{% if filters.band == choice %} selected{% endif %}>{{ choice }}</option>
-      {% endfor %}
-    </select>
-  </label>
+  <select name="language" aria-label="language filter">
+    <option value="">any language</option>
+    {% for choice in language_choices %}
+    <option value="{{ choice }}"{% if filters.language == choice %} selected{% endif %}>{{ choice }}</option>
+    {% endfor %}
+  </select>
+  <select name="band" aria-label="band filter">
+    <option value="">any band</option>
+    {% for choice in band_choices %}
+    <option value="{{ choice }}"{% if filters.band == choice %} selected{% endif %}>{{ choice }}</option>
+    {% endfor %}
+  </select>
   <button type="submit">Filter</button>
   {% if filters.language or filters.band %}<a class="clear" href="/">Clear</a>{% endif %}
+  <span class="pair-context">
+    <span class="lang-chip">{{ card.language }}</span>
+    <span class="band">{{ card.band }}</span>
+    {% if card.decade is not none %}<span>{{ card.decade }}s</span>{% endif %}
+  </span>
 </form>
 {% if back_id is not none or forward_id is not none %}
 <div class="nav-row">
@@ -50,55 +49,43 @@
       <button type="button" class="unsure{% if card.current_verdict == 'unsure' %} current{% endif %}" data-verdict="unsure">Unsure (u)</button>
       <button type="button" class="skip" data-verdict="">Skip (s / space)</button>
     </div>
-    <div class="note-block">
-      <textarea name="note" id="note-field" rows="2" autocomplete="off"
+  </div>
+
+  <div class="above-cards">
+    <div class="above-cards-left">
+      <textarea name="note" id="note-field" autocomplete="off"
                 placeholder="Note (optional) — capture anything notable about this pair">{{ card.note or "" }}</textarea>
+      <div class="category-bar">
+        {%- for key, label in category_choices %}
+        <label class="category-checkbox">
+          <input type="checkbox" name="categories" value="{{ key }}"
+                 {% if key in current_categories %}checked{% endif %}>
+          {{ label }}
+        </label>
+        {%- endfor %}
+      </div>
     </div>
-  </div>
 
-  <div class="category-bar">
-    {%- for key, label in category_choices %}
-    <label class="category-checkbox">
-      <input type="checkbox" name="categories" value="{{ key }}"
-             {% if key in current_categories %}checked{% endif %}>
-      {{ label }}
-    </label>
-    {%- endfor %}
+    <section class="panel evidence">
+      <h2><span class="ev-heading-score">{{ "%.3f"|format(card.score) }}</span></h2>
+      {% if card.evidence %}
+        <ul class="ev-list">
+        {% for ev in card.evidence %}
+        <li class="ev-entry">
+          <div class="ev-row">
+            <span class="ev-label">{{ ev.scorer }}</span>
+            <span class="ev-bar"><span class="ev-fill" style="width: {{ (ev.normalized * 100) | round(1) }}%"></span></span>
+            <span class="ev-score">{{ "%.2f"|format(ev.normalized) }}</span>
+          </div>
+          {% if ev.source %}<div class="ev-source-row"><span class="ev-source">via {{ ev.source }}</span></div>{% endif %}
+        </li>
+        {% endfor %}
+        </ul>
+      {% else %}
+        <p class="hint">No per-scorer evidence recorded for this pair.</p>
+      {% endif %}
+    </section>
   </div>
-
-  <div class="meta">
-    <span class="score">{{ "%.3f"|format(card.score) }}</span>
-    <span class="band">{{ card.band }}</span>
-    <span>lang {{ card.language }}</span>
-    {% if card.decade is not none %}<span>{{ card.decade }}s</span>{% endif %}
-    <span>pair #{{ card.pair_id }}</span>
-  </div>
-
-  <div class="ids">
-    <span>marc <code>{{ card.marc_control_id }}</code></span>
-    <span>reg id <code>{{ card.nypl_uuid }}</code></span>
-    {% if card.cce_renewal_id %}<span>ren id <code>{{ card.cce_renewal_id }}</code></span>{% endif %}
-  </div>
-
-  <section class="panel evidence">
-    <h2>Evidence (per-scorer normalized)</h2>
-    {% if card.evidence %}
-      <div class="ev-grid">
-      {% for ev in card.evidence %}
-      <div class="ev-entry">
-        <div class="ev-row">
-          <span>{{ ev.scorer }}</span>
-          <span class="ev-bar"><span class="ev-fill" style="width: {{ (ev.normalized * 100) | round(1) }}%"></span></span>
-          <span class="ev-score">{{ "%.2f"|format(ev.normalized) }}</span>
-        </div>
-        {% if ev.source %}<div class="ev-source-row"><span class="ev-source">via {{ ev.source }}</span></div>{% endif %}
-      </div>
-      {% endfor %}
-      </div>
-    {% else %}
-      <p class="hint">No per-scorer evidence recorded for this pair.</p>
-    {% endif %}
-  </section>
 
   <div class="comparison-grid">
     <section class="panel">
@@ -202,6 +189,11 @@
   </div>
 
 </form>
+<div class="card-ids">
+  <span>marc <code>{{ card.marc_control_id }}</code></span>
+  <span>reg <code>{{ card.nypl_uuid }}</code></span>
+  {% if card.cce_renewal_id %}<span>ren <code>{{ card.cce_renewal_id }}</code></span>{% endif %}
+</div>
 <p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}{% if forward_id is not none %} · <strong>f</strong> or <strong>&rarr;</strong> forward{% endif %}. The note field captures whatever you think is worth flagging about the pair; accumulated notes will be analyzed later to surface patterns.</p>
 
 <script>
