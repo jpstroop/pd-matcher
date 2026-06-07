@@ -27,7 +27,7 @@ def test_load_shipped_matching_defaults() -> None:
     assert cfg.extent_weight == 0.05
     assert cfg.volume_weight == 0.05
     assert cfg.year_window == 0
-    assert cfg.min_combined_score == 70.0
+    assert cfg.min_combined_score == 50.0
     assert cfg.scorer == "weighted_mean"
 
 
