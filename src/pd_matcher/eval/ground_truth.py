@@ -48,6 +48,7 @@ from pd_matcher.eval.metrics import average_precision
 from pd_matcher.eval.metrics import roc_auc
 from pd_matcher.eval.metrics import threshold_sweep
 from pd_matcher.index.lookup import NyplIndexLookup
+from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import build_idf_table
@@ -146,6 +147,7 @@ def _run_pass_a(
     idf: IdfTable,
     pairings: CompiledPairings,
     matching_config: MatchingConfig,
+    calibrator: PlattCalibrator | None,
 ) -> tuple[list[tuple[float, int]], int, int, int, int]:
     """Score every kept vault entry; return scored pairs plus skip totals.
 
@@ -158,7 +160,7 @@ def _run_pass_a(
         matching_config=matching_config,
         pairings=pairings,
         idf=idf,
-        calibrator=None,
+        calibrator=calibrator,
     )
     scored: list[tuple[float, int]] = []
     positives = 0
@@ -203,6 +205,7 @@ def _run_pass_b(
     idf: IdfTable,
     pairings: CompiledPairings,
     matching_config: MatchingConfig,
+    calibrator: PlattCalibrator | None,
 ) -> tuple[int, int, int]:
     """Run per-MARC linkage; return ``(evaluated, with_top, correct_top)``."""
     combiner = WeightedMeanCombiner(config=matching_config)
@@ -224,7 +227,7 @@ def _run_pass_b(
             lookup=lookup,
             config=matching_config,
             idf=idf,
-            calibrator=None,
+            calibrator=calibrator,
             combiner=combiner,
             pairings=pairings,
         )
@@ -243,6 +246,7 @@ def run_eval(
     index_path: Path,
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
+    calibrator: PlattCalibrator | None = None,
 ) -> EvalReport:
     """Evaluate the matcher pipeline against the vault.
 
@@ -258,6 +262,9 @@ def run_eval(
             as the production matcher applies it.
         pairing_config: Active :class:`PairingConfig`; compiled once
             and reused across both passes.
+        calibrator: Optional Platt calibrator threaded through both
+            passes; ``None`` uses the linear pass-through (raw / 100)
+            from :class:`~pd_matcher.match.combiners.weighted_mean.WeightedMeanCombiner`.
 
     Returns:
         A populated :class:`EvalReport`.
@@ -278,6 +285,7 @@ def run_eval(
             idf=idf,
             pairings=pairings,
             matching_config=matching_config,
+            calibrator=calibrator,
         )
         marcs_evaluated, marcs_with_top, marcs_correct = _run_pass_b(
             ground_truth,
@@ -286,6 +294,7 @@ def run_eval(
             idf=idf,
             pairings=pairings,
             matching_config=matching_config,
+            calibrator=calibrator,
         )
     pairs_evaluated = positives + negatives
     if scored:

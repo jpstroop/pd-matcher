@@ -608,6 +608,7 @@ def eval_(
         pairing_config = _load_default_pairing_config()
     except ConfigError as exc:
         raise _fail(f"failed to load pairing defaults: {exc}") from exc
+    calibrator = _load_calibrator(index.parent)
     try:
         eval_report = run_eval(
             vault_path=vault,
@@ -615,6 +616,7 @@ def eval_(
             index_path=index,
             matching_config=matching_config,
             pairing_config=pairing_config,
+            calibrator=calibrator,
         )
     except OSError as exc:
         raise _fail(f"eval run failed: {exc}") from exc
