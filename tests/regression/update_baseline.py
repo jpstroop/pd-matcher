@@ -14,6 +14,7 @@ from pathlib import Path
 
 from msgspec import to_builtins
 
+from pd_matcher.cli import _load_calibrator
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
 from pd_matcher.config.schemas import MatchingConfig
@@ -62,12 +63,14 @@ def main() -> None:
         scorer=base_matching.scorer,
     )
     pairing_config = _load_default_pairing_config()
+    calibrator = _load_calibrator(_INDEX_PATH.parent)
     report = run_eval(
         vault_path=vault_path,
         pool_path=pool_path,
         index_path=_INDEX_PATH,
         matching_config=matching_config,
         pairing_config=pairing_config,
+        calibrator=calibrator,
     )
     params = BaselineParams(
         vault=_VAULT,

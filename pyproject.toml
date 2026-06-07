@@ -60,6 +60,7 @@ test = "pytest"
 webui = "pytest -m webui -o addopts= --no-header"
 regression = "pytest -s -m regression --no-cov tests/regression"
 regression-baseline = "python tests/regression/update_baseline.py"
+fit-calibrator = "python scripts/fit_calibrator.py"
 gates = {composite = ["fmt", "lint", "typecheck", "test"]}
 
 [tool.pdm.build]
