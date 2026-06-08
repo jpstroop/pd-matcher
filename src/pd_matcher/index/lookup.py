@@ -153,14 +153,19 @@ class NyplIndexLookup:
     def _token_candidates(self, marc: MarcRecord) -> set[str]:
         """Return the union of every registration sharing a query token.
 
-        Title tokens come from ``marc.title``; author tokens from both
-        ``marc.main_author`` and ``marc.statement_of_responsibility``;
+        Title tokens come from ``marc.title`` and every entry in
+        ``marc.title_variants`` (MARC 246 varying-form-of-title, restricted
+        to CCE-likely second indicators by the parser); author tokens come
+        from both ``marc.main_author`` and ``marc.statement_of_responsibility``;
         publisher tokens from ``marc.publisher``. Each token's posting list
         is fetched from the matching inverted sub-DB and unioned together.
         """
         candidates: set[str] = set()
         for token in title_keys(marc.title):
             candidates.update(self._postings(self._store.title_index, token))
+        for variant in marc.title_variants:
+            for token in title_keys(variant):
+                candidates.update(self._postings(self._store.title_index, token))
         author_tokens = author_keys(marc.main_author) | author_keys(
             marc.statement_of_responsibility
         )
