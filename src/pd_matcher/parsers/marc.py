@@ -34,6 +34,15 @@ _YEAR_MIN = 1450
 _YEAR_MAX = 2050
 _OCLC_PREFIX = "(OCoLC)"
 
+# 246 second indicator subset that prevalence audit identified as CCE-likely
+# variants worth indexing/scoring. See
+# ``docs/findings/marc_246_prevalence_2026-06-08.md``. Excluded:
+#   1 (parallel title — language variant, not a re-titled work)
+#   5, 6 (added title page / caption — vanishingly rare, ~0.057%)
+#   blank (cataloger noise / unspecified)
+_CCE_LIKELY_246_IND2: frozenset[str] = frozenset({"0", "2", "3", "4", "7", "8"})
+_TITLE_VARIANT_CAP = 3
+
 _LOGGER = getLogger(__name__)
 
 
@@ -159,6 +168,7 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
     pub_date_raw: str | None = None
     extent: str | None = None
     series_titles: list[str] = []
+    title_variants_raw: list[str] = []
 
     for child in record_elem:
         if child.tag == _CONTROLFIELD_TAG:
@@ -211,6 +221,19 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
                 extent = _first_subfield(child, "a")
         elif tag in {"440", "490", "830"}:
             series_titles.extend(_subfield_texts(child, "a"))
+        elif tag == "246":
+            ind2 = child.get("ind2") or ""
+            if ind2 in _CCE_LIKELY_246_IND2:
+                variant_a = _first_subfield(child, "a")
+                if variant_a is not None:
+                    cleaned_a = _clean(variant_a, stats)
+                    if cleaned_a is not None:
+                        variant_b = _first_subfield(child, "b")
+                        cleaned_b = _clean(variant_b, stats)
+                        if cleaned_b is None:
+                            title_variants_raw.append(cleaned_a)
+                        else:
+                            title_variants_raw.append(f"{cleaned_a} {cleaned_b}")
         elif tag == "700":
             added_authors.extend(_subfield_texts(child, "a"))
 
@@ -237,6 +260,7 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
         title_main=cleaned_title_a,
         title_part_number=_clean(title_n, stats),
         title_part_name=_clean(title_p, stats),
+        title_variants=tuple(title_variants_raw[:_TITLE_VARIANT_CAP]),
         lccn=_clean(lccn, stats),
         oclc=oclc,
         isbns=tuple(
