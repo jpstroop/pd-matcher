@@ -23,6 +23,7 @@ def _marc(
     publisher: str | None = None,
     title_part_number: str | None = None,
     title_part_name: str | None = None,
+    title_variants: tuple[str, ...] = (),
 ) -> MarcRecord:
     return MarcRecord(
         control_id="m",
@@ -34,6 +35,7 @@ def _marc(
         publisher=publisher,
         title_part_number=title_part_number,
         title_part_name=title_part_name,
+        title_variants=title_variants,
     )
 
 
@@ -430,6 +432,36 @@ def test_compile_title_with_parts_and_sor_pairing_concatenates_all_parts() -> No
         )
         == "The history Part 2 The later years by Jane Doe"
     )
+
+
+def test_marc_registry_exposes_title_variant_1_when_present() -> None:
+    """``title_variant_1`` returns slot 0 as a singleton tuple."""
+    assert MARC_FIELDS["title_variant_1"](_marc(title_variants=("first",))) == ("first",)
+
+
+def test_marc_registry_title_variant_1_is_empty_when_absent() -> None:
+    """``title_variant_1`` returns ``()`` when no variants are present."""
+    assert MARC_FIELDS["title_variant_1"](_marc(title_variants=())) == ()
+
+
+def test_marc_registry_exposes_title_variant_2_when_present() -> None:
+    """``title_variant_2`` returns slot 1 as a singleton tuple."""
+    assert MARC_FIELDS["title_variant_2"](_marc(title_variants=("first", "second"))) == ("second",)
+
+
+def test_marc_registry_title_variant_2_is_empty_when_only_one_variant() -> None:
+    """``title_variant_2`` returns ``()`` when only one variant is present."""
+    assert MARC_FIELDS["title_variant_2"](_marc(title_variants=("only",))) == ()
+
+
+def test_marc_registry_exposes_title_variant_3_when_present() -> None:
+    """``title_variant_3`` returns slot 2 as a singleton tuple."""
+    assert MARC_FIELDS["title_variant_3"](_marc(title_variants=("a", "b", "c"))) == ("c",)
+
+
+def test_marc_registry_title_variant_3_is_empty_when_only_two_variants() -> None:
+    """``title_variant_3`` returns ``()`` when fewer than three variants are present."""
+    assert MARC_FIELDS["title_variant_3"](_marc(title_variants=("a", "b"))) == ()
 
 
 def test_compile_title_with_parts_and_sor_skips_empty_components() -> None:

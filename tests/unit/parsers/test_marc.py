@@ -242,3 +242,167 @@ def test_iter_marc_records_repairs_mojibake_in_subfields_and_increments_counter(
     mojibake = by_id["marc-013-mojibake"]
     assert mojibake.title == "Histoire de la folie à l'âge classique"
     assert stats.mojibake_fixed_count >= 1
+
+
+def test_iter_marc_records_extracts_246_ind2_4_with_a_and_b(tmp_path: Path) -> None:
+    """246 ind2=4 (cover title) with $a + $b is fused into a single variant."""
+    path = tmp_path / "246_a_b.xml"
+    _write_xml(
+        path,
+        _record(
+            "246-ind2-4",
+            "<datafield ind1='1' ind2='4' tag='246'>"
+            "<subfield code='a'>Cover form of the title</subfield>"
+            "<subfield code='b'>and its subtitle</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].title_variants == ("Cover form of the title and its subtitle",)
+
+
+def test_iter_marc_records_extracts_246_a_only_when_b_absent(tmp_path: Path) -> None:
+    """246 ind2=0 with only $a is captured without a $b suffix."""
+    path = tmp_path / "246_a_only.xml"
+    _write_xml(
+        path,
+        _record(
+            "246-a-only",
+            "<datafield ind1='1' ind2='0' tag='246'>"
+            "<subfield code='a'>Portion of title</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].title_variants == ("Portion of title",)
+
+
+def test_iter_marc_records_excludes_246_ind2_1_parallel_title(tmp_path: Path) -> None:
+    """246 ind2=1 (parallel title / language variant) is excluded by design."""
+    path = tmp_path / "246_parallel.xml"
+    _write_xml(
+        path,
+        _record(
+            "246-parallel",
+            "<datafield ind1='1' ind2='1' tag='246'>"
+            "<subfield code='a'>Le titre parallele</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].title_variants == ()
+
+
+def test_iter_marc_records_excludes_246_blank_ind2(tmp_path: Path) -> None:
+    """246 with a blank ind2 (cataloger noise) is excluded by design."""
+    path = tmp_path / "246_blank.xml"
+    _write_xml(
+        path,
+        _record(
+            "246-blank",
+            "<datafield ind1='1' ind2=' ' tag='246'>"
+            "<subfield code='a'>Unspecified variant</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].title_variants == ()
+
+
+def test_iter_marc_records_skips_246_without_a_subfield(tmp_path: Path) -> None:
+    """A 246 with a CCE-likely ind2 but no $a subfield is silently skipped."""
+    path = tmp_path / "246_no_a.xml"
+    _write_xml(
+        path,
+        _record(
+            "246-no-a",
+            "<datafield ind1='1' ind2='3' tag='246'>"
+            "<subfield code='i'>Other title:</subfield>"
+            "<subfield code='b'>orphan subtitle</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].title_variants == ()
+
+
+def test_iter_marc_records_skips_246_when_a_cleans_to_empty(tmp_path: Path) -> None:
+    """A whitespace-only $a (cleans to None) yields no variant for that 246."""
+    path = tmp_path / "246_empty_a.xml"
+    _write_xml(
+        path,
+        _record(
+            "246-empty-a",
+            "<datafield ind1='1' ind2='3' tag='246'><subfield code='a'>   </subfield></datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].title_variants == ()
+
+
+def test_iter_marc_records_caps_246_variants_at_three(tmp_path: Path) -> None:
+    """Five CCE-likely 246s on one record yield exactly three variants, in order."""
+    path = tmp_path / "246_many.xml"
+    _write_xml(
+        path,
+        _record(
+            "246-many",
+            "<datafield ind1='1' ind2='0' tag='246'>"
+            "<subfield code='a'>Variant one</subfield>"
+            "</datafield>"
+            "<datafield ind1='1' ind2='2' tag='246'>"
+            "<subfield code='a'>Variant two</subfield>"
+            "</datafield>"
+            "<datafield ind1='1' ind2='3' tag='246'>"
+            "<subfield code='a'>Variant three</subfield>"
+            "</datafield>"
+            "<datafield ind1='1' ind2='4' tag='246'>"
+            "<subfield code='a'>Variant four</subfield>"
+            "</datafield>"
+            "<datafield ind1='1' ind2='7' tag='246'>"
+            "<subfield code='a'>Variant five</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].title_variants == (
+        "Variant one",
+        "Variant two",
+        "Variant three",
+    )
+
+
+def test_iter_marc_records_246_display_text_subfield_i_is_ignored(tmp_path: Path) -> None:
+    """A 246 $i display-text prefix does not contaminate the variant."""
+    path = tmp_path / "246_with_i.xml"
+    _write_xml(
+        path,
+        _record(
+            "246-with-i",
+            "<datafield ind1='1' ind2='3' tag='246'>"
+            "<subfield code='i'>Title on spine:</subfield>"
+            "<subfield code='a'>Spine title only</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].title_variants == ("Spine title only",)
+
+
+def test_iter_marc_records_246_walks_all_ind2_subset_values(tmp_path: Path) -> None:
+    """Each of {0, 2, 3, 4, 7, 8} is recognized as a CCE-likely ind2."""
+    fields = "".join(
+        "<datafield ind1='1' ind2='" + value + "' tag='246'>"
+        "<subfield code='a'>variant " + value + "</subfield>"
+        "</datafield>"
+        for value in ("0", "2", "3", "4", "7", "8")
+    )
+    path = tmp_path / "246_all_ind2.xml"
+    _write_xml(path, _record("246-all-ind2", fields))
+    records = list(iter_marc_records(path))
+    # Cap at 3 — confirms only the first three (in document order) are kept.
+    assert records[0].title_variants == (
+        "variant 0",
+        "variant 2",
+        "variant 3",
+    )

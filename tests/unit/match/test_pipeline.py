@@ -138,6 +138,47 @@ def test_match_record_picks_uuid_0001_for_widget_study(
     assert result.candidates_considered >= 1
 
 
+def test_match_record_wins_title_via_246_variant_when_245_is_weak(
+    tmp_path: Path, compiled_pairings: CompiledPairings
+) -> None:
+    """When the primary title scores weakly, a strong 246 variant carries the title group.
+
+    UUID-0001's CCE title is "A study of widgets". The MARC ``title`` shares
+    only the ``study`` token (enough to retrieve via the primary path), but
+    a ``title_variant`` carrying the full title produces a higher
+    ``title.token_set`` score; the winning Evidence comes from the variant
+    pairing and the losers include the primary pairing.
+    """
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        idf = _idf(lookup)
+        config = _config(min_score=0.0)
+        marc = MarcRecord(
+            control_id="m",
+            title="A study of unrelated cover matters",
+            title_main="A study of unrelated cover matters",
+            title_variants=("A study of widgets",),
+            publication_year=1940,
+        )
+        result = match_record(
+            marc,
+            lookup=lookup,
+            config=config,
+            idf=idf,
+            calibrator=None,
+            combiner=WeightedMeanCombiner(config=config),
+            pairings=compiled_pairings,
+        )
+    assert result.best is not None
+    assert result.best.nypl_uuid == "UUID-0001"
+    title_evidence = next(ev for ev in result.best.evidence if ev.scorer == "title.token_set")
+    losing_titles = [ev for ev in result.best.losing_evidence if ev.scorer == "title.token_set"]
+    assert title_evidence.score > losing_titles[0].score
+    by_scorer = dict(zip(result.best.evidence, result.best.evidence_sources, strict=True))
+    title_source = next(src for ev, src in by_scorer.items() if ev.scorer == "title.token_set")
+    assert title_source[0] == "title_variant_1"
+
+
 def test_match_record_returns_no_best_when_below_floor(
     tmp_path: Path, compiled_pairings: CompiledPairings
 ) -> None:

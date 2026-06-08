@@ -120,6 +120,7 @@ def _marc(
     statement_of_responsibility: str | None = None,
     publisher: str | None = None,
     publication_year: int | None = None,
+    title_variants: tuple[str, ...] = (),
 ) -> MarcRecord:
     return MarcRecord(
         control_id="m",
@@ -129,6 +130,7 @@ def _marc(
         statement_of_responsibility=statement_of_responsibility,
         publisher=publisher,
         publication_year=publication_year,
+        title_variants=title_variants,
     )
 
 
@@ -157,6 +159,23 @@ def test_candidates_for_matches_via_sor_author_token(tmp_path: Path) -> None:
         marc = _marc(
             title="Totally different heading",
             statement_of_responsibility="by John Smith",
+            publication_year=1940,
+        )
+        records = list(lookup.candidates_for(marc))
+    assert [r.uuid for r in records] == ["UUID-0001"]
+
+
+def test_candidates_for_matches_via_title_variant_token(tmp_path: Path) -> None:
+    """A title_variant token (no shared primary-title token) retrieves the candidate.
+
+    The primary title has no overlap with UUID-0001's "A study of widgets";
+    the variant contributes the ``widgets`` token that retrieves it.
+    """
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(
+            title="Totally unrelated cover heading",
+            title_variants=("Detailed widgets monograph",),
             publication_year=1940,
         )
         records = list(lookup.candidates_for(marc))

@@ -21,6 +21,7 @@ def test_marc_record_minimal_fields_default_optional_to_none() -> None:
     assert record.added_authors == ()
     assert record.title_part_number is None
     assert record.title_part_name is None
+    assert record.title_variants == ()
 
 
 def test_marc_record_is_frozen() -> None:
