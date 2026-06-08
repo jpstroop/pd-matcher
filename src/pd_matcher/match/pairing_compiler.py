@@ -50,6 +50,15 @@ MARC_FIELDS: dict[str, MarcRawAccessor] = {
     "title_main": lambda marc: _scalar(marc.title_main),
     "title_part_number": lambda marc: _scalar(marc.title_part_number),
     "title_part_name": lambda marc: _scalar(marc.title_part_name),
+    "title_variant_1": (
+        lambda marc: _scalar(marc.title_variants[0]) if len(marc.title_variants) >= 1 else ()
+    ),
+    "title_variant_2": (
+        lambda marc: _scalar(marc.title_variants[1]) if len(marc.title_variants) >= 2 else ()
+    ),
+    "title_variant_3": (
+        lambda marc: _scalar(marc.title_variants[2]) if len(marc.title_variants) >= 3 else ()
+    ),
     "main_author": lambda marc: _scalar(marc.main_author),
     "statement_of_responsibility": lambda marc: _scalar(marc.statement_of_responsibility),
     "publisher": lambda marc: _scalar(marc.publisher),

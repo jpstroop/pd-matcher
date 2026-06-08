@@ -40,6 +40,9 @@ marc_fields:
   series_lead: {fields: [series_titles], combine: first}
   title_with_sor: {fields: [title, statement_of_responsibility], combine: concat}
   title_with_parts_and_sor: {fields: [title, title_part_number, title_part_name, statement_of_responsibility], combine: concat}
+  title_variant_1: {fields: [title_variant_1], combine: first}
+  title_variant_2: {fields: [title_variant_2], combine: first}
+  title_variant_3: {fields: [title_variant_3], combine: first}
 cce_fields:
   title:             {fields: [title],             combine: first}
   author_name:       {fields: [author_name],       combine: first}
@@ -55,6 +58,12 @@ pairings:
   - {group: title,     marc: title_full,  cce: renewal_title}
   - {group: title,     marc: title_with_sor, cce: title}
   - {group: title,     marc: title_with_parts_and_sor, cce: title}
+  - {group: title,     marc: title_variant_1, cce: title}
+  - {group: title,     marc: title_variant_2, cce: title}
+  - {group: title,     marc: title_variant_3, cce: title}
+  - {group: title,     marc: title_variant_1, cce: renewal_title}
+  - {group: title,     marc: title_variant_2, cce: renewal_title}
+  - {group: title,     marc: title_variant_3, cce: renewal_title}
   - {group: author,    marc: main_author, cce: author_name}
   - {group: author,    marc: sor,         cce: author_name}
   - {group: author,    marc: main_author, cce: claimants}
