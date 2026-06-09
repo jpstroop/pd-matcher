@@ -7,7 +7,7 @@ surface mismatches between data-learned feature importance and the current
 hand-tuned weights, and to produce a worktable of pairs where the learned
 model and the live combiner disagree most.
 
-For the broader matching algorithm, see [design.md](design.md). For the
+For the broader matching algorithm, see [DESIGN.md](DESIGN.md). For the
 labeling loop that produces the vault, see [USER_GUIDE.md](USER_GUIDE.md).
 
 ---

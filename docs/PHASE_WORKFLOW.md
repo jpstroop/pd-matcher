@@ -4,7 +4,7 @@
 
 How a single improvement to the matcher ships, from clean main to merged main, with all gates and the apples-to-apples per-pair diff that lets us spot regressions the aggregate metrics hide.
 
-This is the project's contributor workflow. For codebase architecture see [design.md](design.md); for matching internals see [matching-architecture.md](matching-architecture.md).
+This is the project's contributor workflow. For codebase architecture see [DESIGN.md](DESIGN.md); for matching internals see [MATCHING_ARCHITECTURE.md](MATCHING_ARCHITECTURE.md).
 
 ## Why this shape
 

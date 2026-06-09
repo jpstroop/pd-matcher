@@ -2,7 +2,7 @@
 
 How `pd-matcher` is built, why, and what the algorithm is actually doing under the hood.
 
-This document is for developers and reviewers who need to understand the codebase, the technology choices, the matching pipeline, and the underlying science. For user-facing instructions and command examples, see [README.md](../README.md). Unfamiliar statistics, matching, or tooling terms are defined in the [glossary](glossary.md).
+This document is for developers and reviewers who need to understand the codebase, the technology choices, the matching pipeline, and the underlying science. For user-facing instructions and command examples, see [README.md](../README.md). Unfamiliar statistics, matching, or tooling terms are defined in the [glossary](GLOSSARY.md).
 
 ---
 
@@ -467,7 +467,7 @@ The gate is local-only — **CI is deferred** until the code is published. It is
 
 Run the gate with `pdm run regression` (re-runs the full vault-driven eval; ~10 minutes for the current ~1000-entry vault). Refresh the baseline after an intentional pipeline change with `pdm run regression-baseline`, which reruns the eval and rewrites the JSON.
 
-The gate alone is necessary but not sufficient — precision and recall can move by a few thousandths and conceal individual flips. The full per-branch shipping flow, including the per-pair diff against `main` that surfaces those flips, is documented in [phase-workflow.md](phase-workflow.md).
+The gate alone is necessary but not sufficient — precision and recall can move by a few thousandths and conceal individual flips. The full per-branch shipping flow, including the per-pair diff against `main` that surfaces those flips, is documented in [PHASE_WORKFLOW.md](PHASE_WORKFLOW.md).
 
 Two caveats. **AUC and average precision are reported but not gated**: locking them requires more `no_match` labels than the vault currently carries — the threshold-sweep precision numbers are noisy at small negative-sample sizes, so a strict gate would cry wolf. Bias labeling toward the `below_sample` band to firm them up. And **the eval drops entries gracefully when their MARC is missing from the pool** (data drift after a pool rebuild); a few drops per run is normal, but a large drop count signals the pool's composition shifted and is worth investigating before trusting the metrics.
 
@@ -481,7 +481,7 @@ The connection between the two is loose. The data repo is cloned in-tree at the 
 
 The live vault stays in the code repo specifically because it's tightly coupled to the regression baseline (locked metrics depend on specific vault contents) and to the labeling UI's write path. Moving it would double the per-label workflow and create a footgun around baseline reproducibility. Only the *derived* publishable artifacts split out.
 
-### design.md and git history as the durable design record
+### DESIGN.md and git history as the durable design record
 
 Every meaningful design decision in this codebase is documented in two places: this file and the git commit log. Commit messages describe when and why each piece landed; this document captures the broader rationale and ties decisions together across modules.
 

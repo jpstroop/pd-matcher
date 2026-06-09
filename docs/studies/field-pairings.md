@@ -18,7 +18,7 @@ subsystem — the pairing set is now `config/defaults/field_pairings.yaml`, tune
 by editing config and re-running `eval`, not by editing code — and confirms the
 data-derived default set does not regress precision while recovering recall.
 
-See [design.md §Step 3](../design.md) for the architecture (code surfaces raw
+See [DESIGN.md §Step 3](../DESIGN.md) for the architecture (code surfaces raw
 subfields; a closed combine vocabulary in YAML composes and pairs them; every
 name is validated at compile time).
 

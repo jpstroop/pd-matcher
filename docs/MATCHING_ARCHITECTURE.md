@@ -3,8 +3,8 @@
 This document describes how the matcher finds and ranks CCE registrations for a
 MARC record, why it is structured the way it is, and the performance work in
 issue #22 that established the current design. For the scoring math itself
-(per-field scorers, field pairings, the combiner) see [design.md](design.md);
-for term definitions see [glossary.md](glossary.md).
+(per-field scorers, field pairings, the combiner) see [DESIGN.md](DESIGN.md);
+for term definitions see [GLOSSARY.md](GLOSSARY.md).
 
 ## The core idea: matching is not scoring
 
@@ -90,7 +90,7 @@ retrieve nothing (and therefore match nothing) — by design.
 - **No LCCN/ISBN short-circuit.** A prior implementation returned the LCCN-exact
   registration immediately. We do not: in this corpus LCCN/ISBN carry a >5%
   transcription/OCR error rate, so they are treated as ordinary *scored* fields,
-  never a retrieval bypass (see [glossary.md](glossary.md) and the data-quirks
+  never a retrieval bypass (see [GLOSSARY.md](GLOSSARY.md) and the data-quirks
   note).
 - **No strict intersection across fields.** We union title/author/publisher
   sharers rather than requiring a record to share a title token *and* an author
@@ -115,7 +115,7 @@ scorers (IDF-weighted title Jaccard, rapidfuzz author/publisher, year, edition,
 LCCN, ISBN) over the configured field pairings; a weighted-mean combiner produces
 a confidence; the pipeline keeps the best plus up to three alternates. None of
 this changed in #22 — only *which* candidates reach it. Details in
-[design.md](design.md).
+[DESIGN.md](DESIGN.md).
 
 ## Why this design (#22)
 

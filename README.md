@@ -53,10 +53,10 @@ The CCE data is pulled in via git submodules under `data/nypl-reg/` and `data/ny
 |---|---|
 | Run the pipeline (operator or labeler) | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) — mental model, daily flows, troubleshooting |
 | Label pairs | [docs/LABELING_WORKFLOW.md](docs/LABELING_WORKFLOW.md) (operational) + [docs/LABELING_GUIDE.md](docs/LABELING_GUIDE.md) (decision rules) |
-| Understand the matching algorithm | [docs/design.md](docs/design.md) |
-| Understand candidate retrieval vs scoring | [docs/matching-architecture.md](docs/matching-architecture.md) |
-| Ship a code change | [docs/phase-workflow.md](docs/phase-workflow.md) |
-| Look up a term | [docs/glossary.md](docs/glossary.md) |
+| Understand the matching algorithm | [docs/DESIGN.md](docs/DESIGN.md) |
+| Understand candidate retrieval vs scoring | [docs/MATCHING_ARCHITECTURE.md](docs/MATCHING_ARCHITECTURE.md) |
+| Ship a code change | [docs/PHASE_WORKFLOW.md](docs/PHASE_WORKFLOW.md) |
+| Look up a term | [docs/GLOSSARY.md](docs/GLOSSARY.md) |
 | Read past experiments | [docs/studies/](docs/studies/) (committed studies) and [docs/findings/](docs/findings/) (durable diagnostic records) |
 | See active work | [GitHub issues](https://github.com/jpstroop/pd-matcher/issues) |
 

@@ -1,6 +1,6 @@
 # Labeling workflow
 
-The labeler's operational guide. If you're shipping code changes, see [phase-workflow.md](phase-workflow.md) instead.
+The labeler's operational guide. If you're shipping code changes, see [PHASE_WORKFLOW.md](PHASE_WORKFLOW.md) instead.
 
 The shape:
 
@@ -133,7 +133,7 @@ label → commit vault → [diagnostic] → ask for code changes → [rebuild qu
 ## Where to find more
 
 - Per-verdict decision rules — [LABELING_GUIDE.md](LABELING_GUIDE.md)
-- Algorithm internals — [design.md](design.md)
-- Matching vs scoring separation — [matching-architecture.md](matching-architecture.md)
-- Term definitions — [glossary.md](glossary.md)
-- Code-shipping workflow (not for labelers) — [phase-workflow.md](phase-workflow.md)
+- Algorithm internals — [DESIGN.md](DESIGN.md)
+- Matching vs scoring separation — [MATCHING_ARCHITECTURE.md](MATCHING_ARCHITECTURE.md)
+- Term definitions — [GLOSSARY.md](GLOSSARY.md)
+- Code-shipping workflow (not for labelers) — [PHASE_WORKFLOW.md](PHASE_WORKFLOW.md)

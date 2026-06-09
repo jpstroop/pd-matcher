@@ -4,37 +4,37 @@ A guided tour of the operational picture: mental model, daily flows,
 maintenance. If you're looking for *what* this project is and *why* it
 exists, start with the [README](../README.md) — this guide picks up
 after you've decided to actually run it. For the matching algorithm
-itself, see [docs/design.md](design.md).
+itself, see [docs/DESIGN.md](DESIGN.md).
 
 ---
 
 ## The mental model in 60 seconds
 
 ```
-NYPL CCE submodules                   Princeton MARC dump
-        │                                     │
-        ▼                                     ▼
-[pd-matcher index build]              [pd-groundtruth acquire]
-        │                                     │
-        ▼                                     ▼
-caches/cce.lmdb                      data/candidates/  (MARC pool)
-   (CCE index)                                │
-        │                                     │
-        └──────────────┬──────────────────────┘
-                       ▼
-              [pd-groundtruth build-queue]
-                       │
-                       ▼
-                data/review.db   (stratified pairs to label)
-                       │
-                       ▼
-              [pd-groundtruth review]  ← humans label here
-                       │
-                       ▼
-              data/label_vault.jsonl   (durable, git-tracked)
-                       │
-                       ▼
-              [pd-matcher eval]   ← measures matcher vs vault
+NYPL CCE submodules                        Princeton MARC dump
+         │                                          │
+         ▼                                          ▼
+[pdm run pd-matcher index build]   [pdm run pd-groundtruth acquire]
+         │                                          │
+         ▼                                          ▼
+   caches/cce.lmdb                         data/candidates/
+   (CCE index)                              (MARC pool)
+         │                                          │
+         └──────────────────┬───────────────────────┘
+                            ▼
+              [pdm run pd-groundtruth build-queue]
+                            │
+                            ▼
+                   data/review.db   (stratified pairs to label)
+                            │
+                            ▼
+                [pdm run pd-groundtruth review]   ← humans label here
+                            │
+                            ▼
+                   data/label_vault.jsonl   (durable, git-tracked)
+                            │
+                            ▼
+                  [pdm run pd-matcher eval]   ← measures matcher vs vault
 ```
 
 Two persistent inputs (CCE submodules + Princeton MARC), two derived
@@ -334,11 +334,11 @@ change. Two commands:
 
 - [README.md](../README.md) — what + why; one-screen overview for new
   collaborators and stakeholders.
-- [docs/design.md](design.md) — the matching algorithm, end to end:
+- [docs/DESIGN.md](DESIGN.md) — the matching algorithm, end to end:
   parsing, normalization, indexing, scoring, calibration.
-- [docs/matching-architecture.md](matching-architecture.md) —
+- [docs/MATCHING_ARCHITECTURE.md](MATCHING_ARCHITECTURE.md) —
   candidate retrieval vs scoring as separate concerns.
-- [docs/glossary.md](glossary.md) — plain-language definitions of
+- [docs/GLOSSARY.md](GLOSSARY.md) — plain-language definitions of
   every domain term.
 - [docs/LABELING_WORKFLOW.md](LABELING_WORKFLOW.md) — the labeler's
   operational playbook: every command in order with trigger
@@ -347,7 +347,7 @@ change. Two commands:
   guide for verdicts and edge cases.
 - [docs/studies/](studies/) — write-ups of one-off measurement runs
   (year-window study, field-pairing experiments, etc.).
-- [docs/learned_scorer_diagnostic.md](learned_scorer_diagnostic.md) —
+- [docs/LEARNED_SCORER_DIAGNOSTIC.md](LEARNED_SCORER_DIAGNOSTIC.md) —
   the periodic LightGBM diagnostic over the labeled vault: purpose,
   how to re-run, output conventions.
 - GitHub issues at <https://github.com/jpstroop/pd-matcher/issues> —
