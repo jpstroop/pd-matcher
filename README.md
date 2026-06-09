@@ -12,13 +12,13 @@ Library catalogs use a different format: **MARC** (MAchine-Readable Cataloging).
 
 These two corpora describe the same underlying works but were never designed to link to each other. ISBNs barely existed during the CCE period. LCCNs appear in many MARC records but not the CCE side. Titles, authors, publishers, and years drift between sources (transcription errors, abbreviation conventions, OCR garbles, edition variants). Matching them is fuzzy work.
 
-**The long-term goal**: a learned matcher — a gradient-boosted model trained on verified pairs — that can do this matching across many institutions' catalogs, not just Princeton's. To train one, we need a labeled training set of confirmed (match / no_match / unsure) pairs across the full score range. **That training set is what this project produces.**
+**The long-term goal**: a learned matcher — a gradient-boosted model (LightGBM) trained on verified pairs — that replaces the current hand-tuned scoring weights and can do this matching across many institutions' catalogs, not just Princeton's. Building it requires a labeled training set of confirmed (match / no_match / unsure) pairs across the full score range. **This project produces both: the labeled training set and the learned matcher that consumes it.** The current matcher (weighted-mean combiner + Platt calibration) is the bootstrap — it surfaces candidates for human verification, and the resulting vault feeds the learned successor.
 
 ## What this project is
 
 A two-CLI pipeline:
 
-- **`pd-matcher`** — proposes candidate `(MARC record, CCE registration, optional CCE renewal)` triples with per-field scores and a calibrated confidence.
+- **`pd-matcher`** — proposes candidate `(MARC record, CCE registration, optional CCE renewal)` triples with per-field scores and a calibrated confidence. Today the combiner is a weighted mean over per-field scorers; the LightGBM learned combiner is in progress under `pd-matcher train-scorer` and tracked at [#4](https://github.com/jpstroop/pd-matcher/issues/4).
 - **`pd-groundtruth`** — turns those proposals into a labeled corpus. It samples candidates across the score range, serves a local labeling UI, and persists every human verdict to `data/label_vault.jsonl` — the vault, source of truth.
 
 The matcher's role is **candidate surfacing**, not direct publishing. Every published row is human-verified. The matcher's mistakes only matter for labeling throughput, not output quality.
