@@ -77,7 +77,7 @@ pdm run pd-matcher index build \
   --out caches/cce.lmdb
 
 # 2. Acquire and filter a MARC pool from Princeton (~1 hour first run).
-pdm run pd-groundtruth acquire
+pdm run pd-groundtruth acquire --out-dir data/candidates
 ```
 
 Both produce files under `caches/` and `data/candidates/` that are
@@ -210,7 +210,7 @@ The vault carries a `schema` integer per line. When that bumps, run
 the corresponding CLI subcommand:
 
 ```bash
-pdm run pd-groundtruth migrate-vault-v4   # most recent (CCE IDs)
+pdm run pd-groundtruth migrate-vault-v5   # most recent (categories backfill)
 ```
 
 Migrations are idempotent and write atomically — re-running a migration
