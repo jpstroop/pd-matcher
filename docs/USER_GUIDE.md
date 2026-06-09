@@ -1,27 +1,10 @@
 # User guide
 
-A guided tour. If you're returning to this project after time away, or
-onboarding for the first time, read this top-to-bottom — it's designed
-to take ten minutes and leave you knowing where everything is. For
-per-command reference, see [README.md](../README.md). For the matching
-algorithm itself, see [docs/design.md](design.md).
-
----
-
-## What this is
-
-`pd-matcher` produces a verified linkage table between Princeton's
-MARC catalog and the NYPL transcription of the U.S. Copyright Office's
-Catalog of Copyright Entries (CCE). One row of output = one
-`(MARC record, CCE registration, optional CCE renewal)` triple, with
-per-field scores and a calibrated confidence.
-
-It does **not** decide public-domain status. Consumers apply their own
-copyright reasoning to the linkage. Treating this as a PD-determination
-tool will lead you astray.
-
-The companion `pd-groundtruth` CLI is how humans build the labeled
-corpus the matcher's calibration and evaluation depend on.
+A guided tour of the operational picture: mental model, daily flows,
+maintenance. If you're looking for *what* this project is and *why* it
+exists, start with the [README](../README.md) — this guide picks up
+after you've decided to actually run it. For the matching algorithm
+itself, see [docs/design.md](design.md).
 
 ---
 
@@ -58,23 +41,6 @@ Two persistent inputs (CCE submodules + Princeton MARC), two derived
 caches (LMDB index, MARC pool), one transient queue (review.db), one
 authoritative output (vault JSONL). The vault is the only file in the
 loop that's both human-produced and source-of-truth.
-
----
-
-## Roles
-
-You'll wear one or more of these hats:
-
-- **Operator** — runs the matcher pipeline: acquire fresh MARC, build
-  the index, produce candidate pairs. Mostly batch jobs.
-- **Labeler** — opens the review UI, looks at proposed pairs, clicks
-  match / no_match / unsure with optional notes. Produces the vault.
-- **Maintainer** — keeps the code passing gates, refreshes the
-  regression baseline after intentional pipeline changes, runs
-  migrations when the vault schema bumps.
-
-All three are local-machine roles today. The GCP deployment plan
-(GitHub #34) is the path to multi-user labeling behind Google OAuth.
 
 ---
 
@@ -142,7 +108,7 @@ pdm run pd-matcher match \
 
 `build-queue` does the matching AND stratifies by language and
 confidence band, so you don't burn label effort on easy high-confidence
-pairs. See the [README's `build-queue` section](../README.md#2-build-queue--match-and-stratify-into-a-review-queue) for flags.
+pairs. Run `pdm run pd-groundtruth build-queue --help` for flags.
 
 When tuning, the `--requeue VERDICT` flag (repeatable, valid values
 `match`/`no_match`/`unsure`) opts past vault verdicts back into the
@@ -366,8 +332,8 @@ change. Two commands:
 
 ## Further reading
 
-- [README.md](../README.md) — per-command reference, output schema, all
-  CLI flags.
+- [README.md](../README.md) — what + why; one-screen overview for new
+  collaborators and stakeholders.
 - [docs/design.md](design.md) — the matching algorithm, end to end:
   parsing, normalization, indexing, scoring, calibration.
 - [docs/matching-architecture.md](matching-architecture.md) —

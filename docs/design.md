@@ -35,91 +35,7 @@ A typer-based CLI (`cli.py`) is the thin wrapper that wires these layers into th
 
 ---
 
-## 2. Code structure
-
-```
-src/pd_matcher/
-├── cli.py                        # typer commands: index build/info, match, eval, train-scorer
-├── logging_config.py             # structlog setup (JSON or console renderer)
-├── models.py                     # MarcRecord, NyplRegRecord, NyplRenRecord, IndexedNyplRegRecord
-│
-├── config/
-│   ├── schemas.py                # MatchingConfig, CopyrightRule, PredicateCall, IndexConfig (msgspec.Struct)
-│   ├── loader.py                 # YAML → schema validation with clear ConfigError
-│   └── defaults/
-│       ├── matching.yaml         # scorer weights, year_window, min_combined_score
-│       └── copyright_rules.yaml  # 14 ordered Cornell rules (Categories 2 + 3)
-│
-├── parsers/
-│   ├── marc.py                   # lxml.iterparse streaming MARCXML reader
-│   ├── nypl_reg.py               # NYPL registration XML reader
-│   └── nypl_ren.py               # NYPL renewal TSV reader (handles two header schemas)
-│
-├── normalize/
-│   ├── text.py                   # NFKD + diacritic strip + lowercase + punctuation collapse
-│   ├── numbers.py                # Roman/word/ordinal → digits, multilingual abbreviation expansion
-│   ├── stemming.py               # cached PyStemmer (Snowball) per language
-│   ├── stopwords.py              # language-tuned stopword sets shipped as package data
-│   ├── stopwords_data/           # english/french/german/spanish/italian JSON sets
-│   ├── encoding.py               # ftfy-backed mojibake / BOM / bidi-mark repair (clean_text)
-│   └── cp1255_fallback.py        # defensive UTF-8 / Windows-1255 / replace decode ladder
-│
-├── index/
-│   ├── store.py                  # LMDB environment wrapper with named sub-DBs
-│   ├── codec.py                  # msgspec.msgpack encoders + structured byte keys
-│   ├── builder.py                # streams parsers → normalizes → writes; precomputes renewal join
-│   └── lookup.py                 # read-only API: candidates_for_year, get_*, iter_registrations, stats
-│
-├── match/
-│   ├── evidence.py               # Evidence struct (scorer, score, max, skipped, decisive, features)
-│   ├── idf.py                    # one-pass IDF table over CCE titles; cached at caches/idf.msgpack
-│   ├── pairings.py               # bounded field-pair permutations (title↔series, publisher↔claimants)
-│   ├── pipeline.py               # match_record: MarcRecord + lookup → MatchResult
-│   ├── result.py                 # CandidateMatch, MatchResult (best + top-K alternates + Evidence)
-│   ├── scorers/
-│   │   ├── context.py            # ScorerContext: per-record lang/stopwords/stemmer/IDF/config bundle
-│   │   ├── title.py              # IDF-weighted Jaccard over stems
-│   │   ├── name.py               # rapidfuzz token_set_ratio (author + publisher)
-│   │   ├── year.py               # year delta as a soft signal (linear penalty)
-│   │   ├── lccn.py               # exact-id match; flags decisive on hit
-│   │   ├── isbn.py               # placeholder (CCE pre-dates ISBN)
-│   │   └── edition.py            # edition-number compatibility (penalize explicit mismatch)
-│   └── combiners/
-│       ├── base.py               # Combiner Protocol + CombinedScore (raw, calibrated)
-│       ├── weighted_mean.py      # plain weighted mean over present Evidence
-│       ├── calibrator.py         # Platt-scaled logistic regression over (raw_score, is_match)
-│       └── learned.py            # stub for the learned scorer (#4)
-│
-├── copyright/
-│   ├── status.py                 # CopyrightStatus StrEnum (16 leaves of the books-only matrix)
-│   ├── facts.py                  # Facts: pub_year, country, language, registration flags, today
-│   ├── predicates.py             # pure (facts, *args) → bool primitives; in_pd_by_age moving wall
-│   ├── inference.py              # pragmatic-assumption wrappers (registered→notice, etc.)
-│   ├── rules.py                  # ordered YAML rule engine; first-match-wins
-│   └── assessment.py             # CopyrightAssessment (status, rule_name, explanation, assumptions)
-│
-├── eval/
-│   └── ground_truth.py           # run_eval + EvalReport (precision/recall/F1 + status confusion)
-│
-├── output/
-│   └── csv_writer.py             # CsvResultWriter; mirrors combined_ground_truth.csv schema
-│
-└── workers/
-    ├── pool.py                   # run_match(...) → RunReport orchestration
-    ├── producer.py               # main-thread MARC streamer + batcher
-    ├── worker.py                 # per-process matcher: lookup + scorers + combiner + rule engine
-    ├── writer.py                 # single writer process; drains output queue → CSV
-    ├── reporter.py               # main-thread reporter; aggregates throughput, ETA, by-status
-    ├── shutdown.py               # ShutdownCoordinator (SIGINT → multiprocessing.Event)
-    ├── events.py                 # stats wire format (msgspec.Struct)
-    └── messages.py               # output wire format (worker → writer)
-```
-
-Tests mirror this exactly under `tests/unit/`, with `tests/integration/` for cross-module smoke tests and `tests/fixtures/` for tiny hand-crafted MARC, CCE registration, and CCE renewal samples.
-
----
-
-## 3. Technology decisions
+## 2. Technology decisions
 
 Each choice below is paired with the alternative it replaced and the reason for the swap. The git history is the canonical record of when each decision landed; this section captures the broader rationale that ties them together.
 
@@ -226,7 +142,7 @@ mypy is `--strict` plus `disallow_any_explicit = true`, `disallow_any_generics`,
 
 ---
 
-## 4. The matching algorithm
+## 3. The matching algorithm
 
 The end-to-end flow for one MARC record:
 
@@ -413,7 +329,7 @@ The status enum naming reflects this: `PD_REGISTERED_NOT_RENEWED` (not `PD_US_PU
 
 ---
 
-## 5. The matching science
+## 4. The matching science
 
 Why each scorer chooses the algorithm it does.
 
@@ -495,7 +411,7 @@ If a learned scorer (#4) replaces the weighted mean, the Platt calibrator become
 
 ---
 
-## 6. Architecture notes
+## 5. Architecture notes
 
 A few decisions that shape the codebase even if they don't show up in any single layer.
 
@@ -573,7 +489,7 @@ If a future contributor reads this file and asks "why msgspec?", the answer is h
 
 ---
 
-## 7. Open questions and future work
+## 6. Open questions and future work
 
 - **Learned scorer (#4)**: replace the weighted mean + Platt calibrator with a LightGBM model trained on the same Evidence features. Plan calls for an A/B with the current pipeline and a ≥2 F1-point threshold for adoption.
 - **Baselined regression eval (Phase 8)**: built — see §6, "Regression baseline + local gate". The gate is local-only for now; wiring it into CI is deferred until the code is published.
