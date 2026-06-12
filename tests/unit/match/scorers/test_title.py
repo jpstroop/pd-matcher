@@ -15,6 +15,16 @@ def test_score_title_identical_inputs_max_score(scorer_context: ScorerContext) -
     assert feature_map["token_overlap"] > 0.0
 
 
+def test_score_title_emits_token_length_subfeatures(
+    scorer_context: ScorerContext,
+) -> None:
+    """The learned combiner reads per-side token-set lengths off the features."""
+    ev = score_title("A study of widgets", "Widgets and machines", scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["marc_token_len"] == 2.0
+    assert feature_map["nypl_token_len"] == 2.0
+
+
 def test_score_title_skipped_when_marc_empty(scorer_context: ScorerContext) -> None:
     """An empty MARC title triggers the skipped branch."""
     ev = score_title("", "A study of widgets", scorer_context)
