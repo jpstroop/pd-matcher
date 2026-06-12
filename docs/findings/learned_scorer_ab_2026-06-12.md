@@ -50,6 +50,10 @@ The decisive detail: the learned model loses top-1 (911 vs 915 correct) **despit
 
 **Disposition: do not flip the default.** `scorer: weighted_mean` remains production. Per ticket #4's own contingency: "otherwise keep it available but disabled and document why" — this document is the why.
 
+## Year-window caveat
+
+Under `year_window: 0`, the year signal is fully spent at retrieval: every ranked candidate has `reg_year == marc_year`, so the year scorer emits a constant 100 (or skips). For the weighted mean this is a uniform +10-point uplift that cannot affect ranking and is baked into the #71 floor sweep; for the learned model it is a constant feature that trees never split on (hence year's absence from the importance tables). **If the year window is ever widened, year becomes a live variable again**: the weighted mean's year weight starts discriminating and the learned model must be retrained, since it has learned to ignore a feature that would suddenly vary.
+
 ## The path forward (follow-up ticket)
 
 Ticket #4's original design specified training negatives as "same-year-bucket non-matches" — sampled decoys — which the research rounds replaced with labeled negatives only. This A/B shows that choice is exactly what fails at ranking. Follow-up experiment: augment training with sampled decoy negatives (for each labeled-match MARC, sample k retrieved candidates ≠ the true match as negatives; tolerate the small label-noise risk that an unlabeled candidate is a true duplicate registration), retrain, re-run this A/B. The apparatus built this phase (train-scorer, eval --scorer, the artifact format) makes that a config-and-data experiment, not an engineering one.
