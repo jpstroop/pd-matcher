@@ -5,7 +5,9 @@ from datetime import date
 from datetime import datetime
 from datetime import timedelta
 
+from msgspec.json import decode as json_decode
 from msgspec.json import encode as json_encode
+from msgspec.structs import replace
 
 from pd_groundtruth.review.view import CLAIMANT_LABEL
 from pd_groundtruth.review.view import RENEWAL_NOT_RENEWED
@@ -38,6 +40,7 @@ def _marc(
     lccn: str | None = "53001234",
     title_part_number: str | None = None,
     title_part_name: str | None = None,
+    notes: tuple[str, ...] = (),
 ) -> MarcRecord:
     return MarcRecord(
         control_id="ctrl-1",
@@ -58,6 +61,7 @@ def _marc(
         publication_year=publication_year,
         extent=extent,
         series_titles=("Acme Studies",),
+        notes=notes,
         language_code="eng",
         country_code="nyu",
     )
@@ -219,9 +223,25 @@ def test_build_card_exposes_marc_subfields() -> None:
     assert card.marc_year == 1953
     assert card.marc_edition == "2nd ed."
     assert card.marc_series_titles == ("Acme Studies",)
+    assert card.marc_notes == ()
     assert card.marc_lccn == "53001234"
     assert card.marc_language_code == "eng"
     assert card.marc_country_code == "nyu"
+
+
+def test_build_card_populates_marc_notes_from_marc_json() -> None:
+    marc = _marc(notes=("Includes index", "Bibliography: p. 200"))
+    card = build_card(_row(marc, evidence_json="{}"))
+    assert card.marc_notes == ("Includes index", "Bibliography: p. 200")
+
+
+def test_build_card_defaults_marc_notes_empty_for_blob_without_notes() -> None:
+    blob = json_decode(json_encode(_marc()), type=dict)
+    del blob["notes"]
+    row = _row(_marc(), evidence_json="{}")
+    row_without_notes = replace(row, marc_json=json_encode(blob).decode("utf-8"))
+    card = build_card(row_without_notes)
+    assert card.marc_notes == ()
 
 
 def test_build_card_renders_cce_and_renewal() -> None:

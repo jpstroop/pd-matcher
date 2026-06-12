@@ -235,6 +235,75 @@ def test_iter_marc_records_keeps_first_ocolc_when_multiple_present(tmp_path: Pat
     assert records[0].oclc == "11111111"
 
 
+def test_iter_marc_records_extracts_5xx_notes_in_document_order(tmp_path: Path) -> None:
+    path = tmp_path / "notes.xml"
+    _write_xml(
+        path,
+        _record(
+            "notes-order",
+            "<datafield ind1=' ' ind2=' ' tag='500'>"
+            "<subfield code='a'>General note</subfield>"
+            "</datafield>"
+            "<datafield ind1=' ' ind2=' ' tag='502'>"
+            "<subfield code='a'>Thesis note</subfield>"
+            "</datafield>"
+            "<datafield ind1='0' ind2=' ' tag='505'>"
+            "<subfield code='a'>Contents note</subfield>"
+            "</datafield>"
+            "<datafield ind1=' ' ind2=' ' tag='520'>"
+            "<subfield code='a'>Summary note</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].notes == (
+        "General note",
+        "Thesis note",
+        "Contents note",
+        "Summary note",
+    )
+
+
+def test_iter_marc_records_excludes_non_whitelisted_5xx_notes(tmp_path: Path) -> None:
+    path = tmp_path / "excluded_notes.xml"
+    _write_xml(
+        path,
+        _record(
+            "notes-excluded",
+            "<datafield ind1=' ' ind2=' ' tag='504'>"
+            "<subfield code='a'>Bibliography note</subfield>"
+            "</datafield>"
+            "<datafield ind1=' ' ind2=' ' tag='590'>"
+            "<subfield code='a'>Local note</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].notes == ()
+
+
+def test_iter_marc_records_strips_isbd_punctuation_from_notes(tmp_path: Path) -> None:
+    path = tmp_path / "isbd_notes.xml"
+    _write_xml(
+        path,
+        _record(
+            "notes-isbd",
+            "<datafield ind1=' ' ind2=' ' tag='500'>"
+            "<subfield code='a'>Includes index.</subfield>"
+            "</datafield>",
+        ),
+    )
+    records = list(iter_marc_records(path))
+    assert records[0].notes == ("Includes index",)
+
+
+def test_iter_marc_records_notes_default_empty_when_absent(tmp_path: Path) -> None:
+    path = tmp_path / "no_notes.xml"
+    _write_xml(path, _record("no-notes"))
+    records = list(iter_marc_records(path))
+    assert records[0].notes == ()
+
+
 def test_iter_marc_records_repairs_mojibake_in_subfields_and_increments_counter() -> None:
     stats = MarcParseStats()
     records = list(iter_marc_records(FIXTURE, stats=stats))

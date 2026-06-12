@@ -44,6 +44,7 @@ def _pair(
     isbns: tuple[str, ...] = ("9780000000000",),
     cce_desc: str = "vi, 200 p.",
     cce_lccn: str | None = "28000854",
+    marc_notes: tuple[str, ...] = (),
 ) -> PairInsert:
     marc = MarcRecord(
         control_id=control_id,
@@ -61,6 +62,7 @@ def _pair(
         publication_date_raw="c1953.",
         publication_year=1953,
         extent=extent if extent is not None else "xxiv, 841 p.",
+        notes=marc_notes,
         language_code=language,
         country_code="nyu",
     )
@@ -118,7 +120,14 @@ def vault_path(tmp_path: Path) -> Path:
 def client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
     db_path = tmp_path / "review.db"
     with ReviewDb.connect(db_path) as db:
-        db.insert_pair(_pair(language="eng", control_id="eng-1", nypl_uuid="u-eng-1"))
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="eng-1",
+                nypl_uuid="u-eng-1",
+                marc_notes=("Includes index", "Translation of Le Titre"),
+            )
+        )
         db.insert_pair(_pair(language="fre", control_id="fre-1", nypl_uuid="u-fre-1"))
     app = create_app(db_path, vault_path)
     with TestClient(app) as test_client:
@@ -913,6 +922,20 @@ def test_card_omits_extended_marc_rows_when_absent(empty_client: TestClient) -> 
     assert ">isbns<" not in response.text
     assert ">oclc<" not in response.text
     assert "worldcat.org" not in response.text
+
+
+def test_card_renders_marc_notes_when_present(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Includes index" in response.text
+    assert "Translation of Le Titre" in response.text
+
+
+def test_card_omits_marc_notes_content_when_absent(ebook_client: TestClient) -> None:
+    response = ebook_client.get("/")
+    assert response.status_code == 200
+    assert "Includes index" not in response.text
+    assert "Translation of Le Titre" not in response.text
 
 
 def test_card_renders_hathitrust_link_when_oclc_present(client: TestClient) -> None:
