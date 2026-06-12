@@ -85,6 +85,7 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     marc_edition: str | None
     marc_extent: str | None
     marc_series_titles: tuple[str, ...]
+    marc_notes: tuple[str, ...]
     marc_lccn: str | None
     marc_lccn_canonical: str | None
     marc_isbns: tuple[str, ...]
@@ -391,6 +392,7 @@ def build_card(
         marc_edition=marc.edition,
         marc_extent=marc.extent,
         marc_series_titles=marc.series_titles,
+        marc_notes=marc.notes,
         marc_lccn=marc.lccn,
         marc_lccn_canonical=canonical_lccn(marc.lccn),
         marc_isbns=marc.isbns,

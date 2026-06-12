@@ -127,6 +127,9 @@
         {%- if card.marc_hathitrust_url %}<div class="field"><div class="k">HathiTrust</div><div class="v"><a href="{{ card.marc_hathitrust_url }}" target="_blank" rel="noopener noreferrer">view</a></div></div>{% endif -%}
         {%- if card.marc_series_titles %}<div class="field"><div class="k">series</div><div class="v">{{ card.marc_series_titles | join("; ") }}</div></div>{% endif -%}
         <div class="field"><div class="k">lang / country</div><div class="v">{{ card.marc_language_code or "?" }} / {{ card.marc_country_code or "?" }}</div></div>
+        {%- if card.marc_notes %}<div class="field"><div class="k">notes</div><div class="v">
+          {% if card.marc_notes | length > 1 %}<ul class="cce-notes">{% for note in card.marc_notes %}<li>{{ note }}</li>{% endfor %}</ul>{% else %}{{ card.marc_notes[0] }}{% endif %}
+        </div></div>{% endif -%}
       </div>
     </section>
 
