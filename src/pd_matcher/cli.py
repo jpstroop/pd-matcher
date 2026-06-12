@@ -10,6 +10,8 @@ reported on stderr with these exit codes:
 * ``130`` — interrupted by SIGINT
 """
 
+from __future__ import annotations
+
 from datetime import UTC
 from datetime import datetime
 from importlib.resources import as_file
@@ -17,6 +19,7 @@ from importlib.resources import files
 from json import dumps
 from logging import WARNING
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Annotated
 
 from msgspec import DecodeError
@@ -42,12 +45,18 @@ from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.logging_config import configure_logging
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.calibrator import load_calibrator
+from pd_matcher.match.combiners.learned import META_FILENAME as _LEARNED_META_FILENAME
+from pd_matcher.match.combiners.learned import MODEL_FILENAME as _LEARNED_MODEL_FILENAME
 from pd_matcher.match.idf import load_or_build_idf
 from pd_matcher.match.prepare import PrepareReport
 from pd_matcher.match.prepare import prepare_marc
 from pd_matcher.match.prepare import read_manifest
 from pd_matcher.workers import RunReport
 from pd_matcher.workers import run_match
+
+if TYPE_CHECKING:  # pragma: no cover
+    from pd_matcher.match.combiners.train import TrainedModel
+    from pd_matcher.match.combiners.train import TrainingMatrix
 
 _ARG_ERROR_EXIT_CODE: int = 2
 _RUNTIME_ERROR_EXIT_CODE: int = 1
@@ -290,6 +299,24 @@ def _format_eval_report(report: EvalReport) -> str:
         f"  threshold sweep:\n"
         f"{_format_sweep(report.threshold_sweep)}\n"
         f"  elapsed: {report.elapsed_seconds:.2f}s"
+    )
+
+
+def _format_train_report(
+    trained: TrainedModel,
+    destination: Path,
+    matrix: TrainingMatrix,
+) -> str:
+    """Render a learned-model training summary as a human-readable block."""
+    return (
+        f"Learned model: {destination}\n"
+        f"  positives: {trained.n_positive}\n"
+        f"  negatives: {trained.n_negative}\n"
+        f"  features: {matrix.x.shape[1]}\n"
+        f"  5-fold OOF AUC: {trained.oof_auc:.4f}\n"
+        f"  skipped (pool/index): {matrix.missing_in_pool}/{matrix.missing_in_index}\n"
+        f"  model: {destination / _LEARNED_MODEL_FILENAME}\n"
+        f"  meta: {destination / _LEARNED_META_FILENAME}"
     )
 
 
@@ -646,16 +673,81 @@ def eval_(
 
 
 @app.command("train-scorer")
-def train_scorer() -> None:
-    """Train the Phase 9 learned scorer (placeholder).
+def train_scorer(
+    index: Annotated[Path, Option("--index", help="LMDB index directory.")],
+    vault: Annotated[
+        Path,
+        Option("--vault", help="Label vault JSONL path."),
+    ] = _DEFAULT_VAULT_PATH,
+    pool: Annotated[
+        Path,
+        Option("--pool", help="MARC candidate pool root directory (<pool>/<lang>/*.xml)."),
+    ] = _DEFAULT_POOL_PATH,
+    out_dir: Annotated[
+        Path | None,
+        Option("--out-dir", help="Artifact directory (default: the index's parent)."),
+    ] = None,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Train the LightGBM learned combiner from the label vault.
 
-    The learned scorer is implemented in Phase 9; the current branch only
-    provides the CLI skeleton.
+    Scores every non-``unsure`` vault pair through the production pipeline,
+    projects the Evidence into the canonical feature matrix, fits the locked
+    issue #4 model, and writes ``learned_scorer.txt`` + ``learned_scorer.msgpack``
+    under ``--out-dir`` (defaulting to the index's parent).
+
+    Examples:
+        pd-matcher train-scorer \\
+            --index caches/cce.lmdb \\
+            --vault data/label_vault.jsonl \\
+            --pool data/candidates
     """
-    raise _fail(
-        "train-scorer is implemented in Phase 9; current branch only provides the CLI skeleton",
-        code=_ARG_ERROR_EXIT_CODE,
+    _enable_log_file("train-scorer", log_file)
+    if not vault.is_file():
+        raise _fail(f"--vault does not exist or is not a file: {vault}")
+    if not pool.is_dir():
+        raise _fail(f"--pool does not exist or is not a directory: {pool}")
+    if not index.exists():
+        raise _fail(f"--index does not exist: {index}")
+    destination = out_dir if out_dir is not None else index.parent
+    try:
+        matching_config = _load_default_matching_config()
+        pairing_config = _load_default_pairing_config()
+    except ConfigError as exc:
+        raise _fail(f"failed to load config defaults: {exc}") from exc
+    from pd_matcher.match.combiners import train as train_module
+    from pd_matcher.match.combiners.learned import model_metadata
+    from pd_matcher.match.combiners.learned import save_learned_model
+    from pd_matcher.match.combiners.train import build_training_matrix
+    from pd_matcher.match.combiners.train import train_learned_model
+
+    try:
+        matrix = build_training_matrix(
+            vault_path=vault,
+            pool_path=pool,
+            index_path=index,
+            matching_config=matching_config,
+            pairing_config=pairing_config,
+        )
+        trained = train_learned_model(matrix)
+    except (OSError, ValueError) as exc:
+        raise _fail(f"train-scorer failed: {exc}") from exc
+    meta = model_metadata(
+        trained.booster,
+        n_positive=trained.n_positive,
+        n_negative=trained.n_negative,
+        max_depth=train_module.MAX_DEPTH,
+        num_leaves=train_module.NUM_LEAVES,
+        min_data_in_leaf=train_module.MIN_DATA_IN_LEAF,
+        lambda_l2=train_module.LAMBDA_L2,
+        n_estimators=train_module.N_ESTIMATORS,
+        class_weight=train_module.CLASS_WEIGHT,
     )
+    save_learned_model(trained.booster, meta, destination)
+    echo(_format_train_report(trained, destination, matrix))
 
 
 __all__ = ["app", "index_app"]

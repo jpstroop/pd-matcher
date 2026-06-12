@@ -185,11 +185,12 @@ def test_eval_help_lists_options() -> None:
         assert flag in result.stdout
 
 
-def test_train_scorer_help_lists_phase_9_note() -> None:
-    """``train-scorer --help`` must succeed (and mention the Phase 9 placeholder)."""
+def test_train_scorer_help_lists_options() -> None:
+    """``train-scorer --help`` must succeed and list its options."""
     result = _runner.invoke(app, ["train-scorer", "--help"])
     assert result.exit_code == 0
-    assert "Phase 9" in result.stdout
+    assert "--index" in result.stdout
+    assert "--out-dir" in result.stdout
 
 
 def _matching_config(scorer: Literal["weighted_mean", "learned"]) -> MatchingConfig:
@@ -1248,11 +1249,10 @@ def test_format_sweep_appends_tail_when_grid_does_not_align() -> None:
     assert "t=1.00" in rendered
 
 
-def test_train_scorer_returns_phase_9_stub() -> None:
-    """``train-scorer`` exits 2 with the Phase 9 placeholder message."""
+def test_train_scorer_requires_index() -> None:
+    """``train-scorer`` exits 2 when the required ``--index`` is omitted."""
     result = _runner.invoke(app, ["train-scorer"])
     assert result.exit_code == 2
-    assert "Phase 9" in result.output
 
 
 def test_root_callback_accepts_log_flags() -> None:
@@ -1314,3 +1314,223 @@ def test_match_writes_log_file_with_explicit_path(tmp_path: Path) -> None:
     assert target.exists()
     contents = target.read_text(encoding="utf-8")
     assert "match.pool.start" in contents or "match.pool.complete" in contents
+
+
+def _write_trainable_vault(vault_path: Path) -> None:
+    """Append 5 match + 5 no_match entries so 5-fold CV has a row per fold/class."""
+    match_uuids = ("UUID-0001", "UUID-0003", "UUID-0004", "UUID-0005", "UUID-0007")
+    no_match_uuids = ("UUID-0002", "UUID-0008", "UUID-0009", "UUID-0010", "UUID-0011")
+    minute = 0
+    for uuid in match_uuids:
+        upsert_entry(
+            vault_path,
+            VaultEntry(
+                schema=SCHEMA_VERSION,
+                marc_control_id="marc-aaa",
+                nypl_uuid=uuid,
+                verdict="match",
+                note=None,
+                labeled_at=f"2026-05-22T10:{minute:02d}:00+00:00",
+                labeler="test",
+                marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+            ),
+        )
+        minute += 1
+    for uuid in no_match_uuids:
+        upsert_entry(
+            vault_path,
+            VaultEntry(
+                schema=SCHEMA_VERSION,
+                marc_control_id="marc-aaa",
+                nypl_uuid=uuid,
+                verdict="no_match",
+                note=None,
+                labeled_at=f"2026-05-22T11:{minute:02d}:00+00:00",
+                labeler="test",
+                marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+            ),
+        )
+        minute += 1
+
+
+def test_train_scorer_writes_artifact(tmp_path: Path) -> None:
+    """``train-scorer`` fits a model and writes both artifact files."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path)
+    vault_path = tmp_path / "vault.jsonl"
+    _write_trainable_vault(vault_path)
+    out_dir = tmp_path / "model"
+    result = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(index_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+            "--out-dir",
+            str(out_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "5-fold OOF AUC" in result.stdout
+    assert (out_dir / "learned_scorer.txt").is_file()
+    assert (out_dir / "learned_scorer.msgpack").is_file()
+
+
+def test_train_scorer_defaults_out_dir_to_index_parent(tmp_path: Path) -> None:
+    """With no ``--out-dir`` the artifact lands beside the index."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path)
+    vault_path = tmp_path / "vault.jsonl"
+    _write_trainable_vault(vault_path)
+    result = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(index_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (index_path.parent / "learned_scorer.msgpack").is_file()
+
+
+def test_train_scorer_rejects_single_class_vault(tmp_path: Path) -> None:
+    """A vault with only matches cannot train a binary classifier."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path)
+    vault_path = tmp_path / "vault.jsonl"
+    _write_vault(vault_path)
+    upsert_entry(
+        vault_path,
+        VaultEntry(
+            schema=SCHEMA_VERSION,
+            marc_control_id="marc-aaa",
+            nypl_uuid="UUID-0002",
+            verdict="match",
+            note=None,
+            labeled_at="2026-05-22T12:00:00+00:00",
+            labeler="test",
+            marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+        ),
+    )
+    result = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(index_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "train-scorer failed" in result.output
+
+
+def test_train_scorer_rejects_missing_vault(tmp_path: Path) -> None:
+    """``train-scorer`` exits 1 when ``--vault`` does not exist."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path)
+    result = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(index_path),
+            "--vault",
+            str(tmp_path / "missing.jsonl"),
+            "--pool",
+            str(pool_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--vault" in result.output
+
+
+def test_train_scorer_rejects_missing_pool(tmp_path: Path) -> None:
+    """``train-scorer`` exits 1 when ``--pool`` is not a directory."""
+    index_path = _build_index(tmp_path)
+    vault_path = tmp_path / "vault.jsonl"
+    _write_trainable_vault(vault_path)
+    result = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(index_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(tmp_path / "missing-pool"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--pool" in result.output
+
+
+def test_train_scorer_rejects_missing_index(tmp_path: Path) -> None:
+    """``train-scorer`` exits 1 when ``--index`` does not exist."""
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path)
+    vault_path = tmp_path / "vault.jsonl"
+    _write_trainable_vault(vault_path)
+    result = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(tmp_path / "missing.lmdb"),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--index" in result.output
+
+
+def test_train_scorer_surfaces_config_error(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A ConfigError during defaults load surfaces as exit 1."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path)
+    vault_path = tmp_path / "vault.jsonl"
+    _write_trainable_vault(vault_path)
+    from pd_matcher.config.loader import ConfigError
+
+    def _raise() -> object:
+        raise ConfigError("bad yaml")
+
+    monkeypatch.setattr("pd_matcher.cli._load_default_matching_config", _raise)
+    result = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(index_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "config defaults" in result.output
