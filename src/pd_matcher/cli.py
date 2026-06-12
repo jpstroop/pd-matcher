@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import UTC
 from datetime import datetime
+from enum import StrEnum
 from importlib.resources import as_file
 from importlib.resources import files
 from json import dumps
@@ -21,6 +22,7 @@ from logging import WARNING
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Annotated
+from typing import Literal
 
 from msgspec import DecodeError
 from msgspec import to_builtins
@@ -72,6 +74,13 @@ _YEAR_WINDOW_MAX: int = 100
 _DEFAULT_VAULT_PATH: Path = Path("data/label_vault.jsonl")
 _DEFAULT_POOL_PATH: Path = Path("data/candidates")
 _SWEEP_PREVIEW_STEP: int = 4
+
+
+class _ScorerChoice(StrEnum):
+    """Combiner choices accepted by ``eval --scorer``."""
+
+    WEIGHTED_MEAN = "weighted_mean"
+    LEARNED = "learned"
 
 
 class _LogSettings:
@@ -209,6 +218,36 @@ def _load_default_pairing_config() -> PairingConfig:
     resource = files("pd_matcher.config.defaults") / "field_pairings.yaml"
     with as_file(resource) as path:
         return load_pairing_config(path)
+
+
+def _override_matching_config(
+    config: MatchingConfig,
+    *,
+    year_window: int | None = None,
+    min_combined_score: float | None = None,
+    scorer: Literal["weighted_mean", "learned"] | None = None,
+) -> MatchingConfig:
+    """Return ``config`` with the supplied fields overridden (``None`` keeps).
+
+    The weights are always carried verbatim; only the run-time knobs a CLI
+    flag can override are substitutable.
+    """
+    return MatchingConfig(
+        title_weight=config.title_weight,
+        author_weight=config.author_weight,
+        publisher_weight=config.publisher_weight,
+        year_weight=config.year_weight,
+        edition_weight=config.edition_weight,
+        lccn_weight=config.lccn_weight,
+        isbn_weight=config.isbn_weight,
+        extent_weight=config.extent_weight,
+        volume_weight=config.volume_weight,
+        year_window=year_window if year_window is not None else config.year_window,
+        min_combined_score=(
+            min_combined_score if min_combined_score is not None else config.min_combined_score
+        ),
+        scorer=scorer if scorer is not None else config.scorer,
+    )
 
 
 def _format_build_report(report: BuildReport, out_path: Path) -> str:
@@ -530,21 +569,10 @@ def match(
     except ConfigError as exc:
         raise _fail(f"failed to load matching defaults: {exc}") from exc
     if year_window is not None or min_score is not None:
-        matching_config = MatchingConfig(
-            title_weight=matching_config.title_weight,
-            author_weight=matching_config.author_weight,
-            publisher_weight=matching_config.publisher_weight,
-            year_weight=matching_config.year_weight,
-            edition_weight=matching_config.edition_weight,
-            lccn_weight=matching_config.lccn_weight,
-            isbn_weight=matching_config.isbn_weight,
-            extent_weight=matching_config.extent_weight,
-            volume_weight=matching_config.volume_weight,
-            year_window=year_window if year_window is not None else matching_config.year_window,
-            min_combined_score=(
-                min_score if min_score is not None else matching_config.min_combined_score
-            ),
-            scorer=matching_config.scorer,
+        matching_config = _override_matching_config(
+            matching_config,
+            year_window=year_window,
+            min_combined_score=min_score,
         )
     try:
         pairing_config = _load_default_pairing_config()
@@ -606,6 +634,13 @@ def eval_(
             help="Override the matching config's year_window for this eval run.",
         ),
     ] = None,
+    scorer: Annotated[
+        _ScorerChoice | None,
+        Option(
+            "--scorer",
+            help="Override the matching config's scorer (weighted_mean|learned) for this run.",
+        ),
+    ] = None,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
@@ -618,6 +653,7 @@ def eval_(
             --vault data/label_vault.jsonl \\
             --pool data/candidates \\
             --index caches/cce.lmdb \\
+            --scorer learned \\
             --report /tmp/eval.json
     """
     _enable_log_file("eval", log_file)
@@ -632,20 +668,11 @@ def eval_(
         matching_config = _load_default_matching_config()
     except ConfigError as exc:
         raise _fail(f"failed to load matching defaults: {exc}") from exc
-    if year_window is not None:
-        matching_config = MatchingConfig(
-            title_weight=matching_config.title_weight,
-            author_weight=matching_config.author_weight,
-            publisher_weight=matching_config.publisher_weight,
-            year_weight=matching_config.year_weight,
-            edition_weight=matching_config.edition_weight,
-            lccn_weight=matching_config.lccn_weight,
-            isbn_weight=matching_config.isbn_weight,
-            extent_weight=matching_config.extent_weight,
-            volume_weight=matching_config.volume_weight,
+    if year_window is not None or scorer is not None:
+        matching_config = _override_matching_config(
+            matching_config,
             year_window=year_window,
-            min_combined_score=matching_config.min_combined_score,
-            scorer=matching_config.scorer,
+            scorer=scorer.value if scorer is not None else None,
         )
     try:
         pairing_config = _load_default_pairing_config()
@@ -663,7 +690,7 @@ def eval_(
             calibrator=calibrator,
             learned_model_dir=learned_model_dir,
         )
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         raise _fail(f"eval run failed: {exc}") from exc
     echo("Eval report:")
     echo(_format_eval_report(eval_report))

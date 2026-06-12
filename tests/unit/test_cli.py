@@ -181,6 +181,7 @@ def test_eval_help_lists_options() -> None:
         "--index",
         "--report",
         "--year-window",
+        "--scorer",
     ):
         assert flag in result.stdout
 
@@ -1534,3 +1535,106 @@ def test_train_scorer_surfaces_config_error(
     )
     assert result.exit_code == 1
     assert "config defaults" in result.output
+
+
+def test_eval_scorer_override_weighted_mean(tmp_path: Path) -> None:
+    """``eval --scorer weighted_mean`` runs without needing a learned artifact."""
+    index_path = _build_index(tmp_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+            "--index",
+            str(index_path),
+            "--scorer",
+            "weighted_mean",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Eval report:" in result.stdout
+
+
+def test_eval_scorer_override_learned(tmp_path: Path) -> None:
+    """``eval --scorer learned`` loads the artifact trained beside the index."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path)
+    vault_path = tmp_path / "vault.jsonl"
+    _write_trainable_vault(vault_path)
+    train = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(index_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+        ],
+    )
+    assert train.exit_code == 0, train.output
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+            "--index",
+            str(index_path),
+            "--scorer",
+            "learned",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Eval report:" in result.stdout
+
+
+def test_eval_scorer_learned_without_artifact_errors(tmp_path: Path) -> None:
+    """``eval --scorer learned`` fails loudly when no artifact is present."""
+    index_path = _build_index(tmp_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+            "--index",
+            str(index_path),
+            "--scorer",
+            "learned",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "train-scorer" in result.output
+
+
+def test_eval_scorer_rejects_invalid_value(tmp_path: Path) -> None:
+    """An unknown ``--scorer`` value is rejected by typer with exit 2."""
+    index_path = _build_index(tmp_path)
+    vault_path, pool_path = _prepare_vault_and_pool(tmp_path)
+    result = _runner.invoke(
+        app,
+        [
+            "eval",
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+            "--index",
+            str(index_path),
+            "--scorer",
+            "magic",
+        ],
+    )
+    assert result.exit_code == 2
