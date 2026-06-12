@@ -48,8 +48,8 @@ from pd_matcher.eval.metrics import average_precision
 from pd_matcher.eval.metrics import roc_auc
 from pd_matcher.eval.metrics import threshold_sweep
 from pd_matcher.index.lookup import NyplIndexLookup
+from pd_matcher.match.combiners import build_combiner
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
-from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import build_idf_table
 from pd_matcher.match.pairing_compiler import CompiledPairings
@@ -148,6 +148,7 @@ def _run_pass_a(
     pairings: CompiledPairings,
     matching_config: MatchingConfig,
     calibrator: PlattCalibrator | None,
+    learned_model_dir: Path | None,
 ) -> tuple[list[tuple[float, int]], int, int, int, int]:
     """Score every kept vault entry; return scored pairs plus skip totals.
 
@@ -161,6 +162,7 @@ def _run_pass_a(
         pairings=pairings,
         idf=idf,
         calibrator=calibrator,
+        learned_model_dir=learned_model_dir,
     )
     scored: list[tuple[float, int]] = []
     positives = 0
@@ -206,9 +208,10 @@ def _run_pass_b(
     pairings: CompiledPairings,
     matching_config: MatchingConfig,
     calibrator: PlattCalibrator | None,
+    learned_model_dir: Path | None,
 ) -> tuple[int, int, int]:
     """Run per-MARC linkage; return ``(evaluated, with_top, correct_top)``."""
-    combiner = WeightedMeanCombiner(config=matching_config)
+    combiner = build_combiner(matching_config, learned_model_dir=learned_model_dir)
     marcs_evaluated = 0
     marcs_with_matcher_top = 0
     marcs_with_correct_top = 0
@@ -247,6 +250,7 @@ def run_eval(
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
     calibrator: PlattCalibrator | None = None,
+    learned_model_dir: Path | None = None,
 ) -> EvalReport:
     """Evaluate the matcher pipeline against the vault.
 
@@ -265,6 +269,9 @@ def run_eval(
         calibrator: Optional Platt calibrator threaded through both
             passes; ``None`` uses the linear pass-through (raw / 100)
             from :class:`~pd_matcher.match.combiners.weighted_mean.WeightedMeanCombiner`.
+        learned_model_dir: Directory holding the learned-model artifact when
+            ``matching_config.scorer == "learned"``; threaded into both
+            passes. ``None`` on the default weighted-mean path.
 
     Returns:
         A populated :class:`EvalReport`.
@@ -286,6 +293,7 @@ def run_eval(
             pairings=pairings,
             matching_config=matching_config,
             calibrator=calibrator,
+            learned_model_dir=learned_model_dir,
         )
         marcs_evaluated, marcs_with_top, marcs_correct = _run_pass_b(
             ground_truth,
@@ -295,6 +303,7 @@ def run_eval(
             pairings=pairings,
             matching_config=matching_config,
             calibrator=calibrator,
+            learned_model_dir=learned_model_dir,
         )
     pairs_evaluated = positives + negatives
     if scored:

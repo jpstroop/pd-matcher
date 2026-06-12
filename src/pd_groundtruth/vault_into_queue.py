@@ -215,6 +215,7 @@ def vault_into_queue(
         pairings=pairings,
         idf=idf,
         calibrator=calibrator,
+        learned_model_dir=index_path.parent,
     )
 
     with NyplIndexLookup(index_path) as lookup:
@@ -233,6 +234,7 @@ def _make_pair_scorer(
     pairings: CompiledPairings,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
+    learned_model_dir: Path | None,
 ) -> ScorePairFn:
     """Local indirection so tests can monkey-patch the scorer factory.
 
@@ -243,6 +245,7 @@ def _make_pair_scorer(
         pairings=pairings,
         idf=idf,
         calibrator=calibrator,
+        learned_model_dir=learned_model_dir,
     )
 
 

@@ -38,6 +38,7 @@ from pd_groundtruth.vault_pair_resolver import make_pair_scorer
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.index.lookup import NyplIndexLookup
+from pd_matcher.match.combiners.features import SCORER_ORDER
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.idf import build_idf_table
 from pd_matcher.match.pairing_compiler import compile_pairings
@@ -47,18 +48,6 @@ _LOGGER = getLogger(__name__)
 
 _VERDICT_MATCH: str = "match"
 _VERDICT_UNSURE: str = "unsure"
-
-SCORER_ORDER: tuple[str, ...] = (
-    "title.token_set",
-    "name.author",
-    "name.publisher",
-    "year.delta",
-    "edition.compat",
-    "lccn.exact",
-    "isbn.exact",
-    "extent.page_count",
-    "volume.compat",
-)
 
 
 class FeatureMatrixRow(Struct, frozen=True, forbid_unknown_fields=True):

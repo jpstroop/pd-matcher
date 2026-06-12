@@ -3,6 +3,7 @@
 from csv import DictReader
 from json import loads
 from pathlib import Path
+from typing import Literal
 from typing import Self
 
 from msgspec.msgpack import Encoder
@@ -13,6 +14,7 @@ from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import upsert_entry
+from pd_matcher.cli import _learned_model_dir
 from pd_matcher.cli import _resolve_log_file
 from pd_matcher.cli import app
 from pd_matcher.config.schemas import MatchingConfig
@@ -188,6 +190,34 @@ def test_train_scorer_help_lists_phase_9_note() -> None:
     result = _runner.invoke(app, ["train-scorer", "--help"])
     assert result.exit_code == 0
     assert "Phase 9" in result.stdout
+
+
+def _matching_config(scorer: Literal["weighted_mean", "learned"]) -> MatchingConfig:
+    """A valid matching config (weights sum to 1.0) with ``scorer`` set."""
+    return MatchingConfig(
+        title_weight=0.35,
+        author_weight=0.20,
+        publisher_weight=0.10,
+        year_weight=0.10,
+        edition_weight=0.05,
+        lccn_weight=0.10,
+        isbn_weight=0.0,
+        extent_weight=0.05,
+        volume_weight=0.05,
+        year_window=0,
+        min_combined_score=0.0,
+        scorer=scorer,
+    )
+
+
+def test_learned_model_dir_none_on_default_scorer(tmp_path: Path) -> None:
+    """The weighted-mean path never resolves a learned-model directory."""
+    assert _learned_model_dir(tmp_path, _matching_config("weighted_mean")) is None
+
+
+def test_learned_model_dir_returns_parent_for_learned_scorer(tmp_path: Path) -> None:
+    """The learned scorer resolves the artifact directory to the index parent."""
+    assert _learned_model_dir(tmp_path, _matching_config("learned")) == tmp_path
 
 
 def test_index_build_succeeds_on_tiny_fixtures(tmp_path: Path) -> None:

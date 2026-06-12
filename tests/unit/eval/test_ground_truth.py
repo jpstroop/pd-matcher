@@ -524,3 +524,81 @@ def test_run_eval_latest_verdict_wins(tmp_path: Path) -> None:
     assert report.pairs_positive == 0
     assert report.pairs_negative == 1
     assert report.marcs_evaluated == 0
+
+
+def _learned_matching_config() -> MatchingConfig:
+    """The permissive config with the learned scorer selected."""
+    base = _matching_config()
+    return MatchingConfig(
+        title_weight=base.title_weight,
+        author_weight=base.author_weight,
+        publisher_weight=base.publisher_weight,
+        year_weight=base.year_weight,
+        edition_weight=base.edition_weight,
+        lccn_weight=base.lccn_weight,
+        isbn_weight=base.isbn_weight,
+        extent_weight=base.extent_weight,
+        volume_weight=base.volume_weight,
+        year_window=base.year_window,
+        min_combined_score=base.min_combined_score,
+        scorer="learned",
+    )
+
+
+def _write_tiny_learned_model(directory: Path) -> None:
+    """Train and persist a tiny learned-model artifact under ``directory``."""
+    from lightgbm import LGBMClassifier
+    from numpy import asarray
+    from numpy import float64
+    from numpy import int64
+
+    from pd_matcher.match.combiners.features import feature_names
+    from pd_matcher.match.combiners.learned import model_metadata
+    from pd_matcher.match.combiners.learned import save_learned_model
+
+    n_features = len(feature_names())
+    rows = [[0.9 if i % 2 == 0 else 0.1] + [0.0] * (n_features - 1) for i in range(20)]
+    labels = [1 if i % 2 == 0 else 0 for i in range(20)]
+    model = LGBMClassifier(
+        max_depth=3,
+        num_leaves=8,
+        min_data_in_leaf=5,
+        n_estimators=10,
+        random_state=0,
+        verbose=-1,
+        n_jobs=1,
+    )
+    model.fit(asarray(rows, dtype=float64), asarray(labels, dtype=int64).astype(float64))
+    meta = model_metadata(
+        model.booster_,
+        n_positive=10,
+        n_negative=10,
+        max_depth=3,
+        num_leaves=8,
+        min_data_in_leaf=5,
+        lambda_l2=1.0,
+        n_estimators=10,
+        class_weight="balanced",
+    )
+    save_learned_model(model.booster_, meta, directory)
+
+
+def test_run_eval_threads_learned_model_through_both_passes(tmp_path: Path) -> None:
+    """run_eval scores via the learned combiner when given a model directory."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, _standard_marc_records())
+    vault_path = tmp_path / "vault.jsonl"
+    _standard_vault(vault_path)
+    model_dir = tmp_path / "model"
+    _write_tiny_learned_model(model_dir)
+    report = run_eval(
+        vault_path=vault_path,
+        pool_path=pool_path,
+        index_path=index_path,
+        matching_config=_learned_matching_config(),
+        pairing_config=_pairing_config(),
+        learned_model_dir=model_dir,
+    )
+    assert isinstance(report, EvalReport)
+    assert report.pairs_evaluated == 2

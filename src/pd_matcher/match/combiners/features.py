@@ -32,8 +32,23 @@ is authoritative and is asserted by the unit tests.
 
 from collections.abc import Sequence
 
-from pd_matcher.eval.feature_matrix import SCORER_ORDER
 from pd_matcher.match.evidence import Evidence
+
+# Canonical per-scorer order. The matcher emits exactly one Evidence per name
+# here; both the learned combiner and the eval feature matrix project the
+# Evidence stream against this order. Defined in the production match package
+# (not eval) so production code never imports the eval package.
+SCORER_ORDER: tuple[str, ...] = (
+    "title.token_set",
+    "name.author",
+    "name.publisher",
+    "year.delta",
+    "edition.compat",
+    "lccn.exact",
+    "isbn.exact",
+    "extent.page_count",
+    "volume.compat",
+)
 
 _TITLE_SCORER: str = "title.token_set"
 _MARC_TOKEN_LEN: str = "marc_token_len"
@@ -189,6 +204,7 @@ def feature_row(evidence: Sequence[Evidence]) -> tuple[float, ...]:
 
 
 __all__ = [
+    "SCORER_ORDER",
     "feature_names",
     "feature_row",
 ]

@@ -23,8 +23,9 @@ from structlog.contextvars import unbind_contextvars
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.index.lookup import NyplIndexLookup
+from pd_matcher.match.combiners import build_combiner
+from pd_matcher.match.combiners.base import Combiner
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
-from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
@@ -56,7 +57,7 @@ def _process_record(
     config: MatchingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
-    combiner: WeightedMeanCombiner,
+    combiner: Combiner,
     pairings: CompiledPairings,
 ) -> WorkerOutput:
     """Run match over one record and return the wire payload."""
@@ -113,6 +114,7 @@ def run_worker_loop(
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
     pairings: CompiledPairings,
+    learned_model_dir: Path | None,
     input_get: Callable[[], bytes | None],
     output_put: Callable[[bytes], None],
     stats_put: Callable[[bytes], None],
@@ -129,6 +131,9 @@ def run_worker_loop(
         idf: Pre-built :class:`IdfTable`.
         calibrator: Optional Platt calibrator.
         pairings: Compiled field pairings shared across all records.
+        learned_model_dir: Directory holding the learned-model artifact when
+            ``config.scorer == "learned"``; ``None`` on the default
+            weighted-mean path.
         input_get: Zero-arg callable returning the next encoded batch
             blob, or ``None`` to signal the worker should stop. Usually
             ``input_queue.get``.
@@ -149,7 +154,7 @@ def run_worker_loop(
     Returns:
         The number of records processed by this worker.
     """
-    combiner = WeightedMeanCombiner(config=config)
+    combiner = build_combiner(config, learned_model_dir=learned_model_dir)
     started_at = clock()
     if verbosity >= 1:
         _LOGGER.info("worker.start", worker=worker_id)
@@ -213,6 +218,7 @@ def worker_main(
     pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
+    learned_model_dir: Path | None,
     input_get: Callable[[], bytes | None],
     output_put: Callable[[bytes], None],
     stats_put: Callable[[bytes], None],
@@ -225,7 +231,8 @@ def worker_main(
     Opens the LMDB lookup, compiles the pairing config once, and runs the
     consume loop until exhaustion or shutdown. ``worker_id`` and ``verbosity``
     flow straight through to :func:`run_worker_loop`'s per-worker logging.
-    Returns the count of processed records.
+    The learned combiner's artifact is loaded once per worker inside the loop
+    via ``learned_model_dir``. Returns the count of processed records.
     """
     pairings = compile_pairings(pairing_config)
     with NyplIndexLookup(index_path) as lookup:
@@ -235,6 +242,7 @@ def worker_main(
             idf=idf,
             calibrator=calibrator,
             pairings=pairings,
+            learned_model_dir=learned_model_dir,
             input_get=input_get,
             output_put=output_put,
             stats_put=stats_put,

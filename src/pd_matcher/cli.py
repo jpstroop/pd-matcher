@@ -55,6 +55,7 @@ _INTERRUPTED_EXIT_CODE: int = 130
 
 _IDF_CACHE_NAME: str = "idf.msgpack"
 _CALIBRATOR_NAME: str = "calibrator.msgpack"
+_LEARNED_SCORER: str = "learned"
 
 _YEAR_WINDOW_MIN: int = 0
 _YEAR_WINDOW_MAX: int = 100
@@ -300,6 +301,19 @@ def _load_calibrator(parent: Path) -> PlattCalibrator | None:
     return load_calibrator(candidate)
 
 
+def _learned_model_dir(parent: Path, config: MatchingConfig) -> Path | None:
+    """Return the learned-model directory only when the learned scorer is active.
+
+    The default weighted-mean path never touches the artifact, so we avoid the
+    IO entirely unless ``config.scorer == "learned"``; the loud
+    missing-artifact error then surfaces from
+    :func:`pd_matcher.match.combiners.build_combiner`.
+    """
+    if config.scorer != _LEARNED_SCORER:
+        return None
+    return parent
+
+
 @index_app.command("build")
 def index_build(
     reg_dir: Annotated[
@@ -515,6 +529,7 @@ def match(
     except OSError as exc:
         raise _fail(f"failed to load/build IDF table: {exc}") from exc
     calibrator = _load_calibrator(index.parent)
+    learned_model_dir = _learned_model_dir(index.parent, matching_config)
     try:
         report = run_match(
             marc_path=marc,
@@ -526,6 +541,7 @@ def match(
             pairing_config=pairing_config,
             idf=idf,
             calibrator=calibrator,
+            learned_model_dir=learned_model_dir,
             workers=workers,
             report_interval_seconds=5.0,
             verbosity=verbose,
@@ -609,6 +625,7 @@ def eval_(
     except ConfigError as exc:
         raise _fail(f"failed to load pairing defaults: {exc}") from exc
     calibrator = _load_calibrator(index.parent)
+    learned_model_dir = _learned_model_dir(index.parent, matching_config)
     try:
         eval_report = run_eval(
             vault_path=vault,
@@ -617,6 +634,7 @@ def eval_(
             matching_config=matching_config,
             pairing_config=pairing_config,
             calibrator=calibrator,
+            learned_model_dir=learned_model_dir,
         )
     except OSError as exc:
         raise _fail(f"eval run failed: {exc}") from exc

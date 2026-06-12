@@ -1,6 +1,6 @@
 """Tests for :mod:`pd_matcher.match.combiners.features`."""
 
-from pd_matcher.eval.feature_matrix import SCORER_ORDER
+from pd_matcher.match.combiners.features import SCORER_ORDER
 from pd_matcher.match.combiners.features import feature_names
 from pd_matcher.match.combiners.features import feature_row
 from pd_matcher.match.evidence import Evidence

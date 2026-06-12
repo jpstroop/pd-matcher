@@ -21,8 +21,8 @@ from msgspec import Struct
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.review_db import PairInsert
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.match.combiners import build_combiner
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
-from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pipeline import _build_context
@@ -104,6 +104,7 @@ def make_pair_scorer(
     pairings: CompiledPairings,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
+    learned_model_dir: Path | None = None,
 ) -> ScorePairFn:
     """Bind the matcher's per-pair scoring routine into a one-arg callable.
 
@@ -111,9 +112,11 @@ def make_pair_scorer(
     rows carry the *same* evidence/scores the production matcher would emit if
     it ever proposed the pair (the matcher's candidate retrieval wouldn't
     necessarily surface it from scratch, which is exactly why the vault has to
-    be honored verbatim here).
+    be honored verbatim here). ``learned_model_dir`` selects the learned
+    combiner's artifact when ``matching_config.scorer == "learned"``; the
+    default weighted-mean path ignores it.
     """
-    combiner = WeightedMeanCombiner(config=matching_config)
+    combiner = build_combiner(matching_config, learned_model_dir=learned_model_dir)
 
     def scorer(marc: MarcRecord, candidate: IndexedNyplRegRecord) -> CandidateMatch:
         ctx = _build_context(marc, idf, matching_config)
