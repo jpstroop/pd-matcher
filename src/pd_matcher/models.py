@@ -36,6 +36,7 @@ class MarcRecord(Struct, frozen=True, forbid_unknown_fields=True):
     publication_year: int | None = None
     extent: str | None = None
     series_titles: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
     language_code: str | None = None
     country_code: str | None = None
 

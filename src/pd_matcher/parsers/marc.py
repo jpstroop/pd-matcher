@@ -33,6 +33,7 @@ _YEAR_RE = re_compile(r"(\d{4})")
 _YEAR_MIN = 1450
 _YEAR_MAX = 2050
 _OCLC_PREFIX = "(OCoLC)"
+_NOTE_TAGS: frozenset[str] = frozenset({"500", "502", "505", "520"})
 
 _LOGGER = getLogger(__name__)
 
@@ -159,6 +160,7 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
     pub_date_raw: str | None = None
     extent: str | None = None
     series_titles: list[str] = []
+    notes_raw: list[str] = []
 
     for child in record_elem:
         if child.tag == _CONTROLFIELD_TAG:
@@ -211,6 +213,8 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
                 extent = _first_subfield(child, "a")
         elif tag in {"440", "490", "830"}:
             series_titles.extend(_subfield_texts(child, "a"))
+        elif tag in _NOTE_TAGS:
+            notes_raw.extend(_subfield_texts(child, "a"))
         elif tag == "700":
             added_authors.extend(_subfield_texts(child, "a"))
 
@@ -255,6 +259,9 @@ def _build_record(record_elem: _Element, stats: MarcParseStats) -> MarcRecord | 
         extent=_clean(extent, stats),
         series_titles=tuple(
             cleaned for cleaned in (_clean(v, stats) for v in series_titles) if cleaned is not None
+        ),
+        notes=tuple(
+            cleaned for cleaned in (_clean(v, stats) for v in notes_raw) if cleaned is not None
         ),
         language_code=_slice_008(control_008, 35, 38),
         country_code=_slice_008(control_008, 15, 18),
