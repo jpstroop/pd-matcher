@@ -5,20 +5,20 @@
     "year_window": 0
   },
   "metrics": {
-    "precision": 0.9952038369304557,
-    "recall": 0.992822966507177,
-    "f1": 0.9940119760479041,
-    "auc_roc": 0.9457724232731503,
-    "average_precision": 0.9764124410477992
+    "precision": 0.9967391304347826,
+    "recall": 0.9945770065075922,
+    "f1": 0.995656894679696,
+    "auc_roc": 0.9418913537147505,
+    "average_precision": 0.9677151988368867
   },
   "counts": {
-    "pairs_evaluated": 1198,
-    "pairs_positive": 836,
-    "pairs_negative": 362,
-    "pairs_unsure_excluded": 60,
-    "marcs_evaluated": 836,
-    "marcs_with_matcher_top": 834,
-    "marcs_with_correct_top": 830
+    "pairs_evaluated": 1434,
+    "pairs_positive": 922,
+    "pairs_negative": 512,
+    "pairs_unsure_excluded": 66,
+    "marcs_evaluated": 922,
+    "marcs_with_matcher_top": 920,
+    "marcs_with_correct_top": 917
   },
   "tolerance": 0.02,
   "notes": "Vault-driven eval. Pair-level AUC/AP plus per-MARC P/R; gate is precision/recall only on linkage agreement (latest 'match' verdict wins). Generated: vault=data/label_vault.jsonl pool=data/candidates year_window=0."
