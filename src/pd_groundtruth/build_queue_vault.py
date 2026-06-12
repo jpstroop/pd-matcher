@@ -140,6 +140,7 @@ def resolve_vault_for_build(
         pairings=pairings,
         idf=idf,
         calibrator=calibrator,
+        learned_model_dir=index_path.parent,
     )
     with NyplIndexLookup(index_path) as lookup:
         build_pair = _make_vault_pair_builder()

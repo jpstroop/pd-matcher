@@ -543,6 +543,7 @@ def test_make_pair_scorer_delegates_to_shared_helper() -> None:
         pairings=pairings,
         idf=idf,
         calibrator=None,
+        learned_model_dir=None,
     )
     candidate = scorer(_marc("ctrl-1"), _cce("uuid-1"))
     assert candidate.nypl_uuid == "uuid-1"

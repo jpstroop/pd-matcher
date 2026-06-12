@@ -113,6 +113,7 @@ def _spawn_workers(
     pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
+    learned_model_dir: Path | None,
     input_queue: MpQueue[bytes | None],
     output_queue: MpQueue[bytes | None],
     stats_queue: MpQueue[bytes],
@@ -134,6 +135,7 @@ def _spawn_workers(
                 "pairing_config": pairing_config,
                 "idf": idf,
                 "calibrator": calibrator,
+                "learned_model_dir": learned_model_dir,
                 "input_queue": input_queue,
                 "output_queue": output_queue,
                 "stats_queue": stats_queue,
@@ -157,6 +159,7 @@ def _worker_entry(
     pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None,
+    learned_model_dir: Path | None,
     input_queue: MpQueue[bytes | None],
     output_queue: MpQueue[bytes | None],
     stats_queue: MpQueue[bytes],
@@ -184,6 +187,7 @@ def _worker_entry(
         pairing_config=pairing_config,
         idf=idf,
         calibrator=calibrator,
+        learned_model_dir=learned_model_dir,
         input_get=input_queue.get,
         output_put=output_queue.put,
         stats_put=stats_queue.put,
@@ -253,6 +257,7 @@ def run_match(
     pairing_config: PairingConfig,
     idf: IdfTable,
     calibrator: PlattCalibrator | None = None,
+    learned_model_dir: Path | None = None,
     workers: int | None = None,
     batch_size: int = _DEFAULT_BATCH_SIZE,
     queue_maxsize: int | None = None,
@@ -286,6 +291,9 @@ def run_match(
             it into :class:`CompiledPairings` once at init.
         idf: Pre-built :class:`IdfTable` (workers load it once at init).
         calibrator: Optional Platt calibrator.
+        learned_model_dir: Directory holding the learned-model artifact,
+            forwarded to each worker so the learned combiner loads its model
+            once per process; ``None`` on the default weighted-mean path.
         workers: Number of worker processes. ``None`` uses ``cpu_count - 1``.
         batch_size: MARC records per IPC batch.
         queue_maxsize: Bound on the input queue. ``None`` derives ``workers * 4``.
@@ -329,6 +337,7 @@ def run_match(
             pairing_config=pairing_config,
             idf=idf,
             calibrator=calibrator,
+            learned_model_dir=learned_model_dir,
             input_queue=input_queue,
             output_queue=output_queue,
             stats_queue=stats_queue,

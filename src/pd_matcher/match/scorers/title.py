@@ -94,6 +94,8 @@ def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerConte
         ("unique_to_marc", float(len(marc_set - nypl_set))),
         ("unique_to_nypl", float(len(nypl_set - marc_set))),
         ("avg_token_idf", avg_idf),
+        ("marc_token_len", float(len(marc_set))),
+        ("nypl_token_len", float(len(nypl_set))),
     )
     return Evidence(
         scorer=_SCORER_NAME,

@@ -87,7 +87,7 @@ warn_unreachable = true
 no_implicit_reexport = true
 
 [[tool.mypy.overrides]]
-module = ["Stemmer"]
+module = ["Stemmer", "sklearn.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

@@ -73,6 +73,7 @@ def test_worker_entry_runs_in_process_against_real_queues(
         pairing_config=pairing_config,
         idf=tiny_idf,
         calibrator=None,
+        learned_model_dir=None,
         input_queue=input_queue,
         output_queue=output_queue,
         stats_queue=stats_queue,

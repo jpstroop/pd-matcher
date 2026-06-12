@@ -10,14 +10,19 @@ reported on stderr with these exit codes:
 * ``130`` — interrupted by SIGINT
 """
 
+from __future__ import annotations
+
 from datetime import UTC
 from datetime import datetime
+from enum import StrEnum
 from importlib.resources import as_file
 from importlib.resources import files
 from json import dumps
 from logging import WARNING
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Annotated
+from typing import Literal
 
 from msgspec import DecodeError
 from msgspec import to_builtins
@@ -42,6 +47,8 @@ from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.logging_config import configure_logging
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.calibrator import load_calibrator
+from pd_matcher.match.combiners.learned import META_FILENAME as _LEARNED_META_FILENAME
+from pd_matcher.match.combiners.learned import MODEL_FILENAME as _LEARNED_MODEL_FILENAME
 from pd_matcher.match.idf import load_or_build_idf
 from pd_matcher.match.prepare import PrepareReport
 from pd_matcher.match.prepare import prepare_marc
@@ -49,12 +56,17 @@ from pd_matcher.match.prepare import read_manifest
 from pd_matcher.workers import RunReport
 from pd_matcher.workers import run_match
 
+if TYPE_CHECKING:  # pragma: no cover
+    from pd_matcher.match.combiners.train import TrainedModel
+    from pd_matcher.match.combiners.train import TrainingMatrix
+
 _ARG_ERROR_EXIT_CODE: int = 2
 _RUNTIME_ERROR_EXIT_CODE: int = 1
 _INTERRUPTED_EXIT_CODE: int = 130
 
 _IDF_CACHE_NAME: str = "idf.msgpack"
 _CALIBRATOR_NAME: str = "calibrator.msgpack"
+_LEARNED_SCORER: str = "learned"
 
 _YEAR_WINDOW_MIN: int = 0
 _YEAR_WINDOW_MAX: int = 100
@@ -62,6 +74,13 @@ _YEAR_WINDOW_MAX: int = 100
 _DEFAULT_VAULT_PATH: Path = Path("data/label_vault.jsonl")
 _DEFAULT_POOL_PATH: Path = Path("data/candidates")
 _SWEEP_PREVIEW_STEP: int = 4
+
+
+class _ScorerChoice(StrEnum):
+    """Combiner choices accepted by ``eval --scorer``."""
+
+    WEIGHTED_MEAN = "weighted_mean"
+    LEARNED = "learned"
 
 
 class _LogSettings:
@@ -201,6 +220,36 @@ def _load_default_pairing_config() -> PairingConfig:
         return load_pairing_config(path)
 
 
+def _override_matching_config(
+    config: MatchingConfig,
+    *,
+    year_window: int | None = None,
+    min_combined_score: float | None = None,
+    scorer: Literal["weighted_mean", "learned"] | None = None,
+) -> MatchingConfig:
+    """Return ``config`` with the supplied fields overridden (``None`` keeps).
+
+    The weights are always carried verbatim; only the run-time knobs a CLI
+    flag can override are substitutable.
+    """
+    return MatchingConfig(
+        title_weight=config.title_weight,
+        author_weight=config.author_weight,
+        publisher_weight=config.publisher_weight,
+        year_weight=config.year_weight,
+        edition_weight=config.edition_weight,
+        lccn_weight=config.lccn_weight,
+        isbn_weight=config.isbn_weight,
+        extent_weight=config.extent_weight,
+        volume_weight=config.volume_weight,
+        year_window=year_window if year_window is not None else config.year_window,
+        min_combined_score=(
+            min_combined_score if min_combined_score is not None else config.min_combined_score
+        ),
+        scorer=scorer if scorer is not None else config.scorer,
+    )
+
+
 def _format_build_report(report: BuildReport, out_path: Path) -> str:
     """Render a :class:`BuildReport` as a small human-readable block."""
     skipped = "yes" if report.skipped else "no"
@@ -292,12 +341,43 @@ def _format_eval_report(report: EvalReport) -> str:
     )
 
 
+def _format_train_report(
+    trained: TrainedModel,
+    destination: Path,
+    matrix: TrainingMatrix,
+) -> str:
+    """Render a learned-model training summary as a human-readable block."""
+    return (
+        f"Learned model: {destination}\n"
+        f"  positives: {trained.n_positive}\n"
+        f"  negatives: {trained.n_negative}\n"
+        f"  features: {matrix.x.shape[1]}\n"
+        f"  5-fold OOF AUC: {trained.oof_auc:.4f}\n"
+        f"  skipped (pool/index): {matrix.missing_in_pool}/{matrix.missing_in_index}\n"
+        f"  model: {destination / _LEARNED_MODEL_FILENAME}\n"
+        f"  meta: {destination / _LEARNED_META_FILENAME}"
+    )
+
+
 def _load_calibrator(parent: Path) -> PlattCalibrator | None:
     """Load a Platt calibrator from ``<parent>/calibrator.msgpack`` if present."""
     candidate = parent / _CALIBRATOR_NAME
     if not candidate.exists():
         return None
     return load_calibrator(candidate)
+
+
+def _learned_model_dir(parent: Path, config: MatchingConfig) -> Path | None:
+    """Return the learned-model directory only when the learned scorer is active.
+
+    The default weighted-mean path never touches the artifact, so we avoid the
+    IO entirely unless ``config.scorer == "learned"``; the loud
+    missing-artifact error then surfaces from
+    :func:`pd_matcher.match.combiners.build_combiner`.
+    """
+    if config.scorer != _LEARNED_SCORER:
+        return None
+    return parent
 
 
 @index_app.command("build")
@@ -489,21 +569,10 @@ def match(
     except ConfigError as exc:
         raise _fail(f"failed to load matching defaults: {exc}") from exc
     if year_window is not None or min_score is not None:
-        matching_config = MatchingConfig(
-            title_weight=matching_config.title_weight,
-            author_weight=matching_config.author_weight,
-            publisher_weight=matching_config.publisher_weight,
-            year_weight=matching_config.year_weight,
-            edition_weight=matching_config.edition_weight,
-            lccn_weight=matching_config.lccn_weight,
-            isbn_weight=matching_config.isbn_weight,
-            extent_weight=matching_config.extent_weight,
-            volume_weight=matching_config.volume_weight,
-            year_window=year_window if year_window is not None else matching_config.year_window,
-            min_combined_score=(
-                min_score if min_score is not None else matching_config.min_combined_score
-            ),
-            scorer=matching_config.scorer,
+        matching_config = _override_matching_config(
+            matching_config,
+            year_window=year_window,
+            min_combined_score=min_score,
         )
     try:
         pairing_config = _load_default_pairing_config()
@@ -515,6 +584,7 @@ def match(
     except OSError as exc:
         raise _fail(f"failed to load/build IDF table: {exc}") from exc
     calibrator = _load_calibrator(index.parent)
+    learned_model_dir = _learned_model_dir(index.parent, matching_config)
     try:
         report = run_match(
             marc_path=marc,
@@ -526,6 +596,7 @@ def match(
             pairing_config=pairing_config,
             idf=idf,
             calibrator=calibrator,
+            learned_model_dir=learned_model_dir,
             workers=workers,
             report_interval_seconds=5.0,
             verbosity=verbose,
@@ -563,6 +634,13 @@ def eval_(
             help="Override the matching config's year_window for this eval run.",
         ),
     ] = None,
+    scorer: Annotated[
+        _ScorerChoice | None,
+        Option(
+            "--scorer",
+            help="Override the matching config's scorer (weighted_mean|learned) for this run.",
+        ),
+    ] = None,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
@@ -575,6 +653,7 @@ def eval_(
             --vault data/label_vault.jsonl \\
             --pool data/candidates \\
             --index caches/cce.lmdb \\
+            --scorer learned \\
             --report /tmp/eval.json
     """
     _enable_log_file("eval", log_file)
@@ -589,26 +668,18 @@ def eval_(
         matching_config = _load_default_matching_config()
     except ConfigError as exc:
         raise _fail(f"failed to load matching defaults: {exc}") from exc
-    if year_window is not None:
-        matching_config = MatchingConfig(
-            title_weight=matching_config.title_weight,
-            author_weight=matching_config.author_weight,
-            publisher_weight=matching_config.publisher_weight,
-            year_weight=matching_config.year_weight,
-            edition_weight=matching_config.edition_weight,
-            lccn_weight=matching_config.lccn_weight,
-            isbn_weight=matching_config.isbn_weight,
-            extent_weight=matching_config.extent_weight,
-            volume_weight=matching_config.volume_weight,
+    if year_window is not None or scorer is not None:
+        matching_config = _override_matching_config(
+            matching_config,
             year_window=year_window,
-            min_combined_score=matching_config.min_combined_score,
-            scorer=matching_config.scorer,
+            scorer=scorer.value if scorer is not None else None,
         )
     try:
         pairing_config = _load_default_pairing_config()
     except ConfigError as exc:
         raise _fail(f"failed to load pairing defaults: {exc}") from exc
     calibrator = _load_calibrator(index.parent)
+    learned_model_dir = _learned_model_dir(index.parent, matching_config)
     try:
         eval_report = run_eval(
             vault_path=vault,
@@ -617,8 +688,9 @@ def eval_(
             matching_config=matching_config,
             pairing_config=pairing_config,
             calibrator=calibrator,
+            learned_model_dir=learned_model_dir,
         )
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         raise _fail(f"eval run failed: {exc}") from exc
     echo("Eval report:")
     echo(_format_eval_report(eval_report))
@@ -628,16 +700,81 @@ def eval_(
 
 
 @app.command("train-scorer")
-def train_scorer() -> None:
-    """Train the Phase 9 learned scorer (placeholder).
+def train_scorer(
+    index: Annotated[Path, Option("--index", help="LMDB index directory.")],
+    vault: Annotated[
+        Path,
+        Option("--vault", help="Label vault JSONL path."),
+    ] = _DEFAULT_VAULT_PATH,
+    pool: Annotated[
+        Path,
+        Option("--pool", help="MARC candidate pool root directory (<pool>/<lang>/*.xml)."),
+    ] = _DEFAULT_POOL_PATH,
+    out_dir: Annotated[
+        Path | None,
+        Option("--out-dir", help="Artifact directory (default: the index's parent)."),
+    ] = None,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Train the LightGBM learned combiner from the label vault.
 
-    The learned scorer is implemented in Phase 9; the current branch only
-    provides the CLI skeleton.
+    Scores every non-``unsure`` vault pair through the production pipeline,
+    projects the Evidence into the canonical feature matrix, fits the locked
+    issue #4 model, and writes ``learned_scorer.txt`` + ``learned_scorer.msgpack``
+    under ``--out-dir`` (defaulting to the index's parent).
+
+    Examples:
+        pd-matcher train-scorer \\
+            --index caches/cce.lmdb \\
+            --vault data/label_vault.jsonl \\
+            --pool data/candidates
     """
-    raise _fail(
-        "train-scorer is implemented in Phase 9; current branch only provides the CLI skeleton",
-        code=_ARG_ERROR_EXIT_CODE,
+    _enable_log_file("train-scorer", log_file)
+    if not vault.is_file():
+        raise _fail(f"--vault does not exist or is not a file: {vault}")
+    if not pool.is_dir():
+        raise _fail(f"--pool does not exist or is not a directory: {pool}")
+    if not index.exists():
+        raise _fail(f"--index does not exist: {index}")
+    destination = out_dir if out_dir is not None else index.parent
+    try:
+        matching_config = _load_default_matching_config()
+        pairing_config = _load_default_pairing_config()
+    except ConfigError as exc:
+        raise _fail(f"failed to load config defaults: {exc}") from exc
+    from pd_matcher.match.combiners import train as train_module
+    from pd_matcher.match.combiners.learned import model_metadata
+    from pd_matcher.match.combiners.learned import save_learned_model
+    from pd_matcher.match.combiners.train import build_training_matrix
+    from pd_matcher.match.combiners.train import train_learned_model
+
+    try:
+        matrix = build_training_matrix(
+            vault_path=vault,
+            pool_path=pool,
+            index_path=index,
+            matching_config=matching_config,
+            pairing_config=pairing_config,
+        )
+        trained = train_learned_model(matrix)
+    except (OSError, ValueError) as exc:
+        raise _fail(f"train-scorer failed: {exc}") from exc
+    meta = model_metadata(
+        trained.booster,
+        n_positive=trained.n_positive,
+        n_negative=trained.n_negative,
+        max_depth=train_module.MAX_DEPTH,
+        num_leaves=train_module.NUM_LEAVES,
+        min_data_in_leaf=train_module.MIN_DATA_IN_LEAF,
+        lambda_l2=train_module.LAMBDA_L2,
+        n_estimators=train_module.N_ESTIMATORS,
+        class_weight=train_module.CLASS_WEIGHT,
     )
+    save_learned_model(trained.booster, meta, destination)
+    echo(_format_train_report(trained, destination, matrix))
 
 
 __all__ = ["app", "index_app"]
