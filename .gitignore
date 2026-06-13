@@ -22,6 +22,8 @@ scripts/*
 # reproducible from the shipped CLI are committed as frozen proofs for the
 # findings docs that cite them. They are snapshots, not maintained code:
 # excluded from the lint/typecheck/coverage gates (those run on src + tests).
+!scripts/learned_scorer_diagnostic.py
+!scripts/learned_scorer_tightening.py
 !scripts/learned_scorer_decoys.py
 
 # Groundtruth labeling artifacts (the vault itself IS tracked at data/label_vault.jsonl)
