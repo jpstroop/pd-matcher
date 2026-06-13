@@ -26,6 +26,7 @@ scripts/*
 !scripts/learned_scorer_tightening.py
 !scripts/learned_scorer_decoys.py
 !scripts/learned_scorer_heldout.py
+!scripts/volume_signal_characterization.py
 
 # Groundtruth labeling artifacts (the vault itself IS tracked at data/label_vault.jsonl)
 data/candidates/
