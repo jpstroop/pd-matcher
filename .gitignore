@@ -28,6 +28,7 @@ scripts/*
 !scripts/learned_scorer_heldout.py
 !scripts/volume_signal_characterization.py
 !scripts/cce_part_signal.py
+!scripts/build_separation_test_queue.py
 
 # Groundtruth labeling artifacts (the vault itself IS tracked at data/label_vault.jsonl)
 data/candidates/
@@ -35,6 +36,10 @@ data/review.db
 data/review.db-journal
 data/review.db-shm
 data/review.db-wal
+data/separation_test.db
+data/separation_test.db-journal
+data/separation_test.db-shm
+data/separation_test.db-wal
 
 # Published-data repo (separate git repo at jpstroop/cce-marc-linkage,
 # cloned in-tree here for the default --out of dump-vault-marcs).
