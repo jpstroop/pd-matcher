@@ -31,14 +31,18 @@
     "press",
     "soc", "society",
     "assn", "assoc", "association",
-    "book", "books"
+    "book", "books",
+    "university", "institute", "institution", "academy",
+    "national", "bureau", "department", "dept", "division",
+    "office", "committee", "council", "foundation",
+    "museum", "library"
   ],
 
   "notes_on_exclusions": {
     "not_included": [
       "new", "history", "story", "life", "american", "world",
-      "university", "illustrated", "edited", "translated"
+      "illustrated", "edited", "translated"
     ],
-    "reason": "These are content words that help distinguish between different works. Publisher-side corporate-suffix and form-of-publication noise was promoted to publisher_stopwords following the 2026-05-28 lower-band diagnostic; these stay scoped to publisher because removing them from title would strip distinguishing tokens from names like 'Penguin Books'."
+    "reason": "These are content words that help distinguish between different works. Publisher-side corporate-suffix and form-of-publication noise was promoted to publisher_stopwords following the 2026-05-28 lower-band diagnostic; these stay scoped to publisher because removing them from title would strip distinguishing tokens from names like 'Penguin Books'. The 2026-06-14 institutional batch ('university', 'institute', 'academy', 'national', 'bureau', 'department', 'division', 'office', 'committee', 'council', 'foundation', 'museum', 'library') is publisher-only for the same reason: these words do not distinguish one academic/governmental imprint from another (every 'X University Press' shares 'university'), so on the publisher side they inflate non-matches, while on the title side they remain distinguishing content words."
   }
 }

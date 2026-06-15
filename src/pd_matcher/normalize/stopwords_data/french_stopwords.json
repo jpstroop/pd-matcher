@@ -13,7 +13,10 @@
   ],
 
   "publisher_stopwords": [
-    "et", "&"
+    "et", "&",
+    "editions", "editeur", "editeurs", "librairie",
+    "universite", "societe", "institut", "academie",
+    "nationale", "bibliotheque", "musee"
   ],
 
   "notes_on_exclusions": {
