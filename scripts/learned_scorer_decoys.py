@@ -93,7 +93,9 @@ from pd_matcher.match.combiners import build_combiner
 from pd_matcher.match.combiners.features import feature_row
 from pd_matcher.match.combiners.learned import model_metadata
 from pd_matcher.match.combiners.learned import save_learned_model
+from pd_matcher.match.idf import build_author_idf_table
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.idf import build_publisher_idf_table
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import match_record
 
@@ -309,10 +311,14 @@ def _build_dataset(
 
     with NyplIndexLookup(_INDEX_PATH) as lookup:
         idf = build_idf_table(lookup)
+        author_idf = build_author_idf_table(lookup)
+        publisher_idf = build_publisher_idf_table(lookup)
         score_pair = make_pair_scorer(
             matching_config=scoring_config,
             pairings=pairings,
             idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
             calibrator=None,
         )
         combiner = build_combiner(scoring_config, learned_model_dir=None)
@@ -351,6 +357,8 @@ def _build_dataset(
                 lookup=lookup,
                 config=harvest_config,
                 idf=idf,
+                author_idf=author_idf,
+                publisher_idf=publisher_idf,
                 calibrator=None,
                 combiner=combiner,
                 pairings=pairings,

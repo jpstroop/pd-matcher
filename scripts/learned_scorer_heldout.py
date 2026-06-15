@@ -90,7 +90,9 @@ from pd_matcher.match.combiners.features import feature_names
 from pd_matcher.match.combiners.features import feature_row
 from pd_matcher.match.combiners.learned import LearnedCombiner
 from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.idf import build_author_idf_table
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.idf import build_publisher_idf_table
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import match_record
@@ -241,6 +243,8 @@ class HarvestContext:
 
     lookup: NyplIndexLookup
     idf: IdfTable
+    author_idf: IdfTable
+    publisher_idf: IdfTable
     pairings: CompiledPairings
     scoring_config: MatchingConfig
     harvest_config: MatchingConfig
@@ -267,6 +271,8 @@ def _build_fold_matrix(
         matching_config=ctx.scoring_config,
         pairings=ctx.pairings,
         idf=ctx.idf,
+        author_idf=ctx.author_idf,
+        publisher_idf=ctx.publisher_idf,
         calibrator=None,
     )
     weighted_combiner = build_combiner(ctx.scoring_config, learned_model_dir=None)
@@ -304,6 +310,8 @@ def _build_fold_matrix(
             lookup=ctx.lookup,
             config=ctx.harvest_config,
             idf=ctx.idf,
+            author_idf=ctx.author_idf,
+            publisher_idf=ctx.publisher_idf,
             calibrator=None,
             combiner=weighted_combiner,
             pairings=ctx.pairings,
@@ -401,6 +409,8 @@ def _eval_top_one(
             lookup=ctx.lookup,
             config=config,
             idf=ctx.idf,
+            author_idf=ctx.author_idf,
+            publisher_idf=ctx.publisher_idf,
             calibrator=None,
             combiner=combiner,
             pairings=ctx.pairings,
@@ -478,9 +488,13 @@ def run_heldout(entries: dict[tuple[str, str], VaultEntry], limit: int | None) -
 
     with NyplIndexLookup(_INDEX_PATH) as lookup:
         idf = build_idf_table(lookup)
+        author_idf = build_author_idf_table(lookup)
+        publisher_idf = build_publisher_idf_table(lookup)
         ctx = HarvestContext(
             lookup=lookup,
             idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
             pairings=pairings,
             scoring_config=scoring_config,
             harvest_config=harvest_config,

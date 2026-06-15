@@ -51,7 +51,9 @@ from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners import build_combiner
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.idf import build_author_idf_table
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.idf import build_publisher_idf_table
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import match_record
@@ -145,6 +147,8 @@ def _run_pass_a(
     marc_by_id: dict[str, MarcRecord],
     lookup: NyplIndexLookup,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     pairings: CompiledPairings,
     matching_config: MatchingConfig,
     calibrator: PlattCalibrator | None,
@@ -161,6 +165,8 @@ def _run_pass_a(
         matching_config=matching_config,
         pairings=pairings,
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         calibrator=calibrator,
         learned_model_dir=learned_model_dir,
     )
@@ -205,6 +211,8 @@ def _run_pass_b(
     marc_by_id: dict[str, MarcRecord],
     lookup: NyplIndexLookup,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     pairings: CompiledPairings,
     matching_config: MatchingConfig,
     calibrator: PlattCalibrator | None,
@@ -230,6 +238,8 @@ def _run_pass_b(
             lookup=lookup,
             config=matching_config,
             idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
             calibrator=calibrator,
             combiner=combiner,
             pairings=pairings,
@@ -285,11 +295,15 @@ def run_eval(
     pairings = compile_pairings(pairing_config)
     with NyplIndexLookup(index_path) as lookup:
         idf = build_idf_table(lookup)
+        author_idf = build_author_idf_table(lookup)
+        publisher_idf = build_publisher_idf_table(lookup)
         scored, positives, negatives, missing_pool, missing_index = _run_pass_a(
             kept_entries,
             marc_by_id=marc_by_id,
             lookup=lookup,
             idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
             pairings=pairings,
             matching_config=matching_config,
             calibrator=calibrator,
@@ -300,6 +314,8 @@ def run_eval(
             marc_by_id=marc_by_id,
             lookup=lookup,
             idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
             pairings=pairings,
             matching_config=matching_config,
             calibrator=calibrator,

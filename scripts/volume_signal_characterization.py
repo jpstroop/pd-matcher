@@ -68,7 +68,9 @@ from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.vault_pair_resolver import build_marc_index
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.index.lookup import NyplIndexLookup
+from pd_matcher.match.idf import build_author_idf_table
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.idf import build_publisher_idf_table
 from pd_matcher.match.pipeline import _build_context
 from pd_matcher.match.scorers.volume import _classify_cce
 from pd_matcher.match.scorers.volume import _classify_marc
@@ -491,6 +493,8 @@ def run_study(
 
     with NyplIndexLookup(_INDEX_PATH) as lookup:
         idf = build_idf_table(lookup)
+        author_idf = build_author_idf_table(lookup)
+        publisher_idf = build_publisher_idf_table(lookup)
         _progress("idf table built; selecting slice")
 
         for key, entry in entries.items():
@@ -521,7 +525,7 @@ def run_study(
         _progress(f"slice={report.slice_size}; resolved candidates={len(selected)}")
 
         for entry, marc, cce, is_tagged in selected:
-            ctx = _build_context(marc, idf, matching_config)
+            ctx = _build_context(marc, idf, author_idf, publisher_idf, matching_config)
             evidence = score_volume(marc, cce, ctx)
             marc_kind, marc_part = _classify_marc(marc)
             cce_kind, cce_part = _classify_cce(cce)

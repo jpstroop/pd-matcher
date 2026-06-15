@@ -18,7 +18,9 @@ from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.index.builder import build_index
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.idf import build_author_idf_table
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.idf import build_publisher_idf_table
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
 
@@ -43,9 +45,23 @@ def tiny_index_path(tmp_path: Path) -> Path:
 
 @fixture
 def tiny_idf(tiny_index_path: Path) -> IdfTable:
-    """Return an :class:`IdfTable` built from the tiny index."""
+    """Return a title :class:`IdfTable` built from the tiny index."""
     with NyplIndexLookup(tiny_index_path) as lookup:
         return build_idf_table(lookup)
+
+
+@fixture
+def tiny_author_idf(tiny_index_path: Path) -> IdfTable:
+    """Return an author-name :class:`IdfTable` built from the tiny index."""
+    with NyplIndexLookup(tiny_index_path) as lookup:
+        return build_author_idf_table(lookup)
+
+
+@fixture
+def tiny_publisher_idf(tiny_index_path: Path) -> IdfTable:
+    """Return a publisher-name :class:`IdfTable` built from the tiny index."""
+    with NyplIndexLookup(tiny_index_path) as lookup:
+        return build_publisher_idf_table(lookup)
 
 
 @fixture

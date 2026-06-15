@@ -34,7 +34,9 @@ from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.features import feature_row
+from pd_matcher.match.idf import build_author_idf_table
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.idf import build_publisher_idf_table
 from pd_matcher.match.pairing_compiler import compile_pairings
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -135,10 +137,14 @@ def build_training_matrix(
     missing_in_index = 0
     with NyplIndexLookup(index_path) as lookup:
         idf = build_idf_table(lookup)
+        author_idf = build_author_idf_table(lookup)
+        publisher_idf = build_publisher_idf_table(lookup)
         score_pair = make_pair_scorer(
             matching_config=scoring_config,
             pairings=pairings,
             idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
             calibrator=None,
         )
         for entry in kept:

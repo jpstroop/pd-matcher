@@ -81,6 +81,8 @@ def test_score_title_returns_zero_when_unseen_tokens_idf_zero(
             language="eng",
             idf={},
         ),
+        author_idf=scorer_context.author_idf,
+        publisher_idf=scorer_context.publisher_idf,
         config=scorer_context.config,
     )
     ev = score_title("unique tokens here", "different ones entirely", ctx)

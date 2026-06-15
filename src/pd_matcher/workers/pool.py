@@ -112,6 +112,8 @@ def _spawn_workers(
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     calibrator: PlattCalibrator | None,
     learned_model_dir: Path | None,
     input_queue: MpQueue[bytes | None],
@@ -134,6 +136,8 @@ def _spawn_workers(
                 "matching_config": matching_config,
                 "pairing_config": pairing_config,
                 "idf": idf,
+                "author_idf": author_idf,
+                "publisher_idf": publisher_idf,
                 "calibrator": calibrator,
                 "learned_model_dir": learned_model_dir,
                 "input_queue": input_queue,
@@ -158,6 +162,8 @@ def _worker_entry(
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     calibrator: PlattCalibrator | None,
     learned_model_dir: Path | None,
     input_queue: MpQueue[bytes | None],
@@ -186,6 +192,8 @@ def _worker_entry(
         matching_config=matching_config,
         pairing_config=pairing_config,
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         calibrator=calibrator,
         learned_model_dir=learned_model_dir,
         input_get=input_queue.get,
@@ -256,6 +264,8 @@ def run_match(
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     calibrator: PlattCalibrator | None = None,
     learned_model_dir: Path | None = None,
     workers: int | None = None,
@@ -289,7 +299,9 @@ def run_match(
         matching_config: Loaded :class:`MatchingConfig`.
         pairing_config: Loaded :class:`PairingConfig`; each worker compiles
             it into :class:`CompiledPairings` once at init.
-        idf: Pre-built :class:`IdfTable` (workers load it once at init).
+        idf: Pre-built title :class:`IdfTable` (workers load it once at init).
+        author_idf: Pre-built author-name :class:`IdfTable`.
+        publisher_idf: Pre-built publisher-name :class:`IdfTable`.
         calibrator: Optional Platt calibrator.
         learned_model_dir: Directory holding the learned-model artifact,
             forwarded to each worker so the learned combiner loads its model
@@ -336,6 +348,8 @@ def run_match(
             matching_config=matching_config,
             pairing_config=pairing_config,
             idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
             calibrator=calibrator,
             learned_model_dir=learned_model_dir,
             input_queue=input_queue,

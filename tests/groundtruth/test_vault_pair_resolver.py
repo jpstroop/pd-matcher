@@ -252,6 +252,8 @@ def test_make_pair_scorer_produces_candidate_match_via_matcher_pipeline() -> Non
         matching_config=_load_default_matching_config(),
         pairings=pairings,
         idf=idf,
+        author_idf=idf,
+        publisher_idf=idf,
         calibrator=None,
     )
     candidate = scorer(_marc("ctrl-1"), _cce("uuid-1"))

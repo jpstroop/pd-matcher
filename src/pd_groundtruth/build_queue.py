@@ -50,7 +50,13 @@ from pd_groundtruth.sampling import SOURCE_BELOW_SAMPLE
 from pd_groundtruth.sampling import BudgetModel
 from pd_groundtruth.sampling import band_of
 from pd_groundtruth.sampling import reservoir_sample
+from pd_groundtruth.vault_pair_resolver import (
+    AUTHOR_IDF_CACHE_NAME as _SHARED_AUTHOR_IDF_CACHE_NAME,
+)
 from pd_groundtruth.vault_pair_resolver import IDF_CACHE_NAME as _SHARED_IDF_CACHE_NAME
+from pd_groundtruth.vault_pair_resolver import (
+    PUBLISHER_IDF_CACHE_NAME as _SHARED_PUBLISHER_IDF_CACHE_NAME,
+)
 from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
@@ -58,7 +64,9 @@ from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.calibrator import load_calibrator
 from pd_matcher.match.evidence import Evidence
+from pd_matcher.match.idf import load_or_build_author_idf
 from pd_matcher.match.idf import load_or_build_idf
+from pd_matcher.match.idf import load_or_build_publisher_idf
 from pd_matcher.match.prepare import PreparedManifest
 from pd_matcher.match.result import MatchResult
 from pd_matcher.models import IndexedNyplRegRecord
@@ -69,6 +77,8 @@ from pd_matcher.workers import run_match
 _LOGGER = getLogger(__name__)
 
 _IDF_CACHE_NAME: str = _SHARED_IDF_CACHE_NAME
+_AUTHOR_IDF_CACHE_NAME: str = _SHARED_AUTHOR_IDF_CACHE_NAME
+_PUBLISHER_IDF_CACHE_NAME: str = _SHARED_PUBLISHER_IDF_CACHE_NAME
 _CALIBRATOR_NAME: str = "calibrator.msgpack"
 _PREPARED_PREFIX: str = "pd-groundtruth-prepared-"
 _DEFAULT_LANGUAGE: str = "eng"
@@ -588,7 +598,15 @@ def build_queue(
         raise ValueError(f"workers must be >= 1 (got {workers!r})")
 
     idf_cache_path = index_path.parent / _IDF_CACHE_NAME
+    author_idf_cache_path = index_path.parent / _AUTHOR_IDF_CACHE_NAME
+    publisher_idf_cache_path = index_path.parent / _PUBLISHER_IDF_CACHE_NAME
     idf = load_or_build_idf(idf_cache_path, lambda: NyplIndexLookup(index_path))
+    author_idf = load_or_build_author_idf(
+        author_idf_cache_path, lambda: NyplIndexLookup(index_path)
+    )
+    publisher_idf = load_or_build_publisher_idf(
+        publisher_idf_cache_path, lambda: NyplIndexLookup(index_path)
+    )
     calibrator = _load_calibrator(index_path.parent)
 
     resolved_vault_pairs, vault_summary = resolve_vault_for_build(
@@ -598,6 +616,8 @@ def build_queue(
         matching_config=matching_config,
         pairing_config=pairing_config,
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         calibrator=calibrator,
         requeue_verdicts=requeue_verdicts,
     )
@@ -635,6 +655,8 @@ def build_queue(
             matching_config=floored_config,
             pairing_config=pairing_config,
             idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
             calibrator=calibrator,
             workers=workers,
             writer_factory=factory,
