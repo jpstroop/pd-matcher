@@ -70,9 +70,45 @@ _ENGLISH_PUBLISHER_NOISE_ADDITIONS: frozenset[str] = frozenset(
 )
 
 
+_ENGLISH_PUBLISHER_INSTITUTIONAL_ADDITIONS: frozenset[str] = frozenset(
+    {
+        "university",
+        "institute",
+        "institution",
+        "academy",
+        "national",
+        "bureau",
+        "department",
+        "dept",
+        "division",
+        "office",
+        "committee",
+        "council",
+        "foundation",
+        "museum",
+        "library",
+        "united",
+        "nations",
+        "international",
+        "commission",
+    }
+)
+
+
 def test_english_publisher_stopwords_include_publisher_noise() -> None:
     publisher = load_stopwords("eng").publisher
     assert _ENGLISH_PUBLISHER_NOISE_ADDITIONS.issubset(publisher)
+
+
+def test_english_publisher_stopwords_include_institutional_generics() -> None:
+    publisher = load_stopwords("eng").publisher
+    assert _ENGLISH_PUBLISHER_INSTITUTIONAL_ADDITIONS.issubset(publisher)
+
+
+def test_institutional_additions_are_not_english_title_or_author_stopwords() -> None:
+    english = load_stopwords("eng")
+    assert _ENGLISH_PUBLISHER_INSTITUTIONAL_ADDITIONS.isdisjoint(english.title)
+    assert _ENGLISH_PUBLISHER_INSTITUTIONAL_ADDITIONS.isdisjoint(english.author)
 
 
 def test_publisher_noise_additions_are_not_english_title_stopwords() -> None:
