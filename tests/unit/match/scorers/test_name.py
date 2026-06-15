@@ -25,6 +25,8 @@ def alias_index() -> dict[str, str]:
 def alias_scorer_context(
     matching_config: MatchingConfig,
     idf_table: IdfTable,
+    author_idf_table: IdfTable,
+    publisher_idf_table: IdfTable,
     alias_index: dict[str, str],
 ) -> ScorerContext:
     """Return an English :class:`ScorerContext` with the bundled alias index."""
@@ -33,6 +35,8 @@ def alias_scorer_context(
         stopwords=load_stopwords("eng"),
         stemmer=stemmer_for("eng"),
         idf=idf_table,
+        author_idf=author_idf_table,
+        publisher_idf=publisher_idf_table,
         config=matching_config,
         publisher_alias_index=alias_index,
     )
@@ -143,10 +147,133 @@ def test_score_publisher_disjoint_in_floor_band_preserved(
 def test_score_publisher_overlapping_tokens_unaffected(
     scorer_context: ScorerContext,
 ) -> None:
-    """Token intersection bypasses the floor entirely."""
+    """Token intersection on a distinctive token bypasses the floor entirely.
+
+    ``Macmillan`` (marc) is a full token-subset of ``Macmillan & Co`` (nypl,
+    "& co" stopped), so the gate's full-overlap regime keeps the raw 100.0.
+    """
     ev = score_publisher("Macmillan", "Macmillan & Co", scorer_context)
     assert ev.score == 100.0
     assert dict(ev.features)["token_overlap"] >= 1.0
+
+
+def test_score_publisher_generic_only_overlap_gated_to_low(
+    scorer_context: ScorerContext,
+) -> None:
+    """Sharing only a low-IDF token ("oxford") collapses a partial overlap.
+
+    ``oxford`` carries a low IDF in the publisher fixture, so when it is the
+    only shared token and both sides diverge elsewhere, the gate
+    (most-distinctive shared token / default_idf) drives the score near zero
+    even though ``token_set_ratio`` alone would inflate it.
+    """
+    ev = score_publisher("Oxford Brothers", "Oxford Sisters", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score < 20.0
+
+
+def test_score_publisher_distinctive_token_overlap_stays_high(
+    scorer_context: ScorerContext,
+) -> None:
+    """A distinctive (high-IDF) shared token keeps a real match high.
+
+    ``Knopf`` is rare in the publisher IDF table, so when the marc side is
+    the distinctive token plus a moderate extra one the distinctive-hit term
+    keeps the gate near ``1.0`` and the high raw ratio survives — Jaccard
+    alone would over-penalize the unshared extra token.
+    """
+    ev = score_publisher("Alfred Knopf", "Knopf", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score > 70.0
+
+
+def test_score_publisher_distinctive_typo_preserves_fuzzy(
+    scorer_context: ScorerContext,
+) -> None:
+    """An OCR typo on a distinctive token keeps the disjoint-fuzzy score.
+
+    ``Macmillan`` vs ``Macmillian`` share no token after the typo, so the
+    gate never applies; the disjoint-fuzzy path keeps the high near-match
+    ratio, preserving tolerance for transcription noise.
+    """
+    ev = score_publisher("Macmillan", "Macmillian", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 0.0
+    assert ev.score > 70.0
+
+
+def test_score_publisher_generic_overlap_short_string_still_gated(
+    scorer_context: ScorerContext,
+) -> None:
+    """Generic-only overlap stays low however short either side is.
+
+    The shared token ``oxford`` is the entirety of the marc side here, but
+    because the nypl side carries a distinctive token (``knopf``) the shared
+    set equals neither full side, so the gate fires and the short-string
+    inflation ``token_set_ratio`` would otherwise produce is removed.
+    """
+    ev = score_publisher("Oxford", "Oxford Knopf", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score < 20.0
+
+
+def test_score_author_generic_only_overlap_gated_to_low(
+    scorer_context: ScorerContext,
+) -> None:
+    """The author gate discounts overlap on a common surname alone."""
+    ev = score_author("John Smith", "Jane Smith", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score < 20.0
+
+
+def test_score_author_distinctive_token_overlap_stays_high(
+    scorer_context: ScorerContext,
+) -> None:
+    """A rare shared author token keeps a real match high.
+
+    ``Albuquerque`` is rare in the author IDF table, so the distinctive-hit
+    term keeps the gate near ``1.0`` and the subset match ("Albuquerque" is
+    the whole nypl side) keeps its raw ratio.
+    """
+    ev = score_author("Albuquerque, John", "Albuquerque", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score > 70.0
+
+
+def test_score_publisher_oxford_vs_hawaii_now_low(
+    scorer_context: ScorerContext,
+) -> None:
+    """Separation-test pair #5: a total non-match no longer inflates.
+
+    "Oxford University Press for the Royal Institute of International
+    Affairs" vs "University of Hawaii Press" shared only ``university``
+    before; with the institutional stopword promotion it now shares nothing
+    and the disjoint-fuzzy floor zeroes it.
+    """
+    ev = score_publisher(
+        "Oxford University Press for the Royal Institute of International Affairs",
+        "University of Hawaii Press",
+        scorer_context,
+    )
+    assert ev.score < 10.0
+
+
+def test_score_publisher_alias_lift_survives_generic_gate(
+    scorer_context: ScorerContext,
+    alias_index: dict[str, str],
+) -> None:
+    """A curated alias hit overrides a gate-suppressed fuzzy baseline.
+
+    The alias floor is a ``max`` over the (now gated) fuzzy score, so a
+    curated imprint hit still lifts to the floor even when the literal
+    overlap was generic.
+    """
+    ev = score_publisher(
+        "Whittlesey House",
+        "McGraw-Hill Book Company",
+        scorer_context,
+        alias_index=alias_index,
+    )
+    assert ev.score >= 95.0
 
 
 def test_score_publisher_alias_hit_lifts_imprint_to_parent(

@@ -16,6 +16,23 @@ unrelated-name cluster (16-36, e.g. ``Maruzen`` vs ``Peter Chiarulli``
 lives; a stricter cutoff of 70 was measured and cost ~3% recall on the
 locked regression set, so 50 is the chosen floor.
 
+``token_set_ratio`` also has no notion of which shared tokens are
+*distinctive*. When two otherwise-unrelated names share only a generic
+word — e.g. MARC "Oxford University Press for the Royal Institute…" vs CCE
+"University of Hawaii Press", whose only common post-stopword token is
+"university" — the shared token dominates the shorter string and the raw
+ratio inflates to ~74. To remove that class of false signal we gate the
+ratio by the IDF distinctiveness of the shared tokens — the larger of an
+IDF-weighted Jaccard (coverage) and the most-distinctive shared token's IDF
+normalized by ``default_idf`` (a distinctive-hit term). See
+:func:`_idf_gate` for the full rationale. An identical pair gates to
+``1.0`` (literal match keeps its raw 100); a genuinely shared distinctive
+house token ("knopf") keeps the gate high; overlap on generics alone drives
+it toward zero. The gate is applied only when the token sets actually
+intersect — the disjoint fuzzy path above is left untouched so
+OCR/transcription typos on a distinctive token ("Macmillan" vs
+"Macmillian") still score high.
+
 The publisher scorer additionally consults a curated alias index when
 one is supplied (either via :class:`ScorerContext` or as an explicit
 kwarg). When both sides of a comparison resolve to the same canonical
@@ -27,6 +44,7 @@ replacement so perfect literal matches retain their 100.0.
 from rapidfuzz.fuzz import token_set_ratio
 
 from pd_matcher.match.evidence import Evidence
+from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.scorers.context import ScorerContext
 from pd_matcher.normalize.numbers import normalize_numbers
 from pd_matcher.normalize.publishers import normalize_publisher
@@ -53,11 +71,53 @@ def _prepare(value: str, language: str, stopwords: frozenset[str]) -> tuple[str,
     return joined, " ".join(tokens)
 
 
+def _idf_gate(
+    shared: set[str],
+    marc_set: set[str],
+    nypl_set: set[str],
+    idf: IdfTable,
+) -> float:
+    """Return the IDF distinctiveness gate for two token sets in ``[0, 1]``.
+
+    The gate is the **larger** of two complementary distinctiveness views,
+    so a pair clears it if *either* holds:
+
+    * **Coverage** — the IDF-weighted Jaccard
+      ``sum(idf over shared) / sum(idf over union)``, the same measure the
+      title scorer uses. It is ``1.0`` for identical sets (a literal match
+      keeps its raw ``token_set_ratio`` of 100) and falls toward ``0`` as
+      unshared distinctive tokens accumulate.
+    * **Distinctive hit** — the most distinctive shared token's IDF
+      normalized by ``default_idf`` (the IDF a once-seen token carries),
+      clamped to ``1.0``. A single rare shared token ("knopf") keeps the
+      gate high even when each side carries its own extra distinctive
+      tokens, which Jaccard alone would over-penalize.
+
+    Taken together: overlap on a generic token only ("oxford",
+    "university") yields a low value on *both* views — low coverage (the
+    generic carries little of the union's mass) and a low distinctive-hit
+    ratio (the generic's own IDF is small) — so the pair-#5 class of false
+    signal is driven toward zero. A genuinely shared distinctive house token
+    keeps the gate high through the distinctive-hit term.
+
+    Callers only invoke this when ``shared`` is non-empty, so the union is
+    non-empty and its IDF sum is strictly positive; no zero-division guard
+    is needed.
+    """
+    union_mass = sum(idf.score(token) for token in (marc_set | nypl_set))
+    shared_mass = sum(idf.score(token) for token in shared)
+    coverage = shared_mass / union_mass
+    best_shared = max(idf.score(token) for token in shared)
+    distinctive_hit = min(best_shared / idf.default_idf, 1.0)
+    return max(coverage, distinctive_hit)
+
+
 def _evidence(
     scorer_name: str,
     marc_value: str | None,
     nypl_value: str | None,
     stopwords: frozenset[str],
+    idf: IdfTable,
     ctx: ScorerContext,
 ) -> Evidence:
     if not marc_value or not nypl_value:
@@ -82,10 +142,13 @@ def _evidence(
         )
     marc_set = set(marc_prepared.split())
     nypl_set = set(nypl_prepared.split())
+    shared = marc_set & nypl_set
     score = float(token_set_ratio(marc_prepared, nypl_prepared))
-    if not (marc_set & nypl_set) and score < _DISJOINT_FUZZY_FLOOR:
+    if shared:
+        score *= _idf_gate(shared, marc_set, nypl_set, idf)
+    elif score < _DISJOINT_FUZZY_FLOOR:
         score = 0.0
-    overlap = float(len(marc_set & nypl_set))
+    overlap = float(len(shared))
     features: tuple[tuple[str, float], ...] = (
         ("normalized_marc_len", float(len(marc_normalized))),
         ("normalized_nypl_len", float(len(nypl_normalized))),
@@ -107,7 +170,14 @@ def score_author(
     ctx: ScorerContext,
 ) -> Evidence:
     """Return :class:`Evidence` comparing two author strings."""
-    return _evidence(_AUTHOR_SCORER, marc_author, nypl_author, ctx.stopwords.author, ctx)
+    return _evidence(
+        _AUTHOR_SCORER,
+        marc_author,
+        nypl_author,
+        ctx.stopwords.author,
+        ctx.author_idf,
+        ctx,
+    )
 
 
 def score_publisher(
@@ -138,6 +208,7 @@ def score_publisher(
         marc_publisher,
         nypl_publisher,
         ctx.stopwords.publisher,
+        ctx.publisher_idf,
         ctx,
     )
     effective_index = alias_index if alias_index is not None else ctx.publisher_alias_index

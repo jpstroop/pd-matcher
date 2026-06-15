@@ -24,7 +24,14 @@ class ScorerContext(Struct, frozen=True, forbid_unknown_fields=True):
             ``"eng"`` is used as the fallback for missing/unknown codes.
         stopwords: Per-field stopword sets for ``language``.
         stemmer: Single-token stemmer callable for ``language``.
-        idf: IDF table built once over the NYPL corpus.
+        idf: Title IDF table built once over the NYPL corpus titles.
+        author_idf: IDF table built once over the NYPL corpus
+            ``author_name`` tokens; used by the author scorer to discount
+            generic-word overlap relative to distinctive name tokens.
+        publisher_idf: IDF table built once over the NYPL corpus
+            ``publisher_names`` tokens; used by the publisher scorer to
+            discount generic-word overlap ("university", "press") relative
+            to distinctive house tokens ("knopf", "macmillan").
         config: The active :class:`MatchingConfig`.
         publisher_alias_index: Optional ``{normalized_name: human_canonical}``
             lookup used by the publisher scorer to lift the score on
@@ -38,6 +45,8 @@ class ScorerContext(Struct, frozen=True, forbid_unknown_fields=True):
     stopwords: StopwordSet
     stemmer: Callable[[str], str]
     idf: IdfTable
+    author_idf: IdfTable
+    publisher_idf: IdfTable
     config: MatchingConfig
     publisher_alias_index: dict[str, str] | None = None
 
