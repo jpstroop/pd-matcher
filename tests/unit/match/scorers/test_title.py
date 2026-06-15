@@ -1,6 +1,9 @@
 """Tests for :mod:`pd_matcher.match.scorers.title`."""
 
+from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.scorers.context import ScorerContext
+from pd_matcher.match.scorers.title import _align_tokens
+from pd_matcher.match.scorers.title import _shared_weight
 from pd_matcher.match.scorers.title import score_title
 
 
@@ -122,3 +125,54 @@ def test_score_title_same_script_does_not_fire_mismatch(
     assert ev.skipped is False
     feature_map = dict(ev.features)
     assert "script_mismatch" not in feature_map
+
+
+def test_align_tokens_exact_only_reduces_to_intersection() -> None:
+    """With no near-misses the alignment is the plain set intersection."""
+    matched, unique_marc, unique_nypl = _align_tokens({"a", "b"}, {"b", "c"})
+    assert matched == (("b", "b"),)
+    assert unique_marc == frozenset({"a"})
+    assert unique_nypl == frozenset({"c"})
+
+
+def test_align_tokens_fuzzy_recovers_ocr_corrupted_pair() -> None:
+    """A single-character OCR corruption aligns to the clean stem (ratio 93)."""
+    matched, unique_marc, unique_nypl = _align_tokens({"immunochemistri"}, {"immunochenistri"})
+    assert matched == (("immunochemistri", "immunochenistri"),)
+    assert unique_marc == frozenset()
+    assert unique_nypl == frozenset()
+
+
+def test_align_tokens_distinct_words_stay_unmatched() -> None:
+    """Genuinely different words (ratio 75 < threshold) do not align."""
+    matched, unique_marc, unique_nypl = _align_tokens({"work"}, {"word"})
+    assert matched == ()
+    assert unique_marc == frozenset({"work"})
+    assert unique_nypl == frozenset({"word"})
+
+
+def test_shared_weight_exact_pair_is_token_idf(idf_table: IdfTable) -> None:
+    """An exact pair weighs exactly the token's IDF (Jaccard reduction)."""
+    assert _shared_weight("widget", "widget", idf_table) == 3.0
+
+
+def test_score_title_recovers_ocr_corrupted_token(
+    scorer_context: ScorerContext,
+) -> None:
+    """An OCR'd distinctive token (ratio 90) is recovered; a different one is not."""
+    recovered = score_title("albuquerqu widget", "alkuquerqu widget", scorer_context)
+    distinct = score_title("albuquerqu widget", "machin widget", scorer_context)
+    assert dict(recovered.features)["token_overlap"] == 2.0
+    assert dict(distinct.features)["token_overlap"] == 1.0
+    assert recovered.score > distinct.score
+
+
+def test_score_title_distinct_short_words_not_fuzzy_aligned(
+    scorer_context: ScorerContext,
+) -> None:
+    """Different short words (ratio 22) stay unique; only the shared token aligns."""
+    ev = score_title("small widget", "part widget", scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["token_overlap"] == 1.0
+    assert feature_map["unique_to_marc"] == 1.0
+    assert feature_map["unique_to_nypl"] == 1.0
