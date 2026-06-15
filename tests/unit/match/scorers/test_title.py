@@ -176,3 +176,26 @@ def test_score_title_distinct_short_words_not_fuzzy_aligned(
     assert feature_map["token_overlap"] == 1.0
     assert feature_map["unique_to_marc"] == 1.0
     assert feature_map["unique_to_nypl"] == 1.0
+
+
+def test_score_title_whole_string_rescues_compound_split(
+    scorer_context: ScorerContext,
+) -> None:
+    """A compound split per-token matching misses is rescued by the whole-string ratio.
+
+    "albuquerqu" vs "albu querqu" shares no aligned token (the parts are too
+    short to clear the per-token gate), so the Jaccard alone is zero — but the
+    concatenated stems are identical, so the whole-string rescue lifts it to max.
+    """
+    ev = score_title("albuquerqu", "albu querqu", scorer_context)
+    assert ev.score == 100.0
+    assert dict(ev.features)["token_overlap"] == 0.0
+
+
+def test_score_title_whole_string_below_gate_does_not_rescue(
+    scorer_context: ScorerContext,
+) -> None:
+    """A sub-gate whole-string ratio (work/word = 75 < 90) leaves the score at zero."""
+    ev = score_title("work", "word", scorer_context)
+    assert ev.score == 0.0
+    assert ev.skipped is False

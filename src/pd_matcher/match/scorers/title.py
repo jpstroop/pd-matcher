@@ -51,6 +51,19 @@ _SCORER_NAME: str = "title.token_set"
 # require identity, which keeps distinct short words ("work"/"word" = 75) apart.
 _FUZZY_MIN_RATIO: float = 80.0
 
+# Per-token fuzzy matching handles OCR *substitution* within a token but not
+# token-*boundary* errors — compound splits ("toymaker"/"toy maker"), OCR
+# line-break hyphens ("cru-ciale"/"cruciale"), or inserted spaces
+# ("Tennessee"/"Tennes see"). Joining the prepared stems erases boundaries, so a
+# whole-string character ratio catches them. It bypasses IDF (it is a raw
+# string-identity claim), so the gate is high: a sweep over the same labeled sets
+# recovered +34 matches beyond per-token at 0.90 while only one non-match crossed
+# 0.80 (a same-title-different-work, whose title legitimately *is* identical — the
+# rejection correctly comes from author/year). The boost is a ``max``, so it only
+# ever rescues a low Jaccard, never lowers a high one. Loosen toward 0.85 only if
+# the #84 separation AUC shows headroom.
+_WHOLE_STRING_MIN_RATIO: float = 90.0
+
 
 def _align_tokens(
     marc_set: set[str], nypl_set: set[str]
@@ -162,6 +175,9 @@ def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerConte
     )
     raw = weighted_intersection / weighted_union if weighted_union > 0 else 0.0
     score = raw * _MAX_SCORE
+    whole_ratio = ratio("".join(marc_tokens), "".join(nypl_tokens))
+    if whole_ratio >= _WHOLE_STRING_MIN_RATIO:
+        score = max(score, whole_ratio)
     token_total = len(matched) + len(unique_marc) + len(unique_nypl)
     avg_idf = (weighted_union / token_total) if token_total else 0.0
     features: tuple[tuple[str, float], ...] = (
