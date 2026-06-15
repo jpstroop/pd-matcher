@@ -64,6 +64,15 @@ _FUZZY_MIN_RATIO: float = 80.0
 # the #84 separation AUC shows headroom.
 _WHOLE_STRING_MIN_RATIO: float = 90.0
 
+# The whole-string rescue only fires when BOTH concatenations reach this length.
+# A high character ratio is a strong same-title claim on a long string (many
+# characters agree) but a weak, coincidence-prone one on a short string (~1 char
+# at 0.90). Boundary errors inherently span multiple tokens, so genuine rescues
+# are long anyway: of the 34 matches the rescue recovers, 33 are >=16 characters;
+# a length floor of 10 keeps every one while excluding the short coincidental tail
+# (single generic words like "report"/"index", where per-token already suffices).
+_WHOLE_STRING_MIN_LEN: int = 10
+
 
 def _align_tokens(
     marc_set: set[str], nypl_set: set[str]
@@ -175,9 +184,12 @@ def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerConte
     )
     raw = weighted_intersection / weighted_union if weighted_union > 0 else 0.0
     score = raw * _MAX_SCORE
-    whole_ratio = ratio("".join(marc_tokens), "".join(nypl_tokens))
-    if whole_ratio >= _WHOLE_STRING_MIN_RATIO:
-        score = max(score, whole_ratio)
+    marc_joined = "".join(marc_tokens)
+    nypl_joined = "".join(nypl_tokens)
+    if min(len(marc_joined), len(nypl_joined)) >= _WHOLE_STRING_MIN_LEN:
+        whole_ratio = ratio(marc_joined, nypl_joined)
+        if whole_ratio >= _WHOLE_STRING_MIN_RATIO:
+            score = max(score, whole_ratio)
     token_total = len(matched) + len(unique_marc) + len(unique_nypl)
     avg_idf = (weighted_union / token_total) if token_total else 0.0
     features: tuple[tuple[str, float], ...] = (

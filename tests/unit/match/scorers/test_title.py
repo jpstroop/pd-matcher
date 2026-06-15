@@ -199,3 +199,19 @@ def test_score_title_whole_string_below_gate_does_not_rescue(
     ev = score_title("work", "word", scorer_context)
     assert ev.score == 0.0
     assert ev.skipped is False
+
+
+def test_score_title_whole_string_length_gate_blocks_short_compound(
+    scorer_context: ScorerContext,
+) -> None:
+    """A short compound (joined "redcoat" = 7 < 10) is below the length floor.
+
+    The whole-string ratio is a perfect 100 here, but the concatenation is too
+    short for that to be a trustworthy same-title claim, so the rescue does not
+    fire and the score stays at the (zero) Jaccard. The identical-but-longer
+    "albuquerqu" / "albu querqu" pair (10 chars) clears the floor and is rescued,
+    so this isolates the length gate.
+    """
+    ev = score_title("redcoat", "red coat", scorer_context)
+    assert ev.score == 0.0
+    assert ev.skipped is False
