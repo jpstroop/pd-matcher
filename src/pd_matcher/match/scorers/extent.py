@@ -16,13 +16,19 @@ Score curve:
 * Unparseable on either side: ``skipped=True`` (the combiner already
   excludes skipped Evidence from numerator and denominator).
 
-Parser heuristic: take the LARGEST plain integer in the extent
-string after stripping a leading roman-numeral pagination block.
-Roman numerals at the start (``"xii, 312 p."``) are paginated
-front-matter and not part of the page count. Multi-volume statements
-like ``"1 v. (312 p.)"`` pick out 312 (the larger integer) rather
-than 1 (the volume count); ``"v. (loose-leaf)"`` and ``"unpaged"``
-yield no integer at all and skip.
+Parser heuristic: strip volume-count statements and a leading
+roman-numeral pagination block, then take the LARGEST plain integer
+that remains. Roman numerals at the start (``"xii, 312 p."``) are
+paginated front-matter and not part of the page count. Volume counts
+(``"3 v"``, ``"1 v."``, ``"2 vols."``) are NOT page counts: a bare
+volume statement yields no integer and skips, so a 3-volume set and a
+1-volume work no longer read as "3 pages" vs "1 page" and falsely match
+(extent bug, pair 295). Multi-volume statements that *also* carry a page
+count — ``"1 v. (312 p.)"`` — strip the ``"1 v."`` and pick out 312;
+``"v. (loose-leaf)"`` and ``"unpaged"`` yield no integer at all and skip.
+Whether a volume-count *mismatch* (3 v. vs 1 v.) should be a negative
+whole/part signal is out of scope here (#82); this scorer only declines
+to manufacture a false page match.
 """
 
 from re import IGNORECASE
@@ -37,20 +43,27 @@ _TOLERANCE_PAGES: int = 2
 _PENALTY_PER_PAGE: float = 5.0
 
 _ROMAN_PREFIX_RE = re_compile(r"^\s*(?:\[[^\]]*\]\s*,?\s*)?[ivxlcdm]+\s*,\s*", IGNORECASE)
+# A volume COUNT: "<n> v", "<n> v.", "<n> vol", "<n> vols.", "<n> volume(s)".
+# The negative lookahead stops the abbreviation from swallowing an unrelated
+# word ("3 voluntary..."); the digit it consumes is a volume tally, not pages,
+# so it is removed before page extraction.
+_VOLUME_COUNT_RE = re_compile(r"\b\d+\s*v(?:ol(?:ume)?s?)?\.?(?![a-z])", IGNORECASE)
 _INTEGER_RE = re_compile(r"\d+")
 
 
 def extract_page_count(value: str | None) -> int | None:
-    """Return the largest plain integer in ``value`` after stripping romans.
+    """Return the largest plain page integer, or ``None`` to skip.
 
-    Returns ``None`` when ``value`` is empty, has no digits, or has
-    only digits that are part of an unparseable extent statement (the
-    integer extraction is intentionally non-zero to avoid promoting
-    ``"0 p."``-style sentinel inputs).
+    Strips volume-count statements (``"3 v"``) and a leading roman-numeral
+    block, then returns the largest remaining positive integer. Returns
+    ``None`` when ``value`` is empty, carries only a volume count, has no
+    digits, or yields only zero (avoiding ``"0 p."`` sentinels) — all cases
+    where the scorer should skip rather than compare.
     """
     if not value:
         return None
-    stripped = _ROMAN_PREFIX_RE.sub("", value)
+    no_volumes = _VOLUME_COUNT_RE.sub(" ", value)
+    stripped = _ROMAN_PREFIX_RE.sub("", no_volumes)
     integers = [int(match.group(0)) for match in _INTEGER_RE.finditer(stripped)]
     candidates = [integer for integer in integers if integer > 0]
     if not candidates:

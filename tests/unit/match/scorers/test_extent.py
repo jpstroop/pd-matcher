@@ -70,6 +70,34 @@ def testextract_page_count_returns_none_when_only_zero() -> None:
     assert extract_page_count("0 p.") is None
 
 
+def testextract_page_count_skips_bare_volume_count() -> None:
+    """``"3 v"`` is a volume count, not 3 pages — yields ``None`` (skip)."""
+    assert extract_page_count("3 v") is None
+
+
+def testextract_page_count_skips_bare_volume_count_with_period() -> None:
+    """``"1 v."`` is a volume count, not 1 page — yields ``None`` (skip)."""
+    assert extract_page_count("1 v.") is None
+
+
+def testextract_page_count_skips_plural_volume_abbreviations() -> None:
+    """``"2 vols."`` and ``"3 volumes"`` are volume counts and yield ``None``."""
+    assert extract_page_count("2 vols.") is None
+    assert extract_page_count("3 volumes") is None
+
+
+def testextract_page_count_keeps_page_count_past_volume_count() -> None:
+    """``"1 v. (312 p.)"`` strips the volume count and keeps the page count."""
+    assert extract_page_count("1 v. (312 p.)") == 312
+
+
+def test_score_extent_volume_counts_skip_not_match(scorer_context: ScorerContext) -> None:
+    """``"3 v"`` vs ``"1 v."`` must skip, not score a false 1.0 (pair 295)."""
+    ev = score_extent("3 v", "1 v.", scorer_context)
+    assert ev.skipped is True
+    assert ev.score == 0.0
+
+
 def test_score_extent_zero_delta_is_max(scorer_context: ScorerContext) -> None:
     """Identical page counts produce the maximum score."""
     ev = score_extent("312 p.", "312 p.", scorer_context)
