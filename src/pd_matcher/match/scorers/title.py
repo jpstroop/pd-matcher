@@ -30,6 +30,12 @@ distinct words ("work"/"word") stay unmatched, and IDF weighting keeps any
 residual generic near-match low-impact. An exact match scores ``ratio ==
 100`` and so reduces to the original Jaccard, making this a controlled
 generalization.
+
+IDF cancels in a single-token Jaccard (``idf(tok) / idf(tok) = 1.0``), so a
+lone generic shared word scores a perfect match (#87). The score is therefore
+scaled by an absolute-evidence confidence keyed on the shared IDF *mass* (see
+:data:`_GENERIC_TITLE_MASS_FACTOR`), which is low for a thin generic overlap
+and high for a rich one — the discriminating signal the ratio throws away.
 """
 
 from rapidfuzz.fuzz import ratio
@@ -72,6 +78,20 @@ _WHOLE_STRING_MIN_RATIO: float = 90.0
 # a length floor of 10 keeps every one while excluding the short coincidental tail
 # (single generic words like "report"/"index", where per-token already suffices).
 _WHOLE_STRING_MIN_LEN: int = 10
+
+# IDF cancels in a single-token Jaccard: with one shared stem and no unique
+# tokens, raw = idf(tok) / idf(tok) = 1.0 regardless of how generic the token is,
+# so a lone common word ("Bridges" vs "The bridges") scores a perfect 100 — the
+# same as a distinctive multi-word match. This inflates no-match separation-test
+# pairs (#87 — ~4.1% of vault no_matches falsely high). The absolute shared IDF
+# mass, not the ratio, is the discriminating signal: it is low for a thin generic
+# overlap and high for a rich one. So the Jaccard score is multiplied by a
+# confidence keyed on that mass, scaled by a single distinctive (once-seen)
+# token's IDF (``default_idf``): a lone low-IDF token (mass << default) is
+# discounted toward 0, a lone distinctive token (mass ~= default) clears it at
+# ~1.0, and any multi-token title easily clears it. The factor is the tunable
+# knob (#84 sweeps it); 1.0 means "one once-seen token is full confidence".
+_GENERIC_TITLE_MASS_FACTOR: float = 1.0
 
 
 def _align_tokens(
@@ -183,7 +203,9 @@ def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerConte
         + sum(ctx.idf.score(token) for token in unique_nypl)
     )
     raw = weighted_intersection / weighted_union if weighted_union > 0 else 0.0
-    score = raw * _MAX_SCORE
+    mass_floor = _GENERIC_TITLE_MASS_FACTOR * ctx.idf.default_idf
+    confidence = min(1.0, weighted_intersection / mass_floor) if mass_floor > 0 else 1.0
+    score = raw * _MAX_SCORE * confidence
     marc_joined = "".join(marc_tokens)
     nypl_joined = "".join(nypl_tokens)
     if min(len(marc_joined), len(nypl_joined)) >= _WHOLE_STRING_MIN_LEN:

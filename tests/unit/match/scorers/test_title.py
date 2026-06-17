@@ -156,6 +156,29 @@ def test_shared_weight_exact_pair_is_token_idf(idf_table: IdfTable) -> None:
     assert _shared_weight("widget", "widget", idf_table) == 3.0
 
 
+def test_score_title_lone_generic_token_discounted(scorer_context: ScorerContext) -> None:
+    """A lone low-IDF shared token is discounted below max (#87).
+
+    "small" stems to idf 1.5; with one shared token IDF cancels in the Jaccard
+    (raw == 1.0), so the absolute-mass confidence (1.5 / 2.0 == 0.75) is the only
+    thing keeping it off a full 100.
+    """
+    ev = score_title("small", "small", scorer_context)
+    assert ev.score == 75.0
+    assert ev.skipped is False
+
+
+def test_score_title_lone_distinctive_token_keeps_max(scorer_context: ScorerContext) -> None:
+    """A lone token at or above default_idf clears the confidence gate (#87).
+
+    "widget" stems to idf 3.0 >= default_idf 2.0, so confidence saturates at 1.0
+    and the single-token match keeps its full score.
+    """
+    ev = score_title("widget", "widget", scorer_context)
+    assert ev.score == 100.0
+    assert ev.skipped is False
+
+
 def test_score_title_recovers_ocr_corrupted_token(
     scorer_context: ScorerContext,
 ) -> None:
