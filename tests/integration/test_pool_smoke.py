@@ -12,7 +12,9 @@ from pd_matcher.config.loader import load_pairing_config
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.index.builder import build_index
 from pd_matcher.index.lookup import NyplIndexLookup
+from pd_matcher.match.idf import build_author_idf_table
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.idf import build_publisher_idf_table
 from pd_matcher.parsers.marc import iter_marc_records
 from pd_matcher.workers import run_match
 
@@ -43,6 +45,8 @@ def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
     index_path = _build_index_and_idf(tmp_path)
     with NyplIndexLookup(index_path) as lookup:
         idf = build_idf_table(lookup)
+        author_idf = build_author_idf_table(lookup)
+        publisher_idf = build_publisher_idf_table(lookup)
     marc_path = _FIXTURES / "tiny.marcxml"
     expected_records = sum(1 for _ in iter_marc_records(marc_path))
     output_path = tmp_path / "results.csv"
@@ -68,6 +72,8 @@ def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
         matching_config=config,
         pairing_config=pairing_config,
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         workers=2,
         batch_size=2,
         report_interval_seconds=0.05,

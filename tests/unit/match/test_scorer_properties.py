@@ -19,17 +19,20 @@ _TEXT = text(min_size=1, max_size=40, alphabet="abcdefghijklmnopqrstuvwxyz ")
 
 
 def _ctx() -> ScorerContext:
+    idf = IdfTable(
+        document_count=10,
+        default_idf=2.0,
+        source_hash="h",
+        language="eng",
+        idf={},
+    )
     return ScorerContext(
         language="eng",
         stopwords=load_stopwords("eng"),
         stemmer=stemmer_for("eng"),
-        idf=IdfTable(
-            document_count=10,
-            default_idf=2.0,
-            source_hash="h",
-            language="eng",
-            idf={},
-        ),
+        idf=idf,
+        author_idf=idf,
+        publisher_idf=idf,
         config=MatchingConfig(
             title_weight=0.40,
             author_weight=0.20,

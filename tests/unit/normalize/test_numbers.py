@@ -106,6 +106,23 @@ def test_normalize_numbers_handles_french_ordinals() -> None:
     assert out == "1 livre"
 
 
+def test_normalize_numbers_collapses_digit_ordinals_to_cardinal() -> None:
+    """Digit ordinals match the Roman/word forms ('II' and 'second' -> '2')."""
+    assert normalize_numbers("2nd", "eng") == "2"
+    assert normalize_numbers("1st", "eng") == "1"
+    assert normalize_numbers("3rd", "eng") == "3"
+    assert normalize_numbers("21st", "eng") == "21"
+    assert normalize_numbers("13th", "eng") == "13"
+
+
+def test_normalize_numbers_digit_ordinal_matches_roman_in_title() -> None:
+    """'... Gheyn II' and '... Gheyn, 2nd' normalize to the same digit (pair 367)."""
+    marc = normalize_numbers("Jacob de Gheyn II", "eng")
+    cce = normalize_numbers("Jacob DeGheyn, 2nd", "eng")
+    assert marc.endswith("2")
+    assert cce.endswith("2")
+
+
 def test_normalize_numbers_empty_string() -> None:
     assert normalize_numbers("", "eng") == ""
 

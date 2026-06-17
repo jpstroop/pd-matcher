@@ -69,7 +69,9 @@ from pd_matcher.cli import _load_default_pairing_config
 from pd_matcher.eval.feature_matrix import SCORER_ORDER
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.evidence import Evidence
+from pd_matcher.match.idf import build_author_idf_table
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.idf import build_publisher_idf_table
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
@@ -322,10 +324,14 @@ def _extract(
     labels: list[int] = []
     with NyplIndexLookup(_INDEX_PATH) as lookup:
         idf = build_idf_table(lookup)
+        author_idf = build_author_idf_table(lookup)
+        publisher_idf = build_publisher_idf_table(lookup)
         score_pair = make_pair_scorer(
             matching_config=matching_config,
             pairings=pairings,
             idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
             calibrator=None,
         )
         for entry in kept:

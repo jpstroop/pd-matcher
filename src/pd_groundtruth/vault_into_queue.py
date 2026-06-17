@@ -32,7 +32,9 @@ from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import SOURCE_BANDED
 from pd_groundtruth.sampling import band_of
+from pd_groundtruth.vault_pair_resolver import AUTHOR_IDF_CACHE_NAME
 from pd_groundtruth.vault_pair_resolver import IDF_CACHE_NAME
+from pd_groundtruth.vault_pair_resolver import PUBLISHER_IDF_CACHE_NAME
 from pd_groundtruth.vault_pair_resolver import CceLookupFn
 from pd_groundtruth.vault_pair_resolver import MarcLookupFn
 from pd_groundtruth.vault_pair_resolver import ScorePairFn
@@ -44,7 +46,9 @@ from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.idf import load_or_build_author_idf
 from pd_matcher.match.idf import load_or_build_idf
+from pd_matcher.match.idf import load_or_build_publisher_idf
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.result import CandidateMatch
@@ -207,13 +211,23 @@ def vault_into_queue(
     )
 
     idf_cache_path = index_path.parent / IDF_CACHE_NAME
+    author_idf_cache_path = index_path.parent / AUTHOR_IDF_CACHE_NAME
+    publisher_idf_cache_path = index_path.parent / PUBLISHER_IDF_CACHE_NAME
     idf = load_or_build_idf(idf_cache_path, lambda: NyplIndexLookup(index_path))
+    author_idf = load_or_build_author_idf(
+        author_idf_cache_path, lambda: NyplIndexLookup(index_path)
+    )
+    publisher_idf = load_or_build_publisher_idf(
+        publisher_idf_cache_path, lambda: NyplIndexLookup(index_path)
+    )
     calibrator = _load_calibrator(index_path.parent)
     pairings = compile_pairings(pairing_config)
     score_pair = _make_pair_scorer(
         matching_config=matching_config,
         pairings=pairings,
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         calibrator=calibrator,
         learned_model_dir=index_path.parent,
     )
@@ -233,6 +247,8 @@ def _make_pair_scorer(
     matching_config: MatchingConfig,
     pairings: CompiledPairings,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     calibrator: PlattCalibrator | None,
     learned_model_dir: Path | None,
 ) -> ScorePairFn:
@@ -244,6 +260,8 @@ def _make_pair_scorer(
         matching_config=matching_config,
         pairings=pairings,
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         calibrator=calibrator,
         learned_model_dir=learned_model_dir,
     )

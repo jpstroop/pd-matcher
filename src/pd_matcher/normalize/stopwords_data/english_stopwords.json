@@ -15,7 +15,8 @@
 
   "author_stopwords": [
     "a", "an", "and", "as", "at", "by", "for", "from", "in", "of",
-    "on", "the", "to", "with", "or", "ed", "trans", "comp"
+    "on", "the", "to", "with", "or", "ed", "trans", "comp",
+    "united", "nations", "international", "commission"
   ],
 
   "publisher_stopwords": [
@@ -31,14 +32,19 @@
     "press",
     "soc", "society",
     "assn", "assoc", "association",
-    "book", "books"
+    "book", "books",
+    "university", "institute", "institution", "academy",
+    "national", "bureau", "department", "dept", "division",
+    "office", "committee", "council", "foundation",
+    "museum", "library",
+    "united", "nations", "international", "commission"
   ],
 
   "notes_on_exclusions": {
     "not_included": [
       "new", "history", "story", "life", "american", "world",
-      "university", "illustrated", "edited", "translated"
+      "illustrated", "edited", "translated"
     ],
-    "reason": "These are content words that help distinguish between different works. Publisher-side corporate-suffix and form-of-publication noise was promoted to publisher_stopwords following the 2026-05-28 lower-band diagnostic; these stay scoped to publisher because removing them from title would strip distinguishing tokens from names like 'Penguin Books'."
+    "reason": "These are content words that help distinguish between different works. Publisher-side corporate-suffix and form-of-publication noise was promoted to publisher_stopwords following the 2026-05-28 lower-band diagnostic; these stay scoped to publisher because removing them from title would strip distinguishing tokens from names like 'Penguin Books'. The 2026-06-14 institutional batch ('university', 'institute', 'academy', 'national', 'bureau', 'department', 'division', 'office', 'committee', 'council', 'foundation', 'museum', 'library') is publisher-only for the same reason: these words do not distinguish one academic/governmental imprint from another (every 'X University Press' shares 'university'), so on the publisher side they inflate non-matches, while on the title side they remain distinguishing content words. The 2026-06-14 inter-governmental batch ('united', 'nations', 'international', 'commission') was added after the wild separation test showed ~20 unrelated 'United Nations' publisher pairs scoring name.publisher=1.00: when both sides are identically 'United Nations' the IDF gate cannot suppress them (equal token sets => coverage 1.0), so the score is a constant that fires on matches and non-matches alike and only inflates the non-match baseline. Mixed names keep their distinctive token after removal ('National Health Council' -> 'health'). The inter-governmental four ('united', 'nations', 'international', 'commission') were ALSO promoted to author_stopwords on 2026-06-15: 'United Nations' is a corporate author, and the wild separation test showed it scoring name.author=1.00 across unrelated UN-authored works (the 'Yearbook of the United Nations' candidate recurred against many MARC records). That 1.00 is byte-identical to a genuine distinctive-author match, so neither the weighted mean nor the learned model can discount it from the feature alone — only stopping the boilerplate makes name.author=1.00 meaningful. The rest of the institutional batch stays publisher-only ('university', 'bureau' etc. are not author tokens)."
   }
 }

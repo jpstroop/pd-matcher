@@ -49,7 +49,9 @@ from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.calibrator import load_calibrator
 from pd_matcher.match.combiners.learned import META_FILENAME as _LEARNED_META_FILENAME
 from pd_matcher.match.combiners.learned import MODEL_FILENAME as _LEARNED_MODEL_FILENAME
+from pd_matcher.match.idf import load_or_build_author_idf
 from pd_matcher.match.idf import load_or_build_idf
+from pd_matcher.match.idf import load_or_build_publisher_idf
 from pd_matcher.match.prepare import PrepareReport
 from pd_matcher.match.prepare import prepare_marc
 from pd_matcher.match.prepare import read_manifest
@@ -65,6 +67,8 @@ _RUNTIME_ERROR_EXIT_CODE: int = 1
 _INTERRUPTED_EXIT_CODE: int = 130
 
 _IDF_CACHE_NAME: str = "idf.msgpack"
+_AUTHOR_IDF_CACHE_NAME: str = "author_idf.msgpack"
+_PUBLISHER_IDF_CACHE_NAME: str = "publisher_idf.msgpack"
 _CALIBRATOR_NAME: str = "calibrator.msgpack"
 _LEARNED_SCORER: str = "learned"
 
@@ -579,8 +583,14 @@ def match(
     except ConfigError as exc:
         raise _fail(f"failed to load pairing defaults: {exc}") from exc
     idf_cache_path = index.parent / _IDF_CACHE_NAME
+    author_idf_cache_path = index.parent / _AUTHOR_IDF_CACHE_NAME
+    publisher_idf_cache_path = index.parent / _PUBLISHER_IDF_CACHE_NAME
     try:
         idf = load_or_build_idf(idf_cache_path, lambda: NyplIndexLookup(index))
+        author_idf = load_or_build_author_idf(author_idf_cache_path, lambda: NyplIndexLookup(index))
+        publisher_idf = load_or_build_publisher_idf(
+            publisher_idf_cache_path, lambda: NyplIndexLookup(index)
+        )
     except OSError as exc:
         raise _fail(f"failed to load/build IDF table: {exc}") from exc
     calibrator = _load_calibrator(index.parent)
@@ -595,6 +605,8 @@ def match(
             matching_config=matching_config,
             pairing_config=pairing_config,
             idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
             calibrator=calibrator,
             learned_model_dir=learned_model_dir,
             workers=workers,

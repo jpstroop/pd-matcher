@@ -106,6 +106,8 @@ def resolve_vault_for_build(
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     calibrator: PlattCalibrator | None,
     requeue_verdicts: frozenset[str] = frozenset(),
 ) -> tuple[list[ResolvedVaultPair], ResolveSummary]:
@@ -139,6 +141,8 @@ def resolve_vault_for_build(
         matching_config=matching_config,
         pairings=pairings,
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         calibrator=calibrator,
         learned_model_dir=index_path.parent,
     )

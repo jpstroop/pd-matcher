@@ -60,13 +60,21 @@ _NON_CORROBORATING_SCORERS: frozenset[str] = frozenset(
 )
 
 
-def _build_context(marc: MarcRecord, idf: IdfTable, config: MatchingConfig) -> ScorerContext:
+def _build_context(
+    marc: MarcRecord,
+    idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
+    config: MatchingConfig,
+) -> ScorerContext:
     language = marc.language_code or _DEFAULT_LANGUAGE
     return ScorerContext(
         language=language,
         stopwords=load_stopwords(language),
         stemmer=stemmer_for(language),
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         config=config,
         publisher_alias_index=get_default_alias_index(),
     )
@@ -230,6 +238,8 @@ def match_record(
     lookup: NyplIndexLookup,
     config: MatchingConfig,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     calibrator: PlattCalibrator | None,
     combiner: Combiner,
     pairings: CompiledPairings,
@@ -241,7 +251,9 @@ def match_record(
         marc: The MARC record to match.
         lookup: Open read-only LMDB lookup.
         config: Active :class:`MatchingConfig`.
-        idf: Pre-built :class:`IdfTable`.
+        idf: Pre-built title :class:`IdfTable`.
+        author_idf: Pre-built author-name :class:`IdfTable`.
+        publisher_idf: Pre-built publisher-name :class:`IdfTable`.
         calibrator: Optional Platt calibrator. When supplied,
             ``combined.calibrated`` is set to ``P(true match)``; when
             ``None``, ``calibrated = raw / 100``.
@@ -269,7 +281,7 @@ def match_record(
             alternates=(),
             candidates_considered=0,
         )
-    ctx = _build_context(marc, idf, config)
+    ctx = _build_context(marc, idf, author_idf, publisher_idf, config)
     scored = [
         _score_candidate(marc, candidate, ctx, combiner, calibrator, pairings)
         for candidate in candidates

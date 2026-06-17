@@ -500,6 +500,8 @@ def test_vault_into_queue_end_to_end_against_fake_index(tmp_path: Path) -> None:
     with (
         patch.object(module_under_test, "NyplIndexLookup", lambda _path: _FakeLookup()),
         patch.object(module_under_test, "load_or_build_idf", lambda *_a, **_k: object()),
+        patch.object(module_under_test, "load_or_build_author_idf", lambda *_a, **_k: object()),
+        patch.object(module_under_test, "load_or_build_publisher_idf", lambda *_a, **_k: object()),
         patch.object(module_under_test, "_load_calibrator", lambda _p: None),
         patch.object(
             module_under_test,
@@ -542,6 +544,8 @@ def test_make_pair_scorer_delegates_to_shared_helper() -> None:
         matching_config=_load_default_matching_config(),
         pairings=pairings,
         idf=idf,
+        author_idf=idf,
+        publisher_idf=idf,
         calibrator=None,
         learned_model_dir=None,
     )

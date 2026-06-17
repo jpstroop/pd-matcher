@@ -12,7 +12,9 @@ from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.idf import build_author_idf_table
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.idf import build_publisher_idf_table
 from pd_matcher.match.prepare import prepare_marc
 from pd_matcher.match.result import MatchResult
 from pd_matcher.models import MarcRecord
@@ -55,6 +57,8 @@ def test_shutdown_predicate_tracks_event() -> None:
 def test_worker_entry_runs_in_process_against_real_queues(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
+    tiny_author_idf: IdfTable,
+    tiny_publisher_idf: IdfTable,
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
 ) -> None:
@@ -72,6 +76,8 @@ def test_worker_entry_runs_in_process_against_real_queues(
         matching_config=matching_config,
         pairing_config=pairing_config,
         idf=tiny_idf,
+        author_idf=tiny_author_idf,
+        publisher_idf=tiny_publisher_idf,
         calibrator=None,
         learned_model_dir=None,
         input_queue=input_queue,
@@ -119,6 +125,8 @@ def test_writer_entry_runs_in_process_against_real_queues(tmp_path: Path) -> Non
 def test_run_match_rejects_zero_workers(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
+    tiny_author_idf: IdfTable,
+    tiny_publisher_idf: IdfTable,
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
     tmp_path: Path,
@@ -131,6 +139,8 @@ def test_run_match_rejects_zero_workers(
             matching_config=matching_config,
             pairing_config=pairing_config,
             idf=tiny_idf,
+            author_idf=tiny_author_idf,
+            publisher_idf=tiny_publisher_idf,
             workers=0,
         )
 
@@ -152,6 +162,8 @@ def test_run_match_returns_run_report(
     build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=index_path)
     with NyplIndexLookup(index_path) as lookup:
         idf = build_idf_table(lookup)
+        author_idf = build_author_idf_table(lookup)
+        publisher_idf = build_publisher_idf_table(lookup)
     config = MatchingConfig(
         title_weight=0.40,
         author_weight=0.20,
@@ -174,6 +186,8 @@ def test_run_match_returns_run_report(
         matching_config=config,
         pairing_config=pairing_config,
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         workers=1,
         batch_size=2,
         queue_maxsize=4,
@@ -274,6 +288,8 @@ def test_run_match_consumes_prepared_chunks(
     build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=index_path)
     with NyplIndexLookup(index_path) as lookup:
         idf = build_idf_table(lookup)
+        author_idf = build_author_idf_table(lookup)
+        publisher_idf = build_publisher_idf_table(lookup)
     config = MatchingConfig(
         title_weight=0.40,
         author_weight=0.20,
@@ -299,6 +315,8 @@ def test_run_match_consumes_prepared_chunks(
         matching_config=config,
         pairing_config=pairing_config,
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         workers=1,
         batch_size=2,
         queue_maxsize=4,

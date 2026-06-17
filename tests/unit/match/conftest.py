@@ -76,30 +76,90 @@ def idf_table() -> IdfTable:
 
 
 @fixture
+def author_idf_table() -> IdfTable:
+    """Return a tiny author-name IDF table (unstemmed tokens).
+
+    ``smith`` is modelled as a common surname (low IDF, near the corpus
+    floor) and ``albuquerque`` as a rare one (near ``default_idf``), so the
+    name scorer's distinctiveness gate can be exercised directly.
+    """
+    return IdfTable(
+        document_count=10,
+        default_idf=4.0,
+        source_hash="test-hash",
+        language="eng",
+        idf={
+            "smith": 0.4,
+            "john": 1.2,
+            "jane": 1.2,
+            "albuquerque": 3.9,
+        },
+    )
+
+
+@fixture
+def publisher_idf_table() -> IdfTable:
+    """Return a tiny publisher-name IDF table (unstemmed tokens).
+
+    ``university`` and ``hawaii`` are modelled as generic/common (low IDF)
+    while ``knopf`` and ``macmillan`` are distinctive (near ``default_idf``),
+    so the gate drives generic-only overlap toward zero while keeping
+    distinctive-token overlap high.
+    """
+    return IdfTable(
+        document_count=10,
+        default_idf=4.0,
+        source_hash="test-hash",
+        language="eng",
+        idf={
+            "university": 0.3,
+            "hawaii": 0.6,
+            "oxford": 0.6,
+            "knopf": 3.9,
+            "macmillan": 3.8,
+        },
+    )
+
+
+@fixture
 def english_stemmer() -> Callable[[str], str]:
     """Return the English Snowball stemmer callable."""
     return stemmer_for("eng")
 
 
 @fixture
-def scorer_context(matching_config: MatchingConfig, idf_table: IdfTable) -> ScorerContext:
+def scorer_context(
+    matching_config: MatchingConfig,
+    idf_table: IdfTable,
+    author_idf_table: IdfTable,
+    publisher_idf_table: IdfTable,
+) -> ScorerContext:
     """Return an English-language :class:`ScorerContext`."""
     return ScorerContext(
         language="eng",
         stopwords=load_stopwords("eng"),
         stemmer=stemmer_for("eng"),
         idf=idf_table,
+        author_idf=author_idf_table,
+        publisher_idf=publisher_idf_table,
         config=matching_config,
     )
 
 
 @fixture
-def french_scorer_context(matching_config: MatchingConfig, idf_table: IdfTable) -> ScorerContext:
+def french_scorer_context(
+    matching_config: MatchingConfig,
+    idf_table: IdfTable,
+    author_idf_table: IdfTable,
+    publisher_idf_table: IdfTable,
+) -> ScorerContext:
     """Return a French-language :class:`ScorerContext`."""
     return ScorerContext(
         language="fre",
         stopwords=load_stopwords("fre"),
         stemmer=stemmer_for("fre"),
         idf=idf_table,
+        author_idf=author_idf_table,
+        publisher_idf=publisher_idf_table,
         config=matching_config,
     )

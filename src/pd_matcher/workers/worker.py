@@ -56,6 +56,8 @@ def _process_record(
     lookup: NyplIndexLookup,
     config: MatchingConfig,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     calibrator: PlattCalibrator | None,
     combiner: Combiner,
     pairings: CompiledPairings,
@@ -66,6 +68,8 @@ def _process_record(
         lookup=lookup,
         config=config,
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         calibrator=calibrator,
         combiner=combiner,
         pairings=pairings,
@@ -112,6 +116,8 @@ def run_worker_loop(
     lookup: NyplIndexLookup,
     config: MatchingConfig,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     calibrator: PlattCalibrator | None,
     pairings: CompiledPairings,
     learned_model_dir: Path | None,
@@ -128,7 +134,9 @@ def run_worker_loop(
     Args:
         lookup: Open read-only :class:`NyplIndexLookup`.
         config: Active :class:`MatchingConfig`.
-        idf: Pre-built :class:`IdfTable`.
+        idf: Pre-built title :class:`IdfTable`.
+        author_idf: Pre-built author-name :class:`IdfTable`.
+        publisher_idf: Pre-built publisher-name :class:`IdfTable`.
         calibrator: Optional Platt calibrator.
         pairings: Compiled field pairings shared across all records.
         learned_model_dir: Directory holding the learned-model artifact when
@@ -183,6 +191,8 @@ def run_worker_loop(
                     lookup=lookup,
                     config=config,
                     idf=idf,
+                    author_idf=author_idf,
+                    publisher_idf=publisher_idf,
                     calibrator=calibrator,
                     combiner=combiner,
                     pairings=pairings,
@@ -217,6 +227,8 @@ def worker_main(
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     calibrator: PlattCalibrator | None,
     learned_model_dir: Path | None,
     input_get: Callable[[], bytes | None],
@@ -240,6 +252,8 @@ def worker_main(
             lookup=lookup,
             config=matching_config,
             idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
             calibrator=calibrator,
             pairings=pairings,
             learned_model_dir=learned_model_dir,

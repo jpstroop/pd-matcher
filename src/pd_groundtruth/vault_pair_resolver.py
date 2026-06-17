@@ -35,6 +35,8 @@ from pd_matcher.parsers.marc import iter_marc_records
 _LOGGER = getLogger(__name__)
 
 IDF_CACHE_NAME: str = "idf.msgpack"
+AUTHOR_IDF_CACHE_NAME: str = "author_idf.msgpack"
+PUBLISHER_IDF_CACHE_NAME: str = "publisher_idf.msgpack"
 
 ScorePairFn = Callable[[MarcRecord, IndexedNyplRegRecord], CandidateMatch]
 MarcLookupFn = Callable[[str], MarcRecord | None]
@@ -103,6 +105,8 @@ def make_pair_scorer(
     matching_config: MatchingConfig,
     pairings: CompiledPairings,
     idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
     calibrator: PlattCalibrator | None,
     learned_model_dir: Path | None = None,
 ) -> ScorePairFn:
@@ -119,7 +123,7 @@ def make_pair_scorer(
     combiner = build_combiner(matching_config, learned_model_dir=learned_model_dir)
 
     def scorer(marc: MarcRecord, candidate: IndexedNyplRegRecord) -> CandidateMatch:
-        ctx = _build_context(marc, idf, matching_config)
+        ctx = _build_context(marc, idf, author_idf, publisher_idf, matching_config)
         return _score_candidate(marc, candidate, ctx, combiner, calibrator, pairings)
 
     return scorer
@@ -186,7 +190,9 @@ def resolve_vault_pairs(
 
 
 __all__ = [
+    "AUTHOR_IDF_CACHE_NAME",
     "IDF_CACHE_NAME",
+    "PUBLISHER_IDF_CACHE_NAME",
     "CceLookupFn",
     "MarcLookupFn",
     "ResolveSummary",

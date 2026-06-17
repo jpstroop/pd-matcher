@@ -16,6 +16,11 @@ from re import Match
 from re import compile as re_compile
 
 _ROMAN_PATTERN = re_compile(r"^[ivxlcdm]+$", IGNORECASE)
+# Digit ordinals ("2nd", "3rd", "1st", "21st", "13th") collapse to their cardinal
+# digit so they match the Roman ("II" -> "2") and word ("second" -> "2") forms.
+# The English suffixes are distinctive enough to apply across languages (a no-op
+# where they don't occur).
+_DIGIT_ORDINAL_PATTERN = re_compile(r"^(\d+)(?:st|nd|rd|th)$", IGNORECASE)
 _ROMAN_VALUES: Mapping[str, int] = {
     "i": 1,
     "v": 5,
@@ -430,6 +435,10 @@ def normalize_numbers(s: str, language: str) -> str:
         core = token.strip(_PUNCT_STRIP)
         if not core:
             out.append(token)
+            continue
+        digit_ordinal = _DIGIT_ORDINAL_PATTERN.match(core)
+        if digit_ordinal is not None:
+            out.append(digit_ordinal.group(1))
             continue
         ordinal = ordinal_word_to_int(core, language)
         if ordinal is not None:

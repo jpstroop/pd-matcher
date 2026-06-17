@@ -79,7 +79,9 @@ from pd_matcher.match.combiners import build_combiner
 from pd_matcher.match.combiners.base import Combiner
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.idf import build_author_idf_table
 from pd_matcher.match.idf import build_idf_table
+from pd_matcher.match.idf import build_publisher_idf_table
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import match_record
@@ -192,6 +194,8 @@ class Scoring:
     pairings: CompiledPairings
     combiner: Combiner
     idf: IdfTable
+    author_idf: IdfTable
+    publisher_idf: IdfTable
     calibrator: PlattCalibrator | None
 
 
@@ -214,12 +218,16 @@ def _build_scoring(lookup: NyplIndexLookup) -> Scoring:
     combiner = build_combiner(matching_config, learned_model_dir=learned_model_dir)
     calibrator = _load_calibrator(_INDEX_PATH.parent)
     idf = build_idf_table(lookup)
+    author_idf = build_author_idf_table(lookup)
+    publisher_idf = build_publisher_idf_table(lookup)
     pairings = compile_pairings(pairing_config)
     return Scoring(
         matching_config=matching_config,
         pairings=pairings,
         combiner=combiner,
         idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
         calibrator=calibrator,
     )
 
@@ -240,6 +248,8 @@ def _pair_for_top_candidate(
         lookup=lookup,
         config=scoring.matching_config,
         idf=scoring.idf,
+        author_idf=scoring.author_idf,
+        publisher_idf=scoring.publisher_idf,
         calibrator=scoring.calibrator,
         combiner=scoring.combiner,
         pairings=scoring.pairings,

@@ -598,6 +598,8 @@ def test_build_queue_drives_run_match_and_summarizes(
     _write_shard(pool / "eng" / "shard_1.xml", "id-1", "Title One")
 
     monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_author_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_publisher_idf", lambda *a, **k: object())
     monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
 
     captured: dict[str, object] = {}
@@ -656,6 +658,8 @@ def test_build_queue_threads_log_file_to_run_match(
     (pool / "eng").mkdir(parents=True)
     _write_shard(pool / "eng" / "shard_1.xml", "id-1", "Title One")
     monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_author_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_publisher_idf", lambda *a, **k: object())
     monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
 
     seen_log_file: list[Path | None] = []
@@ -859,6 +863,8 @@ def test_build_queue_carries_vault_pair_through_rebuild(
         )
 
     monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_author_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_publisher_idf", lambda *a, **k: object())
     monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
     monkeypatch.setattr(bq, "resolve_vault_for_build", _fake_resolve)
 
@@ -927,6 +933,8 @@ def test_build_queue_excludes_vault_marcs_from_sample(
     entry_b = _vault_entry("vault-b", "uuid-b")
 
     monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_author_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_publisher_idf", lambda *a, **k: object())
     monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
     monkeypatch.setattr(
         bq,
@@ -1003,6 +1011,8 @@ def test_build_queue_reports_vault_entries_missing_from_pool(
     from pd_groundtruth import build_queue_vault as bqv
 
     monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_author_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_publisher_idf", lambda *a, **k: object())
     monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
     monkeypatch.setattr(bqv, "NyplIndexLookup", lambda _p: _NullCceLookup())
 
@@ -1054,6 +1064,8 @@ def test_build_queue_reports_vault_entry_missing_from_index(
     from pd_groundtruth import build_queue_vault as bqv
 
     monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_author_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_publisher_idf", lambda *a, **k: object())
     monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
     monkeypatch.setattr(bqv, "compile_pairings", lambda _pairing: object())
     monkeypatch.setattr(bqv, "make_pair_scorer", lambda **_kw: lambda _m, _c: _match(0.95))
@@ -1120,6 +1132,8 @@ def test_build_queue_threads_requeue_verdicts_to_resolver_and_factory(
     _write_shard(pool / "eng" / "shard_1.xml", "id-1", "T1")
 
     monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_author_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_publisher_idf", lambda *a, **k: object())
     monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
 
     captured_resolver: dict[str, object] = {}
@@ -1188,6 +1202,8 @@ def test_build_queue_cleans_up_prepared_dir(tmp_path: Path, monkeypatch: MonkeyP
     (pool / "eng").mkdir(parents=True)
     _write_shard(pool / "eng" / "shard_1.xml", "id-1", "Title One")
     monkeypatch.setattr(bq, "load_or_build_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_author_idf", lambda *a, **k: object())
+    monkeypatch.setattr(bq, "load_or_build_publisher_idf", lambda *a, **k: object())
     monkeypatch.setattr(bq, "_load_calibrator", lambda *a, **k: None)
 
     seen: list[Path] = []

@@ -13,7 +13,10 @@
   ],
 
   "publisher_stopwords": [
-    "und", "&"
+    "und", "&",
+    "verlag", "verlags", "gesellschaft",
+    "universitat", "institut", "akademie",
+    "nationale", "nationalen", "amt", "bibliothek", "museum"
   ],
 
   "notes_on_exclusions": {

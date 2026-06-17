@@ -13,7 +13,10 @@
   ],
 
   "publisher_stopwords": [
-    "e", "&"
+    "e", "&",
+    "editrice", "editore", "editori", "edizioni", "libreria", "tipografia",
+    "universita", "societa", "istituto", "accademia",
+    "nazionale", "biblioteca", "museo"
   ],
 
   "notes_on_exclusions": {
