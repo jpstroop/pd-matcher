@@ -36,6 +36,23 @@ lone generic shared word scores a perfect match (#87). The score is therefore
 scaled by an absolute-evidence confidence keyed on the shared IDF *mass* (see
 :data:`_GENERIC_TITLE_MASS_FACTOR`), which is low for a thin generic overlap
 and high for a rich one — the discriminating signal the ratio throws away.
+
+Jaccard is symmetric, so when one side carries a subtitle/blurb the other omits
+(MARC 245 ``$b`` vs. a bare CCE title, or vice versa) the long side's unique
+tokens bloat the union and crater a real match (#85 — ~28.8% of labeled matches
+sit at Jaccard < 0.6 with high one-sided coverage; motivating pair 219, CCE-side
+coverage 0.70 against Jaccard 0.22). So a third, asymmetric *coverage* term lifts
+the score: the shared mass over the *smaller* side's total mass, rewarding "the
+shorter title's distinctive content is mostly present in the longer one". It
+fires only when both :data:`_COVERAGE_MIN_RATIO` (a high coverage bar) and
+:data:`_COVERAGE_MIN_MASS` (the covered side carries enough distinctive evidence)
+clear, so a short generic title fully contained in a long one (e.g. "Report" ⊆
+"Annual report of…", coverage 1.0 but mass tiny) is *not* lifted. The complement
+whole/part shape (a true volume inside a bound set, also CCE ⊆ MARC) is left to
+the ``volume.compat`` feature (#82); coverage emits a clean signal and the learned
+combiner rejects whole/part by reading the two features together — this module
+does not re-gate it. Coverage is a ``max`` like the whole-string rescue: it only
+ever lifts a diluted match, never lowers a clean one.
 """
 
 from rapidfuzz.fuzz import ratio
@@ -92,6 +109,23 @@ _WHOLE_STRING_MIN_LEN: int = 10
 # ~1.0, and any multi-token title easily clears it. The factor is the tunable
 # knob (#84 sweeps it); 1.0 means "one once-seen token is full confidence".
 _GENERIC_TITLE_MASS_FACTOR: float = 1.0
+
+# The asymmetric coverage lift (#85): shared mass / smaller-side mass. Coverage
+# only fires when it clears this ratio — a high bar, since a partial subset of a
+# long title is exactly the same-title-different-work shape coverage must avoid.
+# 0.80 means "all but a small distinctive fraction of the shorter title is
+# present in the longer one". Tunable knob; the #84 sweep tightens or loosens it
+# while watching BOTH the recovered-match arm and the non-match-inflation arm.
+_COVERAGE_MIN_RATIO: float = 0.80
+
+# Coverage is high (often 1.0) whenever the shorter side is a subset of the
+# longer one, so a lone generic CCE title ("Report") inside a long MARC title
+# ("Annual report of the…") would be falsely lifted on ratio alone. The smaller
+# side must therefore carry at least this much distinctive IDF mass before the
+# lift fires — the same absolute-evidence idea as #87's confidence floor, scaled
+# by a single once-seen token's IDF (``default_idf``). The factor is the second
+# tunable knob the #84 sweep moves; 1.0 means "one distinctive token of evidence".
+_COVERAGE_MIN_MASS_FACTOR: float = 1.0
 
 
 def _align_tokens(
@@ -212,6 +246,14 @@ def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerConte
         whole_ratio = ratio(marc_joined, nypl_joined)
         if whole_ratio >= _WHOLE_STRING_MIN_RATIO:
             score = max(score, whole_ratio)
+    marc_side_mass = sum(ctx.idf.score(token) for token in marc_set)
+    cce_side_mass = sum(ctx.idf.score(token) for token in nypl_set)
+    smaller_side_mass = min(marc_side_mass, cce_side_mass)
+    if smaller_side_mass > 0:
+        coverage = weighted_intersection / smaller_side_mass
+        coverage_mass_floor = _COVERAGE_MIN_MASS_FACTOR * ctx.idf.default_idf
+        if coverage >= _COVERAGE_MIN_RATIO and smaller_side_mass >= coverage_mass_floor:
+            score = max(score, coverage * _MAX_SCORE)
     token_total = len(matched) + len(unique_marc) + len(unique_nypl)
     avg_idf = (weighted_union / token_total) if token_total else 0.0
     features: tuple[tuple[str, float], ...] = (

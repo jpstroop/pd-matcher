@@ -127,6 +127,43 @@ def test_score_title_same_script_does_not_fire_mismatch(
     assert "script_mismatch" not in feature_map
 
 
+def test_score_title_asymmetric_coverage_lifts_diluted_match(
+    scorer_context: ScorerContext,
+) -> None:
+    """A high-coverage subset title is lifted above its bloated-union Jaccard (#85).
+
+    The CCE side ("studi widget", mass 5.5) is fully present in the longer MARC
+    title, whose extra distinctive tokens (albuquerqu, machin, american) bloat the
+    union so the symmetric Jaccard is only ~0.38. Coverage of the smaller side is
+    1.0 and its mass (5.5) clears the 2.0 floor, so the coverage term lifts the
+    score to max.
+    """
+    diluted = score_title("albuquerqu machin studi widget american", "studi widget", scorer_context)
+    bare = score_title("studi widget", "albuquerqu machin studi widget american", scorer_context)
+    assert diluted.score == 100.0
+    assert bare.score == 100.0
+    feature_map = dict(diluted.features)
+    assert feature_map["unique_to_marc"] == 3.0
+    assert feature_map["unique_to_nypl"] == 0.0
+
+
+def test_score_title_generic_subset_not_lifted_by_coverage(
+    scorer_context: ScorerContext,
+) -> None:
+    """A lone generic CCE token inside a long MARC title is gated out of the lift (#85).
+
+    "american" (idf 1.0, mass below the 2.0 floor) is fully contained in the MARC
+    title, so coverage is 1.0 — but the smaller side carries too little distinctive
+    evidence, so the mass gate blocks the lift and the score stays at the (#87
+    confidence-discounted) Jaccard rather than jumping to 100.
+    """
+    ev = score_title("american widget studi", "american", scorer_context)
+    expected = (1.0 / (1.0 + 3.0 + 2.5)) * 100.0 * (1.0 / 2.0)
+    assert ev.score == expected
+    assert ev.score < 100.0
+    assert ev.skipped is False
+
+
 def test_align_tokens_exact_only_reduces_to_intersection() -> None:
     """With no near-misses the alignment is the plain set intersection."""
     matched, unique_marc, unique_nypl = _align_tokens({"a", "b"}, {"b", "c"})
