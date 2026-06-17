@@ -20,10 +20,11 @@ Parser heuristic: strip volume-count statements and a leading
 roman-numeral pagination block, then take the LARGEST plain integer
 that remains. Roman numerals at the start (``"xii, 312 p."``) are
 paginated front-matter and not part of the page count. Volume counts
-(``"3 v"``, ``"1 v."``, ``"2 vols."``) are NOT page counts: a bare
-volume statement yields no integer and skips, so a 3-volume set and a
-1-volume work no longer read as "3 pages" vs "1 page" and falsely match
-(extent bug, pair 295). Multi-volume statements that *also* carry a page
+(``"3 v"``, ``"1 v."``, ``"2 vols."``, and the volumes-in-bindings form
+``"5 v. in 10"``) are NOT page counts: a bare volume statement yields no
+integer and skips, so a 3-volume set and a 1-volume work no longer read as
+"3 pages" vs "1 page" and falsely match (extent bug, pair 295; the
+``"in <m>"`` tail is also volumes, pair 377). Multi-volume statements that *also* carry a page
 count — ``"1 v. (312 p.)"`` — strip the ``"1 v."`` and pick out 312;
 ``"v. (loose-leaf)"`` and ``"unpaged"`` yield no integer at all and skip.
 Whether a volume-count *mismatch* (3 v. vs 1 v.) should be a negative
@@ -43,11 +44,12 @@ _TOLERANCE_PAGES: int = 2
 _PENALTY_PER_PAGE: float = 5.0
 
 _ROMAN_PREFIX_RE = re_compile(r"^\s*(?:\[[^\]]*\]\s*,?\s*)?[ivxlcdm]+\s*,\s*", IGNORECASE)
-# A volume COUNT: "<n> v", "<n> v.", "<n> vol", "<n> vols.", "<n> volume(s)".
-# The negative lookahead stops the abbreviation from swallowing an unrelated
-# word ("3 voluntary..."); the digit it consumes is a volume tally, not pages,
-# so it is removed before page extraction.
-_VOLUME_COUNT_RE = re_compile(r"\b\d+\s*v(?:ol(?:ume)?s?)?\.?(?![a-z])", IGNORECASE)
+# A volume COUNT: "<n> v", "<n> v.", "<n> vol", "<n> vols.", "<n> volume(s)",
+# and the volumes-in-bindings form "<n> v. in <m>" (both tallies are volumes,
+# not pages). The negative lookahead stops the abbreviation from swallowing an
+# unrelated word ("3 voluntary..."); the digits it consumes are volume tallies,
+# not pages, so the whole expression is removed before page extraction.
+_VOLUME_COUNT_RE = re_compile(r"\b\d+\s*v(?:ol(?:ume)?s?)?\.?(?:\s+in\s+\d+)?(?![a-z])", IGNORECASE)
 _INTEGER_RE = re_compile(r"\d+")
 
 

@@ -91,6 +91,12 @@ def testextract_page_count_keeps_page_count_past_volume_count() -> None:
     assert extract_page_count("1 v. (312 p.)") == 312
 
 
+def testextract_page_count_skips_volumes_in_bindings_form() -> None:
+    """``"5 v. in 10"`` is volumes-in-bindings, not 10 pages — yields ``None`` (pair 377)."""
+    assert extract_page_count("5 v. in 10") is None
+    assert extract_page_count("5 v in 10") is None
+
+
 def test_score_extent_volume_counts_skip_not_match(scorer_context: ScorerContext) -> None:
     """``"3 v"`` vs ``"1 v."`` must skip, not score a false 1.0 (pair 295)."""
     ev = score_extent("3 v", "1 v.", scorer_context)
