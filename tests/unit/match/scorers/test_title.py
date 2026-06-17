@@ -1,6 +1,9 @@
 """Tests for :mod:`pd_matcher.match.scorers.title`."""
 
+from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.scorers.context import ScorerContext
+from pd_matcher.match.scorers.title import _align_tokens
+from pd_matcher.match.scorers.title import _shared_weight
 from pd_matcher.match.scorers.title import score_title
 
 
@@ -122,3 +125,93 @@ def test_score_title_same_script_does_not_fire_mismatch(
     assert ev.skipped is False
     feature_map = dict(ev.features)
     assert "script_mismatch" not in feature_map
+
+
+def test_align_tokens_exact_only_reduces_to_intersection() -> None:
+    """With no near-misses the alignment is the plain set intersection."""
+    matched, unique_marc, unique_nypl = _align_tokens({"a", "b"}, {"b", "c"})
+    assert matched == (("b", "b"),)
+    assert unique_marc == frozenset({"a"})
+    assert unique_nypl == frozenset({"c"})
+
+
+def test_align_tokens_fuzzy_recovers_ocr_corrupted_pair() -> None:
+    """A single-character OCR corruption aligns to the clean stem (ratio 93)."""
+    matched, unique_marc, unique_nypl = _align_tokens({"immunochemistri"}, {"immunochenistri"})
+    assert matched == (("immunochemistri", "immunochenistri"),)
+    assert unique_marc == frozenset()
+    assert unique_nypl == frozenset()
+
+
+def test_align_tokens_distinct_words_stay_unmatched() -> None:
+    """Genuinely different words (ratio 75 < threshold) do not align."""
+    matched, unique_marc, unique_nypl = _align_tokens({"work"}, {"word"})
+    assert matched == ()
+    assert unique_marc == frozenset({"work"})
+    assert unique_nypl == frozenset({"word"})
+
+
+def test_shared_weight_exact_pair_is_token_idf(idf_table: IdfTable) -> None:
+    """An exact pair weighs exactly the token's IDF (Jaccard reduction)."""
+    assert _shared_weight("widget", "widget", idf_table) == 3.0
+
+
+def test_score_title_recovers_ocr_corrupted_token(
+    scorer_context: ScorerContext,
+) -> None:
+    """An OCR'd distinctive token (ratio 90) is recovered; a different one is not."""
+    recovered = score_title("albuquerqu widget", "alkuquerqu widget", scorer_context)
+    distinct = score_title("albuquerqu widget", "machin widget", scorer_context)
+    assert dict(recovered.features)["token_overlap"] == 2.0
+    assert dict(distinct.features)["token_overlap"] == 1.0
+    assert recovered.score > distinct.score
+
+
+def test_score_title_distinct_short_words_not_fuzzy_aligned(
+    scorer_context: ScorerContext,
+) -> None:
+    """Different short words (ratio 22) stay unique; only the shared token aligns."""
+    ev = score_title("small widget", "part widget", scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["token_overlap"] == 1.0
+    assert feature_map["unique_to_marc"] == 1.0
+    assert feature_map["unique_to_nypl"] == 1.0
+
+
+def test_score_title_whole_string_rescues_compound_split(
+    scorer_context: ScorerContext,
+) -> None:
+    """A compound split per-token matching misses is rescued by the whole-string ratio.
+
+    "albuquerqu" vs "albu querqu" shares no aligned token (the parts are too
+    short to clear the per-token gate), so the Jaccard alone is zero — but the
+    concatenated stems are identical, so the whole-string rescue lifts it to max.
+    """
+    ev = score_title("albuquerqu", "albu querqu", scorer_context)
+    assert ev.score == 100.0
+    assert dict(ev.features)["token_overlap"] == 0.0
+
+
+def test_score_title_whole_string_below_gate_does_not_rescue(
+    scorer_context: ScorerContext,
+) -> None:
+    """A sub-gate whole-string ratio (work/word = 75 < 90) leaves the score at zero."""
+    ev = score_title("work", "word", scorer_context)
+    assert ev.score == 0.0
+    assert ev.skipped is False
+
+
+def test_score_title_whole_string_length_gate_blocks_short_compound(
+    scorer_context: ScorerContext,
+) -> None:
+    """A short compound (joined "redcoat" = 7 < 10) is below the length floor.
+
+    The whole-string ratio is a perfect 100 here, but the concatenation is too
+    short for that to be a trustworthy same-title claim, so the rescue does not
+    fire and the score stays at the (zero) Jaccard. The identical-but-longer
+    "albuquerqu" / "albu querqu" pair (10 chars) clears the floor and is rescued,
+    so this isolates the length gate.
+    """
+    ev = score_title("redcoat", "red coat", scorer_context)
+    assert ev.score == 0.0
+    assert ev.skipped is False
