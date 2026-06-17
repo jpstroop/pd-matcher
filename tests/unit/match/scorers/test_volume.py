@@ -13,6 +13,7 @@ def _marc(
     title_part_number: str | None = None,
     extent: str | None = None,
     publication_date_raw: str | None = None,
+    series_titles: tuple[str, ...] = (),
 ) -> MarcRecord:
     return MarcRecord(
         control_id="m",
@@ -21,6 +22,7 @@ def _marc(
         title_part_number=title_part_number,
         extent=extent,
         publication_date_raw=publication_date_raw,
+        series_titles=series_titles,
     )
 
 
@@ -28,12 +30,14 @@ def _cce(
     *,
     title: str = "Some title",
     desc: str | None = None,
+    notes: tuple[str, ...] = (),
 ) -> IndexedNyplRegRecord:
     return IndexedNyplRegRecord(
         uuid="u",
         title=title,
         was_renewed=False,
         desc=desc,
+        notes=notes,
     )
 
 
@@ -542,3 +546,214 @@ def test_score_volume_bd_publisher_name_without_number_does_not_classify_as_part
     feature_map = dict(ev.features)
     assert feature_map["cce_is_part"] == 0.0
     assert ev.skipped is True
+
+
+# ---- Round-2 detection-quality acceptance cases (#82 / #84) ------------------
+
+
+def test_score_volume_pair_339_punctuated_bare_v_detects_whole_open(
+    scorer_context: ScorerContext,
+) -> None:
+    """Pair 339: MARC extent ``". v"`` (OCR-noised bare ``v``) + CCE ``Pt. 1``.
+
+    marc 996578393506421 / cce A174027. The detection gap was that the
+    punctuated bare-volume extent never classified as a whole; it must now
+    read whole_open against a single-part CCE for a 0.0 mismatch.
+    """
+    marc = _marc(
+        title="Religious and secular leadership",
+        title_main="Religious and secular leadership",
+        extent=". v",
+    )
+    cce = _cce(title="Religious and secular leadership. Pt. 1")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["marc_is_whole_open"] == 1.0
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.skipped is False
+    assert ev.score == 0.0
+
+
+def test_score_volume_pair_377_part_in_notes_with_multivolume_desc_is_incompatible(
+    scorer_context: ScorerContext,
+) -> None:
+    """Pair 377: MARC ``5 v. in 10`` whole + CCE desc ``2 v.`` + notes ``Vol.1``.
+
+    marc 996173823506421 / cce A310797. The CCE part designator lives in
+    the notes, and the CCE desc looks multi-volume (``2 v.``); containment
+    of that single part inside the MARC whole is INCOMPATIBLE, not a set
+    match. The old scorer scored this 1.0 (wrong direction); it must be 0.0.
+    """
+    marc = _marc(
+        title="The notebooks of Samuel Taylor Coleridge",
+        title_main="The notebooks of Samuel Taylor Coleridge",
+        extent="5 v. in 10",
+    )
+    cce = _cce(title="Notebooks.", desc="2 v.", notes=("Vol.1: 1794-1804, text and notes.",))
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["marc_is_whole"] == 1.0
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.skipped is False
+    assert ev.score == 0.0
+
+
+def test_score_volume_pair_362_roman_numeral_designator_in_title(
+    scorer_context: ScorerContext,
+) -> None:
+    """Pair 362: MARC ``2 v`` whole + CCE bare Roman-numeral ``I:`` subtitle.
+
+    marc 996391933506421 / cce A190318. The ``I:`` is not preceded by a
+    Vol/Pt prefix; the bare-designator detector must still flag it as part.
+    """
+    marc = _marc(title="Kontakia of Romanos Byzantine melodist", extent="2 v")
+    cce = _cce(title="Kontakia of Romanos, Byzantine melodist, I: On the person of Christ")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["marc_is_whole"] == 1.0
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_pair_395_mid_title_volume_designator(
+    scorer_context: ScorerContext,
+) -> None:
+    """Pair 395: MARC ``15 v`` whole + CCE mid-title ``v. 1``.
+
+    marc 9917915453506421 / cce A19508. The ``v. 1`` sits mid-title
+    (``...Othmer. v. 1. A to Anthrimides``); detection must scan the whole
+    title, not just a trailing designator.
+    """
+    marc = _marc(title="Encyclopedia of chemical technology", extent="15 v")
+    cce = _cce(
+        title=(
+            "...chemical technology, ed. by Raymond E. Kirk and "
+            "Donald F. Othmer. v. 1. A to Anthrimides."
+        ),
+        desc="xxiv, 982 p.",
+    )
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["marc_is_whole"] == 1.0
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_covering_range_is_not_flagged_incompatible(
+    scorer_context: ScorerContext,
+) -> None:
+    """The spare case: a CCE ``Vol. 1-2`` RANGE over a ``2 v.`` MARC is the whole set.
+
+    A covering designator range registers the entire set, not a single
+    part, so it must NOT be penalised — mis-flagging this is what caused
+    the original top-1 regression.
+    """
+    marc = _marc(title="A critical history", extent="2 v.")
+    cce = _cce(title="A critical history. Vol. 1-2.")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_whole"] == 1.0
+    assert feature_map["cce_is_part"] == 0.0
+    assert ev.score == 100.0
+
+
+def test_score_volume_t_range_in_notes_is_not_part(scorer_context: ScorerContext) -> None:
+    """A non-volume-prefixed range ``T.1-3`` is a whole/set, not a single part."""
+    marc = _marc(extent="3 v.")
+    cce = _cce(title="Histoire, T.1-3.")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_whole"] == 1.0
+    assert ev.score == 100.0
+
+
+def test_score_volume_part_in_notes_classifies_as_part(scorer_context: ScorerContext) -> None:
+    """A single ``Pt. 2`` designator in the CCE notes classifies the CCE as a part."""
+    marc = _marc(extent="4 v.")
+    cce = _cce(notes=("Pt. 2 of the collected edition.",))
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_monographic_series_note_is_suppressed(
+    scorer_context: ScorerContext,
+) -> None:
+    """A ``<series>, Bd.N`` note matching a MARC series title is not a whole/part part."""
+    marc = _marc(extent="6 v.", series_titles=("Grundlehren der mathematischen Wissenschaften",))
+    cce = _cce(notes=("Grundlehren der mathematischen Wissenschaften, Bd. 66",))
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 0.0
+
+
+def test_score_volume_bare_designator_ignores_subtitle_colon(
+    scorer_context: ScorerContext,
+) -> None:
+    """A plain ``Title: subtitle`` colon is not a bare volume designator."""
+    marc = _marc(extent="5 v.")
+    cce = _cce(title="A history: of the modern world")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 0.0
+
+
+def test_score_volume_title_extension_against_whole_open_is_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """A CCE title strictly extending a whole_open MARC title reads as a part."""
+    marc = _marc(title="Guide to art museums", title_main="Guide to art museums", extent="v")
+    cce = _cce(title="Guide to art museums in the United States east coast")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_covering_range_via_title_extension_stays_whole(
+    scorer_context: ScorerContext,
+) -> None:
+    """A title-extending CCE whose extension is a covering range stays whole."""
+    marc = _marc(title="A critical history", title_main="A critical history", extent="2 v.")
+    cce = _cce(title="A critical history of modern art Vol. 1-2")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_whole"] == 1.0
+    assert ev.score == 100.0
+
+
+def test_score_volume_leading_noise_extent_with_count_is_whole(
+    scorer_context: ScorerContext,
+) -> None:
+    """A leading-noise multi-volume extent (``". 5 v"``) still classifies as whole."""
+    marc = _marc(extent=". 5 v")
+    cce = _cce(desc="v. 1")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["marc_is_whole"] == 1.0
+    assert ev.score == 0.0
+
+
+def test_score_volume_title_extension_skipped_when_marc_title_empty(
+    scorer_context: ScorerContext,
+) -> None:
+    """A whole MARC with an empty title_main cannot drive the title-extension path."""
+    marc = _marc(title="", title_main="", extent="3 v.")
+    cce = _cce(title="Some extended title with content")
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 0.0
+    assert ev.skipped is True
+
+
+def test_score_volume_notes_skip_non_designator_note_then_match(
+    scorer_context: ScorerContext,
+) -> None:
+    """A leading note with no designator is skipped; a later ``Pt. 1`` note fires."""
+    marc = _marc(extent="3 v.")
+    cce = _cce(notes=("A general descriptive note.", "Pt. 1 of the set."))
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert ev.score == 0.0
