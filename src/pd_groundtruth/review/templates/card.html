@@ -35,6 +35,7 @@
   {% endif %}
 </div>
 {% endif %}
+{% if card.audit_note %}<div class="audit-note">{{ card.audit_note }}</div>{% endif %}
 
 <form id="label-form" method="post" action="/label">
   <input type="hidden" name="pair_id" value="{{ card.pair_id }}">

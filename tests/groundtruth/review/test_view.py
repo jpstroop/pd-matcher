@@ -94,6 +94,7 @@ def _row(
     cce_renewal_new_matter: str | None = None,
     cce_claimants: str | None = "Jane Doe",
     evidence_sources_json: str = "{}",
+    audit_note: str | None = None,
 ) -> ReviewPairRow:
     return ReviewPairRow(
         id=7,
@@ -139,6 +140,7 @@ def _row(
         cce_renewal_claimants=cce_renewal_claimants,
         cce_renewal_new_matter=cce_renewal_new_matter,
         evidence_sources_json=evidence_sources_json,
+        audit_note=audit_note,
     )
 
 
@@ -242,6 +244,17 @@ def test_build_card_defaults_marc_notes_empty_for_blob_without_notes() -> None:
     row_without_notes = replace(row, marc_json=json_encode(blob).decode("utf-8"))
     card = build_card(row_without_notes)
     assert card.marc_notes == ()
+
+
+def test_build_card_populates_audit_note() -> None:
+    note = "you=match · learned=0.20 · weighted=0.85 · [model-vs-model]"
+    card = build_card(_row(_marc(), evidence_json="{}", audit_note=note))
+    assert card.audit_note == note
+
+
+def test_build_card_audit_note_none_when_absent() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.audit_note is None
 
 
 def test_build_card_renders_cce_and_renewal() -> None:

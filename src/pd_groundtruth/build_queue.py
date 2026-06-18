@@ -186,6 +186,7 @@ def _build_pair_insert(
     band: str,
     source: str,
     evidence_sources: tuple[tuple[str, str], ...] = (),
+    audit_note: str | None = None,
 ) -> PairInsert:
     """Assemble a :class:`PairInsert` snapshot from one matched record."""
     return PairInsert(
@@ -232,6 +233,7 @@ def _build_pair_insert(
         evidence_sources_json=json_encode(
             _evidence_sources_payload(evidence, evidence_sources)
         ).decode("utf-8"),
+        audit_note=audit_note,
     )
 
 

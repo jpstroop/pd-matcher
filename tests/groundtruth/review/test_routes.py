@@ -45,6 +45,7 @@ def _pair(
     cce_desc: str = "vi, 200 p.",
     cce_lccn: str | None = "28000854",
     marc_notes: tuple[str, ...] = (),
+    audit_note: str | None = None,
 ) -> PairInsert:
     marc = MarcRecord(
         control_id=control_id,
@@ -108,6 +109,7 @@ def _pair(
         cce_renewal_claimants=renewal_claimants,
         cce_renewal_new_matter=renewal_new_matter,
         evidence_sources_json=evidence_sources_json,
+        audit_note=audit_note,
     )
 
 
@@ -286,6 +288,27 @@ def evidence_source_client(tmp_path: Path, vault_path: Path) -> Iterator[TestCli
         yield test_client
 
 
+_AUDIT_NOTE: str = "you=match · learned=0.20 · weighted=0.85 · [model-vs-model]"
+
+
+@fixture
+def audit_note_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="an-1",
+                nypl_uuid="u-an-1",
+                audit_note=_AUDIT_NOTE,
+            )
+        )
+        db.insert_pair(_pair(language="eng", control_id="an-2", nypl_uuid="u-an-2"))
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
 @fixture
 def nav_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
     """Five pairs with one pre-labeled so ``/pair/5`` is reachable as a jump.
@@ -359,6 +382,19 @@ def test_index_renders_a_card(client: TestClient) -> None:
     assert "A Studied Title" in response.text
     assert "title.token_set" in response.text
     assert "Renewed" in response.text
+
+
+def test_audit_note_banner_renders_when_set(audit_note_client: TestClient) -> None:
+    response = audit_note_client.get("/pair/1")
+    assert response.status_code == 200
+    assert 'class="audit-note"' in response.text
+    assert _AUDIT_NOTE in response.text
+
+
+def test_audit_note_banner_absent_when_none(audit_note_client: TestClient) -> None:
+    response = audit_note_client.get("/pair/2")
+    assert response.status_code == 200
+    assert 'class="audit-note"' not in response.text
 
 
 def test_index_language_filter_selects_french(client: TestClient) -> None:

@@ -936,6 +936,101 @@ def test_init_schema_adds_evidence_sources_json_to_legacy_pair_table(tmp_path: P
     assert row.evidence_sources_json == "{}"
 
 
+def test_round_trip_preserves_audit_note(tmp_path: Path) -> None:
+    note = "you=match · learned=0.20 · weighted=0.85 · [model-vs-model]"
+    pair = PairInsert(
+        language="eng",
+        decade=1950,
+        score=0.20,
+        band="model-vs-model",
+        source="banded",
+        marc_control_id="ctrl-a",
+        marc_json="{}",
+        marc_title="t",
+        marc_author="a",
+        marc_publisher="p",
+        marc_year=1953,
+        nypl_uuid="uuid-a",
+        cce_title="CCE",
+        cce_author="A",
+        cce_publishers="P",
+        cce_claimants="C",
+        cce_reg_year=1953,
+        cce_was_renewed=True,
+        cce_regnum="R1",
+        evidence_json="{}",
+        audit_note=note,
+    )
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        db.insert_pair(pair)
+        row = db.next_unlabeled()
+    assert row is not None
+    assert row.audit_note == note
+
+
+def test_audit_note_defaults_to_null(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        db.insert_pair(_pair())
+        row = db.next_unlabeled()
+    assert row is not None
+    assert row.audit_note is None
+
+
+def test_init_schema_adds_audit_note_to_legacy_pair_table(tmp_path: Path) -> None:
+    from sqlite3 import connect as sqlite_connect
+
+    db_path = tmp_path / "legacy_audit.db"
+    legacy = sqlite_connect(db_path)
+    legacy.executescript(
+        """
+        CREATE TABLE review_pair (
+            id INTEGER PRIMARY KEY,
+            language TEXT NOT NULL,
+            decade INTEGER,
+            score REAL NOT NULL,
+            band TEXT NOT NULL,
+            source TEXT NOT NULL,
+            marc_control_id TEXT NOT NULL,
+            marc_json TEXT NOT NULL,
+            marc_title TEXT,
+            marc_author TEXT,
+            marc_publisher TEXT,
+            marc_year INTEGER,
+            nypl_uuid TEXT NOT NULL,
+            cce_title TEXT,
+            cce_author TEXT,
+            cce_publishers TEXT,
+            cce_claimants TEXT,
+            cce_reg_year INTEGER,
+            cce_was_renewed INTEGER,
+            cce_regnum TEXT,
+            evidence_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO review_pair (
+            language, decade, score, band, source, marc_control_id, marc_json,
+            marc_title, marc_author, marc_publisher, marc_year, nypl_uuid,
+            cce_title, cce_author, cce_publishers, cce_claimants, cce_reg_year,
+            cce_was_renewed, cce_regnum, evidence_json, created_at
+        ) VALUES (
+            'eng', 1950, 0.9, 'ge90', 'banded', 'ctrl-legacy', '{}',
+            't', 'a', 'p', 1953, 'uuid-legacy',
+            'CCE', 'A', 'P', 'C', 1953,
+            1, 'R1', '{}', '2026-01-01T00:00:00+00:00'
+        );
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    with ReviewDb.connect(db_path) as db:
+        columns = {row[1] for row in db._conn.execute("PRAGMA table_info(review_pair)")}
+        assert "audit_note" in columns
+        row = db.get_pair(1)
+    assert row is not None
+    assert row.audit_note is None
+
+
 def test_add_label_defaults_categories_to_empty_tuple(tmp_path: Path) -> None:
     with ReviewDb.connect(tmp_path / "review.db") as db:
         pair_id = db.insert_pair(_pair())

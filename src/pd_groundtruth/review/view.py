@@ -135,6 +135,7 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
 
     evidence: tuple[EvidenceBar, ...]
 
+    audit_note: str | None
     note: str | None
     current_verdict: str | None
 
@@ -439,6 +440,7 @@ def build_card(
         cce_has_renewal_details=_has_renewal_details(row),
         cce_is_translation=_is_translation_row(row),
         evidence=_build_evidence(row.evidence_json, row.evidence_sources_json),
+        audit_note=row.audit_note,
         note=current_label.note if current_label is not None else None,
         current_verdict=current_label.verdict if current_label is not None else None,
     )
