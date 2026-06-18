@@ -30,6 +30,7 @@ scripts/*
 !scripts/cce_part_signal.py
 !scripts/build_separation_test_queue.py
 !scripts/separation_wild_test.py
+!scripts/disagreement_scan.py
 
 # Groundtruth labeling artifacts (the vault itself IS tracked at data/label_vault.jsonl)
 data/candidates/
