@@ -31,9 +31,12 @@ HOW (reuses production machinery, reinvents nothing):
   it. Unlike the heldout script there is NO ``match_record`` retrieval — the
   known pair's feature vector is scored directly.
 * Surfaced pairs are written via ``build_queue._build_pair_insert`` /
-  ``ReviewDb.insert_pair`` (the same row-builder the queue builders use) and the
-  CURRENT vault verdict is pre-applied via ``ReviewDb.insert_existing_label`` so
-  each review card shows what was labeled plus the disagreement reason.
+  ``ReviewDb.insert_pair`` (the same row-builder the queue builders use), left
+  UNLABELED, and stamped with their bucket as the ``band`` — so the review UI's
+  ``next_unlabeled`` pages through one bucket at a time via ``/?band=<slug>``
+  (re-judging a pair there flows the new verdict back to the vault, which is how
+  label-error corrections land). The flat text file leads with the per-bucket
+  paging URLs, then lists every surfaced pair (link + how it disagrees).
 
 Usage:
     # Smoke (caps pairs scanned; DB + text are partial):
@@ -68,7 +71,6 @@ from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
 from pd_groundtruth.sampling import SOURCE_BANDED
-from pd_groundtruth.sampling import band_of
 from pd_groundtruth.vault_pair_resolver import build_marc_index
 from pd_groundtruth.vault_pair_resolver import make_pair_scorer
 from pd_matcher.cli import _load_default_matching_config
@@ -125,6 +127,15 @@ _BUCKET_ORDER: Final[tuple[str, ...]] = (
     _BUCKET_MODEL_VS_MODEL,
     _BUCKET_WHOLE_PART,
 )
+# URL-safe `band` slug per bucket. Surfaced pairs are left UNLABELED and stamped
+# with their bucket's band so the review UI's next_unlabeled pages through one
+# bucket at a time via `/?band=<slug>` (the `?`/`/` in the bucket labels are not
+# URL-safe, hence the slugs).
+_BUCKET_BAND: Final[dict[str, str]] = {
+    _BUCKET_LABEL_ERROR: "label-error",
+    _BUCKET_MODEL_VS_MODEL: "model-vs-model",
+    _BUCKET_WHOLE_PART: "whole-part",
+}
 
 _PROGRESS_EVERY: Final[int] = 100
 
@@ -269,14 +280,6 @@ def _label_error_starkness(pair: ScoredPair) -> float:
 def _model_gap(pair: ScoredPair) -> float:
     """Return the absolute learned-minus-weighted gap for a ``model-vs-model`` pair."""
     return abs(pair.learned - pair.weighted)
-
-
-def _note_for(bucket: str, pair: ScoredPair) -> str:
-    """Render the per-pair disagreement summary stored on the pre-applied label."""
-    return (
-        f"DISAGREEMENT [{bucket}]: you={pair.entry.verdict} "
-        f"learned={pair.learned:.2f} weighted={pair.weighted:.2f}"
-    )
 
 
 def _link_line(base_url: str, pair_id: int, bucket: str, pair: ScoredPair) -> str:
@@ -451,33 +454,36 @@ def _write_outputs(
     base_url: str,
     result: ScanResult,
 ) -> None:
-    """Insert surfaced pairs into the review DB and write the flat link file."""
+    """Insert surfaced pairs into the review DB and write the flat link file.
+
+    Pairs are inserted UNLABELED with their bucket's band slug, so the review UI
+    pages through one bucket at a time via ``/?band=<slug>`` (re-judging there
+    flows the verdict back to the vault). The flat link file leads with the
+    per-bucket paging URLs, then lists every pair (link + how they disagree).
+    """
     lines: list[str] = []
     with ReviewDb.connect(out_path) as db:
         for bucket in _BUCKET_ORDER:
             bucket_pairs = grouped[bucket]
             result.surfaced[bucket] = len(bucket_pairs)
-            lines.append(f"# {bucket} ({len(bucket_pairs)})")
+            band = _BUCKET_BAND[bucket]
+            lines.append(f"# {bucket} ({len(bucket_pairs)}) — page: {base_url}/?band={band}")
             for pair in bucket_pairs:
-                score = pair.learned
                 pair_insert: PairInsert = _build_pair_insert(
                     pair.marc,
                     pair.cce,
                     pair.evidence,
                     language=_language_of(pair.marc),
-                    score=score,
-                    band=band_of(score),
+                    score=pair.learned,
+                    band=band,
                     source=SOURCE_BANDED,
                     evidence_sources=pair.evidence_sources,
+                    audit_note=(
+                        f"you={pair.entry.verdict} · learned={pair.learned:.2f} · "
+                        f"weighted={pair.weighted:.2f} · [{bucket}]"
+                    ),
                 )
                 pair_id = db.insert_pair(pair_insert)
-                db.insert_existing_label(
-                    pair_id=pair_id,
-                    verdict=pair.entry.verdict,
-                    labeled_at=pair.entry.labeled_at,
-                    note=_note_for(bucket, pair),
-                    categories=pair.entry.categories,
-                )
                 lines.append(_link_line(base_url, pair_id, bucket, pair))
         db.commit()
     text_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

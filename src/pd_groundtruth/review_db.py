@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS review_pair (
     cce_renewal_new_matter TEXT,
     evidence_json TEXT NOT NULL,
     evidence_sources_json TEXT NOT NULL DEFAULT '{}',
+    audit_note TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -216,6 +217,7 @@ class PairInsert(Struct, frozen=True, forbid_unknown_fields=True):
     cce_renewal_claimants: str | None = None
     cce_renewal_new_matter: str | None = None
     evidence_sources_json: str = "{}"
+    audit_note: str | None = None
 
 
 class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
@@ -264,6 +266,7 @@ class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
     cce_renewal_claimants: str | None = None
     cce_renewal_new_matter: str | None = None
     evidence_sources_json: str = "{}"
+    audit_note: str | None = None
 
 
 class LanguageProgress(Struct, frozen=True, forbid_unknown_fields=True):
@@ -337,6 +340,7 @@ _ADDITIVE_CCE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("cce_renewal_claimants", "TEXT"),
     ("cce_renewal_new_matter", "TEXT"),
     ("evidence_sources_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ("audit_note", "TEXT"),
 )
 
 
@@ -386,6 +390,7 @@ def _row_to_pair(row: Row) -> ReviewPairRow:
         cce_renewal_claimants=row["cce_renewal_claimants"],
         cce_renewal_new_matter=row["cce_renewal_new_matter"],
         evidence_sources_json=row["evidence_sources_json"] or "{}",
+        audit_note=row["audit_note"],
     )
 
 
@@ -466,6 +471,7 @@ class ReviewDb:
                 cce_renewal_author, cce_renewal_title, cce_renewal_claimants,
                 cce_renewal_new_matter,
                 evidence_sources_json,
+                audit_note,
                 created_at
             ) VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
@@ -473,6 +479,7 @@ class ReviewDb:
                 ?, ?,
                 ?, ?, ?,
                 ?, ?, ?,
+                ?,
                 ?,
                 ?,
                 ?
@@ -520,6 +527,7 @@ class ReviewDb:
                 pair.cce_renewal_claimants,
                 pair.cce_renewal_new_matter,
                 pair.evidence_sources_json,
+                pair.audit_note,
                 _now(),
             ),
         )
