@@ -33,7 +33,6 @@ class WeightedMeanCombiner(Struct, frozen=True, forbid_unknown_fields=True):
             "title.token_set": cfg.title_weight,
             "name.author": cfg.author_weight,
             "name.publisher": cfg.publisher_weight,
-            "year.delta": cfg.year_weight,
             "edition.compat": cfg.edition_weight,
             "lccn.exact": cfg.lccn_weight,
             "isbn.exact": cfg.isbn_weight,

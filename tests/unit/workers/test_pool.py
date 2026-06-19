@@ -165,10 +165,9 @@ def test_run_match_returns_run_report(
         author_idf = build_author_idf_table(lookup)
         publisher_idf = build_publisher_idf_table(lookup)
     config = MatchingConfig(
-        title_weight=0.40,
+        title_weight=0.50,
         author_weight=0.20,
         publisher_weight=0.10,
-        year_weight=0.10,
         edition_weight=0.05,
         lccn_weight=0.10,
         isbn_weight=0.05,
@@ -291,10 +290,9 @@ def test_run_match_consumes_prepared_chunks(
         author_idf = build_author_idf_table(lookup)
         publisher_idf = build_publisher_idf_table(lookup)
     config = MatchingConfig(
-        title_weight=0.40,
+        title_weight=0.50,
         author_weight=0.20,
         publisher_weight=0.10,
-        year_weight=0.10,
         edition_weight=0.05,
         lccn_weight=0.10,
         isbn_weight=0.05,

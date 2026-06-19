@@ -156,7 +156,6 @@ def _scoring_config(config: MatchingConfig) -> MatchingConfig:
         title_weight=config.title_weight,
         author_weight=config.author_weight,
         publisher_weight=config.publisher_weight,
-        year_weight=config.year_weight,
         edition_weight=config.edition_weight,
         lccn_weight=config.lccn_weight,
         isbn_weight=config.isbn_weight,
@@ -169,36 +168,15 @@ def _scoring_config(config: MatchingConfig) -> MatchingConfig:
 
 
 def _zero_year_config(config: MatchingConfig) -> MatchingConfig:
-    """Return ``config`` with ``year_weight`` zeroed and the rest renormalized.
+    """Return ``config`` unchanged: year is no longer a combiner weight (#88).
 
-    The schema requires the weight tuple to sum to 1.0, so year's mass is
-    redistributed across the remaining scorers in proportion to their existing
-    weights. This removes year's contribution to the combined score while
-    preserving the relative balance of every other scorer.
+    Year was dropped as a scoring feature in issue #88 — exact-year retrieval
+    bucketing makes its delta a constant ``1.0``. The combiner therefore no
+    longer reads any year weight, so the historical ``weighted_minus_year``
+    arm is now identical to the plain ``weighted`` arm. This identity is kept
+    deliberately as a sanity check: the two arms must report the same AUC.
     """
-    remaining = (
-        config.title_weight
-        + config.author_weight
-        + config.publisher_weight
-        + config.edition_weight
-        + config.lccn_weight
-        + config.isbn_weight
-        + config.extent_weight
-        + config.volume_weight
-    )
-    factor = 1.0 / remaining if remaining > 0.0 else 0.0
-    return structs.replace(
-        config,
-        title_weight=config.title_weight * factor,
-        author_weight=config.author_weight * factor,
-        publisher_weight=config.publisher_weight * factor,
-        year_weight=0.0,
-        edition_weight=config.edition_weight * factor,
-        lccn_weight=config.lccn_weight * factor,
-        isbn_weight=config.isbn_weight * factor,
-        extent_weight=config.extent_weight * factor,
-        volume_weight=config.volume_weight * factor,
-    )
+    return structs.replace(config)
 
 
 def _split_by_cutoff(
@@ -686,9 +664,10 @@ def _print_report(result: SeparationResult) -> None:
     print(
         "**Each TEST pair is scored once** into per-scorer Evidence; three "
         "combiner arms grade that same Evidence: `learned`, `weighted_mean`, "
-        "and `weighted_minus_year` (weighted mean with `year_weight=0.0`, the "
-        "remaining weights renormalized to sum to 1.0, to remove year's "
-        "constant uplift). Gold = 1 for `match`, 0 for `no_match`.\n"
+        "and `weighted_minus_year`. Since issue #88 dropped year as a combiner "
+        "feature, the `weighted_minus_year` arm is now identical to "
+        "`weighted_mean` and is retained only as a sanity check (the two must "
+        "report the same AUC). Gold = 1 for `match`, 0 for `no_match`.\n"
     )
     print(
         f"- **Feature count**: {result.feature_count} (production `feature_names()`)\n"

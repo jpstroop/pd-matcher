@@ -22,11 +22,14 @@ _DEFAULT_LMDB_MAP_SIZE_BYTES: int = 16 * 1024 * 1024 * 1024
 class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
     """Per-field weights and thresholds used by the scoring pipeline.
 
-    The nine field weights (``title_weight``, ``author_weight``,
-    ``publisher_weight``, ``year_weight``, ``edition_weight``,
-    ``lccn_weight``, ``isbn_weight``, ``extent_weight``,
-    ``volume_weight``) must sum to ``1.0`` within
-    :data:`_WEIGHT_SUM_TOLERANCE`. Identifier scorers (LCCN, ISBN) are
+    The eight field weights (``title_weight``, ``author_weight``,
+    ``publisher_weight``, ``edition_weight``, ``lccn_weight``,
+    ``isbn_weight``, ``extent_weight``, ``volume_weight``) must sum to
+    ``1.0`` within :data:`_WEIGHT_SUM_TOLERANCE`. Year is deliberately not
+    a weight: under exact-year retrieval bucketing (``year_window = 0``)
+    every scored pair shares its year, so a year-delta scorer would add a
+    constant ``1.0`` that only compresses the score range (issue #88). Year
+    remains the retrieval bucket key. Identifier scorers (LCCN, ISBN) are
     weighted alongside the heuristic scorers rather than short
     -circuiting the combiner: in this corpus, transcription/OCR errors
     give standard identifiers a non-trivial false-positive rate, so the
@@ -37,7 +40,6 @@ class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
     title_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
     author_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
     publisher_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
-    year_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
     edition_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
     lccn_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
     isbn_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
@@ -53,7 +55,6 @@ class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
             self.title_weight
             + self.author_weight
             + self.publisher_weight
-            + self.year_weight
             + self.edition_weight
             + self.lccn_weight
             + self.isbn_weight
@@ -62,7 +63,7 @@ class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
         )
         if abs(total - 1.0) > _WEIGHT_SUM_TOLERANCE:
             raise ValueError(
-                "title_weight + author_weight + publisher_weight + year_weight + "
+                "title_weight + author_weight + publisher_weight + "
                 "edition_weight + lccn_weight + isbn_weight + extent_weight + "
                 f"volume_weight must sum to 1.0 (got {total!r})"
             )

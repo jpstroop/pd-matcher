@@ -51,10 +51,9 @@ def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
     expected_records = sum(1 for _ in iter_marc_records(marc_path))
     output_path = tmp_path / "results.csv"
     config = MatchingConfig(
-        title_weight=0.40,
+        title_weight=0.50,
         author_weight=0.20,
         publisher_weight=0.10,
-        year_weight=0.10,
         edition_weight=0.05,
         lccn_weight=0.10,
         isbn_weight=0.05,

@@ -53,10 +53,9 @@ def _build_index(tmp_path: Path) -> Path:
 def _matching_config() -> MatchingConfig:
     """A permissive :class:`MatchingConfig` so the tiny corpus produces matches."""
     return MatchingConfig(
-        title_weight=0.40,
+        title_weight=0.50,
         author_weight=0.20,
         publisher_weight=0.10,
-        year_weight=0.10,
         edition_weight=0.05,
         lccn_weight=0.10,
         isbn_weight=0.05,
@@ -385,10 +384,9 @@ def test_run_eval_year_window_zero_blocks_year_drift(tmp_path: Path) -> None:
         ),
     )
     narrow = MatchingConfig(
-        title_weight=0.40,
+        title_weight=0.50,
         author_weight=0.20,
         publisher_weight=0.10,
-        year_weight=0.10,
         edition_weight=0.05,
         lccn_weight=0.10,
         isbn_weight=0.05,
@@ -438,10 +436,9 @@ def test_run_eval_year_window_five_admits_drifted_match(tmp_path: Path) -> None:
         ),
     )
     wide = MatchingConfig(
-        title_weight=0.40,
+        title_weight=0.50,
         author_weight=0.20,
         publisher_weight=0.10,
-        year_weight=0.10,
         edition_weight=0.05,
         lccn_weight=0.10,
         isbn_weight=0.05,
@@ -533,7 +530,6 @@ def _learned_matching_config() -> MatchingConfig:
         title_weight=base.title_weight,
         author_weight=base.author_weight,
         publisher_weight=base.publisher_weight,
-        year_weight=base.year_weight,
         edition_weight=base.edition_weight,
         lccn_weight=base.lccn_weight,
         isbn_weight=base.isbn_weight,

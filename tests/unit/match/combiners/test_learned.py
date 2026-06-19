@@ -22,7 +22,7 @@ from pd_matcher.match.combiners.learned import model_metadata
 from pd_matcher.match.combiners.learned import save_learned_model
 from pd_matcher.match.evidence import Evidence
 
-_N_FEATURES: int = 53
+_N_FEATURES: int = len(feature_names())
 _N_ROWS: int = 30
 
 

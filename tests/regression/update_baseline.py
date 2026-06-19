@@ -52,7 +52,6 @@ def main() -> None:
         title_weight=base_matching.title_weight,
         author_weight=base_matching.author_weight,
         publisher_weight=base_matching.publisher_weight,
-        year_weight=base_matching.year_weight,
         edition_weight=base_matching.edition_weight,
         lccn_weight=base_matching.lccn_weight,
         isbn_weight=base_matching.isbn_weight,
