@@ -23,8 +23,10 @@ tightening round (``docs/findings/learned_scorer_tightening_2026-06-12.md``):
   title scorer's ``marc_token_len`` / ``nypl_token_len`` sub-features
   (``0.0`` when either is ``0`` or absent).
 
-The expanded count is **49**: 16 baseline + 32 named sub-features (incl.
-presence flags and the two title token-length sub-features) + 1 pair-level.
+The expanded count is **50**: 16 baseline + 32 named sub-features (incl.
+presence flags and the two title token-length sub-features) + 1 pair-level
+(``pair.title_len_ratio``) + 1 cross-scorer derived
+(``volume.incompatible_uncorroborated``, issue #82).
 ``year.delta`` was dropped as a scoring feature in issue #88: exact-year
 retrieval bucketing (``year_window = 0``) makes its delta a constant ``1.0``
 for every scored pair, so it carried zero variance — uninformative to the
@@ -116,16 +118,69 @@ _PRESENCE_FLAGGED: dict[str, tuple[str, ...]] = {
 
 _TITLE_LEN_RATIO: str = "pair.title_len_ratio"
 
+# Cross-scorer derived signal (issue #82): a whole/part volume incompatibility
+# that no strong identifier corroborates. ``volume.compat`` fires score ``0.0``
+# (NOT skipped) on the marc_whole_cce_part / cce_whole_marc_part mismatch, but
+# the combiner cannot turn that ~82%-predictive feature into a veto because the
+# raw column conflates corroborated 0.0s (a handful of true matches that happen
+# to carry a misleading volume signal) with uncorroborated ones (the false
+# accepts triage needs to push down). This derived column isolates the
+# uncorroborated case so the learned model can learn a clean weight and the
+# weighted mean can apply a decisive penalty.
+_VOLUME_INCOMPAT_UNCORROBORATED: str = "volume.incompatible_uncorroborated"
+
+# The volume scorer whose incompatibility (normalized 0.0, not skipped) the
+# signal keys on, and the identifier scorers that VETO it. Title/author are
+# deliberately NOT vetoes: whole/part pairs share title+author by nature, so a
+# title/author veto would protect exactly the pairs the signal must catch.
+_VOLUME_SCORER: str = "volume.compat"
+_VETO_SCORERS: tuple[str, ...] = ("lccn.exact", "isbn.exact")
+
+# A scorer "fires incompatible" at exactly normalized 0.0; a veto "corroborates"
+# at exactly normalized 1.0 (an exact identifier hit). Both are exact endpoints
+# of ``Evidence.normalized``; no tolerance band is needed.
+_INCOMPATIBLE_SCORE: float = 0.0
+_VETO_SCORE: float = 1.0
+
+
+def volume_incompatible_uncorroborated(evidence: Sequence[Evidence]) -> float:
+    """Return ``1.0`` for an uncorroborated whole/part volume incompatibility.
+
+    The signal is ``1.0`` when the ``volume.compat`` scorer is present, not
+    skipped, and scored a normalized ``0.0`` (the whole-vs-part mismatch) AND
+    no veto scorer (an exact LCCN or ISBN hit, normalized ``1.0``) corroborates
+    the pair. It is ``0.0`` otherwise — when volume is absent/skipped/non-zero,
+    or when a strong identifier vetoes the incompatibility.
+
+    Args:
+        evidence: The winning per-scorer Evidence for one candidate pair.
+
+    Returns:
+        ``1.0`` when the uncorroborated-incompatibility condition holds, else
+        ``0.0``.
+    """
+    by_name = _evidence_by_scorer(evidence)
+    volume = by_name.get(_VOLUME_SCORER)
+    if volume is None or volume.skipped or volume.normalized != _INCOMPATIBLE_SCORE:
+        return 0.0
+    for scorer in _VETO_SCORERS:
+        veto = by_name.get(scorer)
+        if veto is not None and not veto.skipped and veto.normalized == _VETO_SCORE:
+            return 0.0
+    return 1.0
+
 
 def feature_names() -> tuple[str, ...]:
     """Return the canonical feature-column order for the learned combiner.
 
-    The order is, in full: 9 normalized scorer scores in
-    :data:`SCORER_ORDER`; 9 ``{scorer}__skipped`` flags; the namespaced
+    The order is, in full: 8 normalized scorer scores in
+    :data:`SCORER_ORDER`; 8 ``{scorer}__skipped`` flags; the namespaced
     named sub-features (each optionally followed by its
-    ``{scorer}.{feature}__present`` flag); and finally
-    ``pair.title_len_ratio``. The exact order is load-bearing: a trained
-    model stores these names and inference asserts equality against them.
+    ``{scorer}.{feature}__present`` flag); ``pair.title_len_ratio``; and
+    finally the cross-scorer derived
+    ``volume.incompatible_uncorroborated`` (issue #82). The exact order is
+    load-bearing: a trained model stores these names and inference asserts
+    equality against them.
     """
     names: list[str] = list(SCORER_ORDER)
     for scorer in SCORER_ORDER:
@@ -136,6 +191,7 @@ def feature_names() -> tuple[str, ...]:
             if feature in _PRESENCE_FLAGGED.get(scorer, ()):
                 names.append(f"{scorer}.{feature}__present")
     names.append(_TITLE_LEN_RATIO)
+    names.append(_VOLUME_INCOMPAT_UNCORROBORATED)
     return tuple(names)
 
 
@@ -200,6 +256,7 @@ def feature_row(evidence: Sequence[Evidence]) -> tuple[float, ...]:
                 has_value = present and raw is not None
                 values.append(1.0 if has_value else 0.0)
     values.append(_title_len_ratio(by_name.get(_TITLE_SCORER)))
+    values.append(volume_incompatible_uncorroborated(evidence))
     return tuple(values)
 
 
@@ -207,4 +264,5 @@ __all__ = [
     "SCORER_ORDER",
     "feature_names",
     "feature_row",
+    "volume_incompatible_uncorroborated",
 ]

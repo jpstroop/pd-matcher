@@ -3,9 +3,10 @@
 from pd_matcher.match.combiners.features import SCORER_ORDER
 from pd_matcher.match.combiners.features import feature_names
 from pd_matcher.match.combiners.features import feature_row
+from pd_matcher.match.combiners.features import volume_incompatible_uncorroborated
 from pd_matcher.match.evidence import Evidence
 
-_EXPECTED_FEATURE_COUNT: int = 49
+_EXPECTED_FEATURE_COUNT: int = 50
 
 
 def _evidence(
@@ -28,7 +29,7 @@ def _evidence(
 
 
 def test_feature_names_length_matches_expected_count() -> None:
-    """The canonical builder yields exactly 49 columns."""
+    """The canonical builder yields exactly 50 columns."""
     assert len(feature_names()) == _EXPECTED_FEATURE_COUNT
 
 
@@ -65,7 +66,8 @@ def test_feature_names_canonical_layout() -> None:
     assert names[n_scorers : 2 * n_scorers] == tuple(
         f"{scorer}__skipped" for scorer in SCORER_ORDER
     )
-    assert names[-1] == "pair.title_len_ratio"
+    assert names[-1] == "volume.incompatible_uncorroborated"
+    assert names[-2] == "pair.title_len_ratio"
     assert "name.author.token_overlap" in names
     assert "name.publisher.token_overlap" in names
 
@@ -216,3 +218,82 @@ def test_feature_row_full_evidence_happy_path() -> None:
     assert row[names.index("name.publisher.token_overlap")] == 1.0
     assert row[names.index("pair.title_len_ratio")] == 1.0
     assert row[names.index("edition.compat__skipped")] == 1.0
+
+
+def test_volume_incompatible_uncorroborated_fires_on_bare_incompatibility() -> None:
+    """Volume scored 0.0, not skipped, no identifier veto -> signal is 1.0."""
+    evidence = (
+        _evidence("volume.compat", score=0.0, skipped=False),
+        _evidence("lccn.exact", skipped=True),
+    )
+    assert volume_incompatible_uncorroborated(evidence) == 1.0
+
+
+def test_volume_incompatible_uncorroborated_vetoed_by_exact_lccn() -> None:
+    """An exact LCCN hit (normalized 1.0) suppresses the signal to 0.0.
+
+    Whole/part pairs share title+author by nature, so only an exact identifier
+    may veto. This protects the LCCN-corroborated true matches (e.g. reg
+    A63607) the issue calls out.
+    """
+    evidence = (
+        _evidence("volume.compat", score=0.0, skipped=False),
+        _evidence("lccn.exact", score=100.0, skipped=False),
+    )
+    assert volume_incompatible_uncorroborated(evidence) == 0.0
+
+
+def test_volume_incompatible_uncorroborated_vetoed_by_exact_isbn() -> None:
+    """An exact ISBN hit also vetoes (kept for the future ISBN-bearing corpus)."""
+    evidence = (
+        _evidence("volume.compat", score=0.0, skipped=False),
+        _evidence("isbn.exact", score=100.0, skipped=False),
+    )
+    assert volume_incompatible_uncorroborated(evidence) == 0.0
+
+
+def test_volume_incompatible_uncorroborated_skipped_volume_is_zero() -> None:
+    """A skipped volume scorer carries no incompatibility signal."""
+    evidence = (_evidence("volume.compat", score=0.0, skipped=True),)
+    assert volume_incompatible_uncorroborated(evidence) == 0.0
+
+
+def test_volume_incompatible_uncorroborated_compatible_volume_is_zero() -> None:
+    """A compatible volume (normalized 1.0) is not an incompatibility."""
+    evidence = (_evidence("volume.compat", score=100.0, skipped=False),)
+    assert volume_incompatible_uncorroborated(evidence) == 0.0
+
+
+def test_volume_incompatible_uncorroborated_absent_volume_is_zero() -> None:
+    """No volume Evidence at all yields a 0.0 signal."""
+    evidence = (_evidence("title.token_set", score=80.0),)
+    assert volume_incompatible_uncorroborated(evidence) == 0.0
+
+
+def test_volume_incompatible_uncorroborated_skipped_lccn_does_not_veto() -> None:
+    """A skipped LCCN scorer (its only state in this corpus) cannot veto."""
+    evidence = (
+        _evidence("volume.compat", score=0.0, skipped=False),
+        _evidence("lccn.exact", score=0.0, skipped=True),
+    )
+    assert volume_incompatible_uncorroborated(evidence) == 1.0
+
+
+def test_volume_incompatible_uncorroborated_partial_lccn_does_not_veto() -> None:
+    """A non-exact LCCN (normalized below 1.0) does not corroborate, so no veto."""
+    evidence = (
+        _evidence("volume.compat", score=0.0, skipped=False),
+        _evidence("lccn.exact", score=50.0, skipped=False),
+    )
+    assert volume_incompatible_uncorroborated(evidence) == 1.0
+
+
+def test_volume_incompatible_uncorroborated_projected_into_feature_row() -> None:
+    """The derived signal lands in its canonical last column."""
+    names = feature_names()
+    evidence = (
+        _evidence("volume.compat", score=0.0, skipped=False),
+        _evidence("lccn.exact", skipped=True),
+    )
+    row = feature_row(evidence)
+    assert row[names.index("volume.incompatible_uncorroborated")] == 1.0

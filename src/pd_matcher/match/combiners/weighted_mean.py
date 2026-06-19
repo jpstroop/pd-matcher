@@ -8,6 +8,15 @@ heavily-weighted scorers rather than short-circuiting the combiner: in
 this corpus the >5% transcription/OCR error rate on standard identifiers
 makes a hard "decisive" override unsafe. The Platt calibrator learns the
 empirical ``P(true match)`` for the raw scores this combiner emits.
+
+One decisive exception (issue #82): an uncorroborated whole/part volume
+incompatibility (``volume.compat`` normalized ``0.0``, not skipped, and NOT
+vetoed by an exact LCCN/ISBN hit) caps the combined score at
+:data:`_WHOLE_PART_PENALTY_CAP`. Such a pair describes different
+bibliographic units (a multi-volume whole vs a single registered part) yet
+agrees on title/author/year by nature, so averaging the lone ``0.0`` leaves
+it falsely high; the cap pushes it down for threshold triage. The veto built
+into the signal spares identifier-corroborated true matches.
 """
 
 from collections.abc import Mapping
@@ -17,9 +26,23 @@ from msgspec import Struct
 
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.match.combiners.base import CombinedScore
+from pd_matcher.match.combiners.features import volume_incompatible_uncorroborated
 from pd_matcher.match.evidence import Evidence
 
 _RAW_MAX: float = 100.0
+
+# Decisive whole/part penalty (issue #82). When the cross-scorer
+# ``volume.incompatible_uncorroborated`` signal fires — ``volume.compat``
+# scored a whole-vs-part incompatibility (normalized 0.0, not skipped) and no
+# exact LCCN/ISBN vetoes it — the combined calibrated score is CAPPED at this
+# ceiling rather than letting one 0.0 be averaged away among several high
+# signals. The cap, not a subtraction, is what makes the signal decisive: a
+# whole/part no_match cannot score above the cap no matter how strongly title /
+# author / year agree (they agree by nature on whole/part pairs). The veto
+# inside the signal protects identifier-corroborated true matches, so the cap
+# never touches an LCCN-confirmed pair. Tunable: a lower cap rejects harder; a
+# higher cap is gentler.
+_WHOLE_PART_PENALTY_CAP: float = 0.30
 
 
 class WeightedMeanCombiner(Struct, frozen=True, forbid_unknown_fields=True):
@@ -65,7 +88,14 @@ class WeightedMeanCombiner(Struct, frozen=True, forbid_unknown_fields=True):
             numerator += effective_weight * item.normalized
             denominator += effective_weight
         raw = (numerator / denominator) * _RAW_MAX if denominator > 0.0 else 0.0
-        return CombinedScore(raw=raw, calibrated=raw / _RAW_MAX)
+        calibrated = raw / _RAW_MAX
+        if (
+            volume_incompatible_uncorroborated(evidence) == 1.0
+            and calibrated > _WHOLE_PART_PENALTY_CAP
+        ):
+            calibrated = _WHOLE_PART_PENALTY_CAP
+            raw = calibrated * _RAW_MAX
+        return CombinedScore(raw=raw, calibrated=calibrated)
 
 
 __all__ = [
