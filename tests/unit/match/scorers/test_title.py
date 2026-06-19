@@ -88,6 +88,66 @@ def test_score_title_disjoint_inputs_score_zero(scorer_context: ScorerContext) -
     assert ev.skipped is False
 
 
+def test_score_title_coverage_one_when_shorter_is_subset(
+    scorer_context: ScorerContext,
+) -> None:
+    """A shorter title fully contained in a longer one yields coverage 1.0 (#85).
+
+    The symmetric ``score`` is deflated by the longer side's extra distinctive
+    tokens, but the asymmetric coverage sub-feature stays high because the
+    shorter side's whole mass is shared.
+    """
+    ev = score_title(
+        "Studies of widgets in Albuquerque machines", "Widgets Albuquerque", scorer_context
+    )
+    feature_map = dict(ev.features)
+    assert feature_map["coverage"] == 1.0
+    assert ev.score < 100.0
+
+
+def test_score_title_coverage_bidirectional(scorer_context: ScorerContext) -> None:
+    """Coverage is high whether the MARC side or the CCE side is the longer one."""
+    longer = "Widgets Albuquerque machines studies"
+    shorter = "Widgets Albuquerque"
+    long_marc = score_title(longer, shorter, scorer_context)
+    long_cce = score_title(shorter, longer, scorer_context)
+    assert dict(long_marc.features)["coverage"] == 1.0
+    assert dict(long_cce.features)["coverage"] == 1.0
+
+
+def test_score_title_coverage_low_for_disjoint(scorer_context: ScorerContext) -> None:
+    """No shared mass means coverage 0.0."""
+    ev = score_title("Albuquerque", "machines", scorer_context)
+    assert dict(ev.features)["coverage"] == 0.0
+
+
+def test_score_title_coverage_does_not_change_score(
+    scorer_context: ScorerContext,
+) -> None:
+    """Coverage is a FEATURE only: the token_set score itself is unchanged (#85).
+
+    The subset shape must produce the same symmetric Jaccard ``score`` it
+    produced before coverage existed — the v1 regression was lifting this
+    score; coverage must not touch it.
+    """
+    ev = score_title(
+        "Studies of widgets in Albuquerque machines", "Widgets Albuquerque", scorer_context
+    )
+    shared = 3.0 + 5.0
+    union = shared + 2.5 + 3.0
+    expected_raw = shared / union
+    assert ev.score == expected_raw * 100.0
+
+
+def test_score_title_coverage_partial_between_zero_and_one(
+    scorer_context: ScorerContext,
+) -> None:
+    """A shorter side that is only partly shared yields coverage in (0, 1)."""
+    ev = score_title("Widgets machines", "Widgets Albuquerque", scorer_context)
+    coverage = dict(ev.features)["coverage"]
+    assert 0.0 < coverage < 1.0
+
+
 def test_score_title_returns_zero_when_unseen_tokens_idf_zero(
     scorer_context: ScorerContext,
 ) -> None:
