@@ -37,6 +37,7 @@ from pd_matcher.match.scorers.isbn import score_isbn
 from pd_matcher.match.scorers.lccn import score_lccn
 from pd_matcher.match.scorers.name import score_author
 from pd_matcher.match.scorers.name import score_publisher
+from pd_matcher.match.scorers.title import prepare_cross_field_stems
 from pd_matcher.match.scorers.title import score_title
 from pd_matcher.match.scorers.volume import score_volume
 from pd_matcher.match.scorers.year import score_year
@@ -68,15 +69,25 @@ def _build_context(
     config: MatchingConfig,
 ) -> ScorerContext:
     language = marc.language_code or _DEFAULT_LANGUAGE
+    stopwords = load_stopwords(language)
+    stemmer = stemmer_for(language)
+    cross_field_values = tuple(
+        value
+        for value in (marc.publisher, marc.publication_place, marc.statement_of_responsibility)
+        if value
+    )
     return ScorerContext(
         language=language,
-        stopwords=load_stopwords(language),
-        stemmer=stemmer_for(language),
+        stopwords=stopwords,
+        stemmer=stemmer,
         idf=idf,
         author_idf=author_idf,
         publisher_idf=publisher_idf,
         config=config,
         publisher_alias_index=get_default_alias_index(),
+        cross_field_title_stems=prepare_cross_field_stems(
+            cross_field_values, language, stopwords.title, stemmer
+        ),
     )
 
 

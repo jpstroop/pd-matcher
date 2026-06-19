@@ -16,6 +16,7 @@ from pd_matcher.match.idf import build_idf_table
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import _apply_title_isolation_multiplier
+from pd_matcher.match.pipeline import _build_context
 from pd_matcher.match.pipeline import _with_multiplier
 from pd_matcher.match.pipeline import match_record
 from pd_matcher.models import MarcRecord
@@ -53,6 +54,43 @@ def _config(*, min_score: float = 30.0, year_window: int = 2) -> MatchingConfig:
         min_combined_score=min_score,
         scorer="weighted_mean",
     )
+
+
+def test_build_context_collects_cross_field_title_stems(
+    tmp_path: Path,
+) -> None:
+    """Publisher / place / responsibility are prepared into cross-field stems (#90)."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        idf = _idf(lookup)
+        marc = MarcRecord(
+            control_id="m",
+            title="The study of politics",
+            title_main="The study of politics",
+            publisher="University of Illinois Press",
+            publication_place="Urbana",
+            statement_of_responsibility="by Charles Merriam",
+            publication_year=1925,
+        )
+        ctx = _build_context(marc, idf, idf, idf, _config())
+    assert "press" in ctx.cross_field_title_stems
+    assert "urbana" in ctx.cross_field_title_stems
+    assert "merriam" in ctx.cross_field_title_stems
+
+
+def test_build_context_empty_when_no_cross_field_values(tmp_path: Path) -> None:
+    """A record with no publisher/place/responsibility yields an empty stem set."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        idf = _idf(lookup)
+        marc = MarcRecord(
+            control_id="m",
+            title="The study of politics",
+            title_main="The study of politics",
+            publication_year=1925,
+        )
+        ctx = _build_context(marc, idf, idf, idf, _config())
+    assert ctx.cross_field_title_stems == frozenset()
 
 
 def test_match_record_returns_empty_when_marc_has_no_year(

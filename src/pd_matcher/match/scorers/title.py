@@ -36,7 +36,19 @@ lone generic shared word scores a perfect match (#87). The score is therefore
 scaled by an absolute-evidence confidence keyed on the shared IDF *mass* (see
 :data:`_GENERIC_TITLE_MASS_FACTOR`), which is low for a thin generic overlap
 and high for a rich one — the discriminating signal the ratio throws away.
+
+The CCE also routinely packs into its *title* string content MARC keeps in
+separate fields — the publisher, the publication place, or the 245$c statement
+of responsibility (#90). Those leaked tokens are unique to the CCE side and the
+Jaccard penalizes them as a title difference, deflating true matches. Before
+scoring, the CCE-title stems explained by a non-title MARC field (carried on the
+context as :attr:`ScorerContext.cross_field_title_stems`) are stripped from the
+CCE comparand — but never a stem that also belongs to the genuine MARC title,
+and never to the point of emptying the comparand. Genuine *different-title*
+content still penalizes, because it is not explained by any MARC field.
 """
+
+from collections.abc import Callable
 
 from rapidfuzz.fuzz import ratio
 
@@ -140,12 +152,69 @@ def _shared_weight(marc_token: str, nypl_token: str, idf: IdfTable) -> float:
     return (idf.score(marc_token) + idf.score(nypl_token)) / 2.0
 
 
+def _prepare_tokens(
+    value: str,
+    language: str,
+    title_stopwords: frozenset[str],
+    stemmer: Callable[[str], str],
+) -> tuple[str, ...]:
+    """Normalize numbers, tokenize, drop title stopwords, and stem ``value``."""
+    normalized = normalize_numbers(value, language)
+    tokens = tokenize(normalized)
+    filtered = [token for token in tokens if token not in title_stopwords]
+    return tuple(stemmer(token) for token in filtered)
+
+
 def _prepare(value: str, ctx: ScorerContext) -> tuple[str, ...]:
     """Tokenize, drop stopwords, and stem ``value`` for the context language."""
-    normalized = normalize_numbers(value, ctx.language)
-    tokens = tokenize(normalized)
-    filtered = [token for token in tokens if token not in ctx.stopwords.title]
-    return tuple(ctx.stemmer(token) for token in filtered)
+    return _prepare_tokens(value, ctx.language, ctx.stopwords.title, ctx.stemmer)
+
+
+def prepare_cross_field_stems(
+    values: tuple[str, ...],
+    language: str,
+    title_stopwords: frozenset[str],
+    stemmer: Callable[[str], str],
+) -> frozenset[str]:
+    """Build the cross-field stem set for :class:`ScorerContext` (#90).
+
+    Prepares the MARC publisher / publication-place / statement-of-responsibility
+    strings with the **same** normalize/tokenize/stopword/stem pipeline the title
+    scorer applies to titles, so the resulting stems are directly comparable to
+    prepared CCE-title stems. ``None`` field values must be filtered by the caller
+    before being passed in. Returns a :class:`frozenset` ready to drop straight
+    into :attr:`ScorerContext.cross_field_title_stems`.
+    """
+    stems: set[str] = set()
+    for value in values:
+        stems.update(_prepare_tokens(value, language, title_stopwords, stemmer))
+    return frozenset(stems)
+
+
+def _strip_cross_field(
+    nypl_tokens: tuple[str, ...], marc_tokens: tuple[str, ...], ctx: ScorerContext
+) -> tuple[str, ...]:
+    """Drop CCE-title stems explained by a non-title MARC field (#90).
+
+    The CCE routinely packs the publisher, publication place, or statement of
+    responsibility *into its title* string — fields MARC keeps separate. Those
+    leaked tokens are unique to the CCE side, so the IDF-weighted similarity
+    penalizes them as a title difference and deflates a true match. This removes
+    any CCE-title stem present in :attr:`ScorerContext.cross_field_title_stems`
+    (the prepared publisher/place/responsibility stems) **unless** the stem also
+    belongs to the genuine MARC title — a token that legitimately appears in the
+    title is never stripped just because it recurs in another field. The strip
+    is suppressed when it would empty the CCE comparand, so an over-aggressive
+    removal can never manufacture a zero-token skip.
+    """
+    explained = ctx.cross_field_title_stems
+    if not explained:
+        return nypl_tokens
+    marc_set = frozenset(marc_tokens)
+    kept = tuple(token for token in nypl_tokens if token not in explained or token in marc_set)
+    if not kept:
+        return nypl_tokens
+    return kept
 
 
 def _skipped() -> Evidence:
@@ -193,6 +262,7 @@ def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerConte
     nypl_tokens = _prepare(nypl_title, ctx)
     if not marc_tokens or not nypl_tokens:
         return _skipped()
+    nypl_tokens = _strip_cross_field(nypl_tokens, marc_tokens, ctx)
     marc_set = set(marc_tokens)
     nypl_set = set(nypl_tokens)
     matched, unique_marc, unique_nypl = _align_tokens(marc_set, nypl_set)
@@ -234,5 +304,6 @@ def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerConte
 
 
 __all__ = [
+    "prepare_cross_field_stems",
     "score_title",
 ]

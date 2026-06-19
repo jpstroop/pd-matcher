@@ -39,6 +39,15 @@ class ScorerContext(Struct, frozen=True, forbid_unknown_fields=True):
             canonical (e.g. ``"McGraw-Hill Book Company"``) so it can be
             surfaced verbatim in the review UI. ``None`` disables the
             alias path.
+        cross_field_title_stems: Stemmed tokens drawn from the MARC fields
+            the CCE routinely embeds *inside its title* string — the
+            ``publisher``, ``publication_place``, and
+            ``statement_of_responsibility`` (#90). The title scorer strips any
+            of these from the CCE-title comparand (unless the stem also belongs
+            to the genuine MARC title), so cross-field contamination no longer
+            deflates the title score. Prepared with the same normalize/stem
+            pipeline the title scorer uses, so the comparison is like-with-like.
+            Empty by default, which disables the strip.
     """
 
     language: str
@@ -49,6 +58,7 @@ class ScorerContext(Struct, frozen=True, forbid_unknown_fields=True):
     publisher_idf: IdfTable
     config: MatchingConfig
     publisher_alias_index: dict[str, str] | None = None
+    cross_field_title_stems: frozenset[str] = frozenset()
 
 
 __all__ = [
