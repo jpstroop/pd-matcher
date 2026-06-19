@@ -37,6 +37,7 @@ from pd_matcher.match.scorers.isbn import score_isbn
 from pd_matcher.match.scorers.lccn import score_lccn
 from pd_matcher.match.scorers.name import score_author
 from pd_matcher.match.scorers.name import score_publisher
+from pd_matcher.match.scorers.organization import looks_like_organization
 from pd_matcher.match.scorers.title import prepare_cross_field_stems
 from pd_matcher.match.scorers.title import score_title
 from pd_matcher.match.scorers.volume import score_volume
@@ -57,6 +58,15 @@ _TITLE_ISOLATION_MULTIPLIER: float = 0.3
 _NON_CORROBORATING_SCORERS: frozenset[str] = frozenset(
     {
         "year.delta",  # many records share a year; year alone is too weak a corroboration signal
+    }
+)
+_PUBLISHER_GROUP: str = "publisher"
+_CROSS_FIELD_PUBLISHER_CCE_SOURCES: frozenset[str] = frozenset(
+    {
+        "author_name",
+        "claimants",
+        "renewal_author",
+        "renewal_claimants",
     }
 )
 
@@ -160,6 +170,48 @@ _GROUP_SCORERS: dict[str, _GroupScorer] = {
 }
 
 
+def _as_skipped(evidence: Evidence) -> Evidence:
+    """Return a copy of ``evidence`` forced to ``skipped`` with a zeroed score."""
+    return Evidence(
+        scorer=evidence.scorer,
+        score=0.0,
+        max=evidence.max,
+        skipped=True,
+        decisive=evidence.decisive,
+        features=(),
+    )
+
+
+def _gate_cross_field_publisher(
+    pairing: CompiledPairing,
+    candidate: IndexedNyplRegRecord,
+    evidence: Evidence,
+) -> Evidence:
+    """Skip a cross-field publisher pairing whose CCE comparand is a person.
+
+    The publisher group pairs the MARC publisher / statement of
+    responsibility against the CCE ``author_name`` / ``claimants`` (and their
+    renewal twins) to catch a corporate claimant that is in fact the
+    publisher. That fallback is only valid when the CCE comparand looks like
+    an organization: a *person* is never a publisher, so a person comparand
+    produces either a fabricated ``0.0`` penalty on a real match or a
+    double-counted author identity inflating a no_match (issue #86). When the
+    comparand does not look like an organization the Evidence is forced to
+    ``skipped`` so it drops out of the combiner instead of contributing a
+    spurious score; the genuine ``publisher ↔ publisher_names`` pairings are
+    never touched.
+    """
+    if pairing.group != _PUBLISHER_GROUP:
+        return evidence
+    if pairing.cce_name not in _CROSS_FIELD_PUBLISHER_CCE_SOURCES:
+        return evidence
+    if evidence.skipped:
+        return evidence
+    if looks_like_organization(pairing.cce_accessor(candidate)):
+        return evidence
+    return _as_skipped(evidence)
+
+
 def _score_group(
     pairings: tuple[CompiledPairing, ...],
     marc: MarcRecord,
@@ -182,7 +234,11 @@ def _score_group(
         return
     scorer = _GROUP_SCORERS[pairings[0].group]
     evidences = tuple(
-        scorer(pairing.marc_accessor(marc), pairing.cce_accessor(candidate), ctx)
+        _gate_cross_field_publisher(
+            pairing,
+            candidate,
+            scorer(pairing.marc_accessor(marc), pairing.cce_accessor(candidate), ctx),
+        )
         for pairing in pairings
     )
     best_index, best, losers = _select_best(evidences)
