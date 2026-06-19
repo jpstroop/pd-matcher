@@ -7,6 +7,7 @@ weighted mean over present Evidence, end of story.
 """
 
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.match.combiners.weighted_mean import _WHOLE_PART_PENALTY_CAP
 from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
 from pd_matcher.match.evidence import Evidence
 
@@ -246,3 +247,93 @@ def test_weight_multiplier_zero_drops_evidence(matching_config: MatchingConfig) 
     )
     # The author Evidence is dropped, so the mean is title alone -> 100.
     assert combined.raw == 100.0
+
+
+def test_whole_part_penalty_caps_uncorroborated_incompatibility(
+    matching_config: MatchingConfig,
+) -> None:
+    """An uncorroborated whole/part incompatibility caps the combined score.
+
+    Title/author/publisher all agree (the whole/part pairs share them by
+    nature) and ``volume.compat`` fired the incompatibility at 0.0 with no
+    LCCN veto. Without the cap the lone 0.0 would be averaged away (volume
+    carries zero weight in the default config); with it the calibrated score is
+    pinned to the penalty ceiling and the raw tracks it.
+    """
+    combiner = WeightedMeanCombiner(config=matching_config)
+    evidence = (
+        _ev("title.token_set", 64.0),
+        _ev("name.author", 100.0),
+        _ev("name.publisher", 100.0),
+        _ev("volume.compat", 0.0),
+    )
+    uncapped = combiner.combine(
+        (
+            _ev("title.token_set", 64.0),
+            _ev("name.author", 100.0),
+            _ev("name.publisher", 100.0),
+        )
+    )
+    assert uncapped.calibrated > _WHOLE_PART_PENALTY_CAP
+    combined = combiner.combine(evidence)
+    assert combined.calibrated == _WHOLE_PART_PENALTY_CAP
+    assert combined.raw == _WHOLE_PART_PENALTY_CAP * 100.0
+
+
+def test_whole_part_penalty_spared_by_exact_lccn(
+    matching_config: MatchingConfig,
+) -> None:
+    """An exact LCCN vetoes the penalty: the corroborated pair is not capped.
+
+    This is the guardrail protecting LCCN-confirmed true matches (e.g. reg
+    A63607) that happen to carry a misleading ``volume.compat=0.0``.
+    """
+    combiner = WeightedMeanCombiner(config=matching_config)
+    evidence = (
+        _ev("title.token_set", 64.0),
+        _ev("name.author", 100.0),
+        _ev("name.publisher", 100.0),
+        _ev("volume.compat", 0.0),
+        _ev("lccn.exact", 100.0, decisive=True),
+    )
+    combined = combiner.combine(evidence)
+    assert combined.calibrated > _WHOLE_PART_PENALTY_CAP
+
+
+def test_whole_part_penalty_not_applied_below_cap(
+    matching_config: MatchingConfig,
+) -> None:
+    """A pair already below the cap is left untouched by the penalty.
+
+    The penalty only lowers; it never raises a score up to the cap.
+    """
+    combiner = WeightedMeanCombiner(config=matching_config)
+    evidence = (
+        _ev("title.token_set", 10.0),
+        _ev("name.author", 0.0),
+        _ev("volume.compat", 0.0),
+    )
+    uncapped = combiner.combine(
+        (
+            _ev("title.token_set", 10.0),
+            _ev("name.author", 0.0),
+        )
+    )
+    assert uncapped.calibrated < _WHOLE_PART_PENALTY_CAP
+    combined = combiner.combine(evidence)
+    assert combined.calibrated == uncapped.calibrated
+
+
+def test_whole_part_penalty_not_applied_when_volume_compatible(
+    matching_config: MatchingConfig,
+) -> None:
+    """A compatible volume signal does not trigger the penalty cap."""
+    combiner = WeightedMeanCombiner(config=matching_config)
+    evidence = (
+        _ev("title.token_set", 64.0),
+        _ev("name.author", 100.0),
+        _ev("name.publisher", 100.0),
+        _ev("volume.compat", 100.0),
+    )
+    combined = combiner.combine(evidence)
+    assert combined.calibrated > _WHOLE_PART_PENALTY_CAP
