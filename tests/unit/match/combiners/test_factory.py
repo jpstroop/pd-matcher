@@ -22,10 +22,9 @@ _N_FEATURES: int = 53
 def _config(scorer: Literal["weighted_mean", "learned"]) -> MatchingConfig:
     """Return a valid matching config (weights sum to 1.0) with ``scorer`` set."""
     return MatchingConfig(
-        title_weight=0.35,
+        title_weight=0.45,
         author_weight=0.20,
         publisher_weight=0.10,
-        year_weight=0.10,
         edition_weight=0.05,
         lccn_weight=0.10,
         isbn_weight=0.0,

@@ -68,10 +68,9 @@ def tiny_publisher_idf(tiny_index_path: Path) -> IdfTable:
 def matching_config() -> MatchingConfig:
     """Return the project-default :class:`MatchingConfig`."""
     return MatchingConfig(
-        title_weight=0.40,
+        title_weight=0.50,
         author_weight=0.20,
         publisher_weight=0.10,
-        year_weight=0.10,
         edition_weight=0.05,
         lccn_weight=0.10,
         isbn_weight=0.05,

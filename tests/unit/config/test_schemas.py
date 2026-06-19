@@ -14,10 +14,9 @@ from pd_matcher.config.schemas import MatchingConfig
 
 def _valid_matching() -> dict[str, object]:
     return {
-        "title_weight": 0.40,
+        "title_weight": 0.50,
         "author_weight": 0.20,
         "publisher_weight": 0.10,
-        "year_weight": 0.10,
         "edition_weight": 0.05,
         "lccn_weight": 0.10,
         "isbn_weight": 0.05,
@@ -55,7 +54,7 @@ def test_matching_config_rejects_weights_not_summing_to_one() -> None:
 def test_matching_config_accepts_weights_within_tolerance() -> None:
     """Weights summing to ~1.0 within the small tolerance must be accepted."""
     data = _valid_matching()
-    data["title_weight"] = 0.4005
+    data["title_weight"] = 0.5005
     data["author_weight"] = 0.1995
     cfg = convert(data, type=MatchingConfig)
     assert cfg.publisher_weight == 0.10

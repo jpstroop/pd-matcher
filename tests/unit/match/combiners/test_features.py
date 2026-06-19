@@ -5,7 +5,7 @@ from pd_matcher.match.combiners.features import feature_names
 from pd_matcher.match.combiners.features import feature_row
 from pd_matcher.match.evidence import Evidence
 
-_EXPECTED_FEATURE_COUNT: int = 53
+_EXPECTED_FEATURE_COUNT: int = 49
 
 
 def _evidence(
@@ -28,8 +28,22 @@ def _evidence(
 
 
 def test_feature_names_length_matches_expected_count() -> None:
-    """The canonical builder yields exactly 53 columns."""
+    """The canonical builder yields exactly 49 columns."""
     assert len(feature_names()) == _EXPECTED_FEATURE_COUNT
+
+
+def test_year_is_not_a_combiner_feature() -> None:
+    """Year was dropped as a scoring feature in issue #88.
+
+    Exact-year retrieval bucketing makes ``year.delta`` a constant, so it is
+    no longer a scorer column nor a named sub-feature. No feature name may
+    reference year, and a year Evidence passed to ``feature_row`` is ignored.
+    """
+    names = feature_names()
+    assert "year.delta" not in SCORER_ORDER
+    assert not any("year" in name for name in names)
+    with_year = feature_row((_evidence("year.delta", score=100.0),))
+    assert set(with_year) == {0.0}
 
 
 def test_feature_names_are_unique() -> None:
@@ -185,7 +199,6 @@ def test_feature_row_full_evidence_happy_path() -> None:
         ),
         _evidence("name.author", score=70.0, features=(("token_overlap", 2.0),)),
         _evidence("name.publisher", score=60.0, features=(("token_overlap", 1.0),)),
-        _evidence("year.delta", score=100.0, features=(("delta_years", 0.0),)),
         _evidence("edition.compat", skipped=True),
         _evidence("lccn.exact", skipped=True),
         _evidence("isbn.exact", skipped=True),

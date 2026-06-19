@@ -93,7 +93,10 @@ def test_weighted_mean_lccn_match_with_conflicting_title_is_moderate(
 
     The whole point of walking back the short-circuit: a transcription
     error in either side of the LCCN comparison would otherwise have
-    promoted a clear mismatch to 100% confidence.
+    promoted a clear mismatch to 100% confidence. Year Evidence is supplied
+    at 100 to confirm it is now ignored (issue #88): it contributes to
+    neither the numerator nor the denominator, so only LCCN carries the
+    score.
     """
     combiner = WeightedMeanCombiner(config=matching_config)
     combined = combiner.combine(
@@ -106,17 +109,17 @@ def test_weighted_mean_lccn_match_with_conflicting_title_is_moderate(
             _ev("lccn.exact", 100.0, decisive=True),
         )
     )
-    # Year + LCCN carry the score: (0.10 + 0.10) / sum_of_all_weights
+    # Year is dropped as a combiner weight; only LCCN carries the score:
+    # lccn_weight / (every weight except year).
     cfg = matching_config
     denom = (
         cfg.title_weight
         + cfg.author_weight
         + cfg.publisher_weight
-        + cfg.year_weight
         + cfg.edition_weight
         + cfg.lccn_weight
     )
-    expected = ((cfg.year_weight + cfg.lccn_weight) / denom) * 100.0
+    expected = (cfg.lccn_weight / denom) * 100.0
     assert combined.raw == expected
     assert combined.raw < 50.0
 
@@ -176,6 +179,23 @@ def test_weighted_mean_ignores_unknown_scorer(matching_config: MatchingConfig) -
         )
     )
     assert combined.raw == 100.0
+
+
+def test_weighted_mean_ignores_year_evidence(matching_config: MatchingConfig) -> None:
+    """Year Evidence is excluded from the mean (issue #88).
+
+    Year carries no weight in the combiner, so a perfect-scoring year
+    Evidence neither raises nor lowers the combined score: the result is the
+    title alone, exactly as if the year Evidence were absent.
+    """
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 40.0),
+            _ev("year.delta", 100.0),
+        )
+    )
+    assert combined.raw == 40.0
 
 
 def test_weight_multiplier_default_one_preserves_old_behaviour(

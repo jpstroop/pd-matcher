@@ -12,8 +12,8 @@ match what inference feeds it.
 The projection is the validated expanded family from the issue #4
 tightening round (``docs/findings/learned_scorer_tightening_2026-06-12.md``):
 
-* 9 per-scorer normalized scores in :data:`SCORER_ORDER`.
-* 9 ``{scorer}__skipped`` flags.
+* 8 per-scorer normalized scores in :data:`SCORER_ORDER`.
+* 8 ``{scorer}__skipped`` flags.
 * Named sub-features flattened out of each scorer's ``Evidence.features``,
   namespaced ``{scorer}.{feature}`` because author and publisher share
   sub-feature names. Where a ``-1.0`` sentinel or a skipped scorer makes a
@@ -23,11 +23,14 @@ tightening round (``docs/findings/learned_scorer_tightening_2026-06-12.md``):
   title scorer's ``marc_token_len`` / ``nypl_token_len`` sub-features
   (``0.0`` when either is ``0`` or absent).
 
-The expanded count is **53**: 18 baseline + 34 named sub-features (incl.
-presence flags and the two title token-length sub-features added in this
-phase) + 1 pair-level. The tightening research run reported 51 because it
-predated the two title token-length sub-features; the canonical count here
-is authoritative and is asserted by the unit tests.
+The expanded count is **49**: 16 baseline + 32 named sub-features (incl.
+presence flags and the two title token-length sub-features) + 1 pair-level.
+``year.delta`` was dropped as a scoring feature in issue #88: exact-year
+retrieval bucketing (``year_window = 0``) makes its delta a constant ``1.0``
+for every scored pair, so it carried zero variance — uninformative to the
+learned trees and pure inflation in the weighted mean. Year remains the
+retrieval bucket key; it is no longer a combiner feature. The canonical
+count here is authoritative and is asserted by the unit tests.
 """
 
 from collections.abc import Sequence
@@ -42,7 +45,6 @@ SCORER_ORDER: tuple[str, ...] = (
     "title.token_set",
     "name.author",
     "name.publisher",
-    "year.delta",
     "edition.compat",
     "lccn.exact",
     "isbn.exact",
@@ -80,7 +82,6 @@ _NAMED_SUBFEATURES: dict[str, tuple[str, ...]] = {
         "normalized_nypl_len",
         "token_overlap",
     ),
-    "year.delta": ("delta_years",),
     "edition.compat": (
         "marc_edition_num",
         "nypl_edition_num",
@@ -109,7 +110,6 @@ _NAMED_SUBFEATURES: dict[str, tuple[str, ...]] = {
 # companion ``__present`` flag disambiguates "value is genuinely -1" from
 # "missing".
 _PRESENCE_FLAGGED: dict[str, tuple[str, ...]] = {
-    "year.delta": ("delta_years",),
     "edition.compat": ("marc_edition_num", "nypl_edition_num"),
     "extent.page_count": ("marc_pages", "cce_pages"),
 }

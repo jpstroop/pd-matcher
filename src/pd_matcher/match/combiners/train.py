@@ -74,7 +74,6 @@ def _scoring_config(config: MatchingConfig) -> MatchingConfig:
         title_weight=config.title_weight,
         author_weight=config.author_weight,
         publisher_weight=config.publisher_weight,
-        year_weight=config.year_weight,
         edition_weight=config.edition_weight,
         lccn_weight=config.lccn_weight,
         isbn_weight=config.isbn_weight,
