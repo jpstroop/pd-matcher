@@ -1,10 +1,29 @@
 """Tests for :mod:`pd_matcher.match.scorers.title`."""
 
+from collections.abc import Callable
+
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.scorers.context import ScorerContext
 from pd_matcher.match.scorers.title import _align_tokens
 from pd_matcher.match.scorers.title import _shared_weight
+from pd_matcher.match.scorers.title import _strip_cross_field
+from pd_matcher.match.scorers.title import prepare_cross_field_stems
 from pd_matcher.match.scorers.title import score_title
+
+
+def _with_cross_field(ctx: ScorerContext, stems: frozenset[str]) -> ScorerContext:
+    """Return a copy of ``ctx`` carrying ``stems`` as cross-field title stems."""
+    return ScorerContext(
+        language=ctx.language,
+        stopwords=ctx.stopwords,
+        stemmer=ctx.stemmer,
+        idf=ctx.idf,
+        author_idf=ctx.author_idf,
+        publisher_idf=ctx.publisher_idf,
+        config=ctx.config,
+        publisher_alias_index=ctx.publisher_alias_index,
+        cross_field_title_stems=stems,
+    )
 
 
 def test_score_title_identical_inputs_max_score(scorer_context: ScorerContext) -> None:
@@ -238,3 +257,105 @@ def test_score_title_whole_string_length_gate_blocks_short_compound(
     ev = score_title("redcoat", "red coat", scorer_context)
     assert ev.score == 0.0
     assert ev.skipped is False
+
+
+def test_prepare_cross_field_stems_normalizes_and_merges(
+    english_stemmer: Callable[[str], str],
+) -> None:
+    """Field values are normalized/stopword-dropped/stemmed and merged to a set."""
+    stems = prepare_cross_field_stems(
+        ("University of Illinois Press", "Chicago"),
+        "eng",
+        frozenset({"of"}),
+        english_stemmer,
+    )
+    assert stems == frozenset({"universiti", "illinoi", "press", "chicago"})
+
+
+def test_prepare_cross_field_stems_empty_input_is_empty() -> None:
+    """No field values yields an empty stem set (the no-op default)."""
+    assert prepare_cross_field_stems((), "eng", frozenset(), str) == frozenset()
+
+
+def test_strip_cross_field_removes_explained_token(scorer_context: ScorerContext) -> None:
+    """A CCE stem explained only by a non-title MARC field is dropped."""
+    kept = _strip_cross_field(
+        ("studi", "press"),
+        ("studi",),
+        _with_cross_field(scorer_context, frozenset({"press"})),
+    )
+    assert kept == ("studi",)
+
+
+def test_strip_cross_field_keeps_genuine_title_token(scorer_context: ScorerContext) -> None:
+    """A stem in the MARC title is never stripped, even if it recurs in a field."""
+    kept = _strip_cross_field(
+        ("widget", "press"),
+        ("widget", "press"),
+        _with_cross_field(scorer_context, frozenset({"press", "widget"})),
+    )
+    assert kept == ("widget", "press")
+
+
+def test_strip_cross_field_over_strip_guard_returns_original(
+    scorer_context: ScorerContext,
+) -> None:
+    """When stripping would empty the comparand, the original tokens are kept."""
+    kept = _strip_cross_field(
+        ("press", "universiti"),
+        ("widget",),
+        _with_cross_field(scorer_context, frozenset({"press", "universiti"})),
+    )
+    assert kept == ("press", "universiti")
+
+
+def test_strip_cross_field_no_stems_is_noop(scorer_context: ScorerContext) -> None:
+    """An empty cross-field set returns the CCE tokens unchanged."""
+    kept = _strip_cross_field(("studi", "press"), ("studi",), scorer_context)
+    assert kept == ("studi", "press")
+
+
+def test_score_title_cross_field_contamination_recovers(
+    scorer_context: ScorerContext,
+) -> None:
+    """Publisher tokens leaked into the CCE title no longer deflate the score.
+
+    The MARC title is "study widget"; the CCE title repeats it but appends the
+    publisher "machines" (a high-IDF token MARC keeps in its publisher field).
+    Without the cross-field strip those extra tokens are penalized as a title
+    difference; with the strip the comparand reduces to the shared title and
+    scores higher.
+    """
+    contaminated = "study widget machines"
+    without = score_title("study widget", contaminated, scorer_context)
+    ctx = _with_cross_field(scorer_context, frozenset({"machin"}))
+    with_strip = score_title("study widget", contaminated, ctx)
+    assert with_strip.score > without.score
+    assert with_strip.score == 100.0
+
+
+def test_score_title_genuine_extra_content_still_penalized(
+    scorer_context: ScorerContext,
+) -> None:
+    """Extra CCE tokens not explained by any MARC field still lower the score.
+
+    "machines" here is NOT in the cross-field set, so the strip leaves it in
+    place and the title difference is preserved — the change is surgical, not a
+    blanket extra-token amnesty.
+    """
+    ctx = _with_cross_field(scorer_context, frozenset({"albuquerqu"}))
+    ev = score_title("study widget", "study widget machines", ctx)
+    assert ev.score < 100.0
+
+
+def test_score_title_cross_field_does_not_strip_shared_title_token(
+    scorer_context: ScorerContext,
+) -> None:
+    """A title token that also appears in a MARC field is retained, not stripped.
+
+    "widget" is in both the MARC title and the (contrived) cross-field set; it
+    must survive so the genuine title overlap still counts.
+    """
+    ctx = _with_cross_field(scorer_context, frozenset({"widget"}))
+    ev = score_title("study widget", "study widget", ctx)
+    assert ev.score == 100.0
