@@ -6,7 +6,7 @@ from pd_matcher.match.combiners.features import feature_row
 from pd_matcher.match.combiners.features import volume_incompatible_uncorroborated
 from pd_matcher.match.evidence import Evidence
 
-_EXPECTED_FEATURE_COUNT: int = 50
+_EXPECTED_FEATURE_COUNT: int = 51
 
 
 def _evidence(
@@ -29,8 +29,29 @@ def _evidence(
 
 
 def test_feature_names_length_matches_expected_count() -> None:
-    """The canonical builder yields exactly 50 columns."""
+    """The canonical builder yields exactly 51 columns."""
     assert len(feature_names()) == _EXPECTED_FEATURE_COUNT
+
+
+def test_title_coverage_is_a_feature_column() -> None:
+    """The asymmetric title coverage signal (#85) is a learned feature column."""
+    names = feature_names()
+    assert "title.token_set.coverage" in names
+
+
+def test_feature_row_projects_title_coverage() -> None:
+    """A title Evidence's coverage sub-feature lands in its namespaced column."""
+    names = feature_names()
+    evidence = (
+        _evidence(
+            "title.token_set",
+            score=20.0,
+            skipped=False,
+            features=(("coverage", 0.95),),
+        ),
+    )
+    row = feature_row(evidence)
+    assert row[names.index("title.token_set.coverage")] == 0.95
 
 
 def test_year_is_not_a_combiner_feature() -> None:

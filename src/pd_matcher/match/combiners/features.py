@@ -23,8 +23,9 @@ tightening round (``docs/findings/learned_scorer_tightening_2026-06-12.md``):
   title scorer's ``marc_token_len`` / ``nypl_token_len`` sub-features
   (``0.0`` when either is ``0`` or absent).
 
-The expanded count is **50**: 16 baseline + 32 named sub-features (incl.
-presence flags and the two title token-length sub-features) + 1 pair-level
+The expanded count is **51**: 16 baseline + 33 named sub-features (incl.
+presence flags, the two title token-length sub-features, and the asymmetric
+title ``coverage`` sub-feature added in issue #85) + 1 pair-level
 (``pair.title_len_ratio``) + 1 cross-scorer derived
 (``volume.incompatible_uncorroborated``, issue #82).
 ``year.delta`` was dropped as a scoring feature in issue #88: exact-year
@@ -70,6 +71,7 @@ _NAMED_SUBFEATURES: dict[str, tuple[str, ...]] = {
         "unique_to_marc",
         "unique_to_nypl",
         "avg_token_idf",
+        "coverage",
         "script_mismatch",
         "marc_token_len",
         "nypl_token_len",

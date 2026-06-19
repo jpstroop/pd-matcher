@@ -46,6 +46,21 @@ context as :attr:`ScorerContext.cross_field_title_stems`) are stripped from the
 CCE comparand — but never a stem that also belongs to the genuine MARC title,
 and never to the point of emptying the comparand. Genuine *different-title*
 content still penalizes, because it is not explained by any MARC field.
+
+The symmetric Jaccard tanks when one title is much longer than the other — a
+subtitle the CCE omits ("Oscar Wilde a biography" vs "Oscar Wilde"), or a
+bound-with second work ("Babylone, suivi de la Vache la mort" vs "Babylone").
+The longer side's extra distinctive tokens bloat the union and crater the score
+even on a real match; the asymmetry is bidirectional (MARC or CCE longer). The
+scorer emits an asymmetric ``coverage`` sub-feature for the learned combiner
+(#85): shared IDF mass over the *smaller* side's total IDF mass — high (→1.0)
+when the shorter title is a distinctive subset of the longer one, even when the
+symmetric ``score`` is low. It is a FEATURE only; the ``score`` is deliberately
+unchanged (a blunt coverage lift on the score regressed both arms in v1 because
+it inflated coincidental-subset no_matches). The learned model weights coverage
+in concert with author/year/publisher — high coverage with corroboration means
+match, high coverage with an author mismatch is still rejected. The weighted
+mean never sees it.
 """
 
 from collections.abc import Callable
@@ -165,6 +180,38 @@ def _prepare_tokens(
     return tuple(stemmer(token) for token in filtered)
 
 
+def _coverage(
+    weighted_intersection: float, unique_marc_mass: float, unique_nypl_mass: float
+) -> float:
+    """Return the asymmetric title coverage signal (#85).
+
+    Coverage is the shared IDF mass divided by the total IDF mass of the
+    *smaller* side — ``shared / min(marc_mass, cce_mass)`` where each side's
+    mass is its shared mass plus its own unique mass. It approaches ``1.0``
+    when the shorter title's distinctive content is mostly present in the
+    longer one (a subtitle the other side omits, or a bound-with second work),
+    precisely the asymmetric shape the symmetric Jaccard ``score`` deflates.
+    It is ``0.0`` when there is no shared mass or both sides are empty.
+
+    Reuses the masses the scorer has already computed from its IDF / normalize
+    / tokenize / stem pipeline, so the signal is consistent with ``score``.
+
+    Args:
+        weighted_intersection: Shared IDF mass over the aligned token pairs.
+        unique_marc_mass: IDF mass of the MARC-only stems.
+        unique_nypl_mass: IDF mass of the CCE-only stems.
+
+    Returns:
+        Coverage in ``[0.0, 1.0]``.
+    """
+    marc_mass = weighted_intersection + unique_marc_mass
+    cce_mass = weighted_intersection + unique_nypl_mass
+    smaller_mass = min(marc_mass, cce_mass)
+    if smaller_mass <= 0.0:
+        return 0.0
+    return weighted_intersection / smaller_mass
+
+
 def _prepare(value: str, ctx: ScorerContext) -> tuple[str, ...]:
     """Tokenize, drop stopwords, and stem ``value`` for the context language."""
     return _prepare_tokens(value, ctx.language, ctx.stopwords.title, ctx.stemmer)
@@ -267,11 +314,10 @@ def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerConte
     nypl_set = set(nypl_tokens)
     matched, unique_marc, unique_nypl = _align_tokens(marc_set, nypl_set)
     weighted_intersection = sum(_shared_weight(a, b, ctx.idf) for a, b in matched)
-    weighted_union = (
-        weighted_intersection
-        + sum(ctx.idf.score(token) for token in unique_marc)
-        + sum(ctx.idf.score(token) for token in unique_nypl)
-    )
+    unique_marc_mass = sum(ctx.idf.score(token) for token in unique_marc)
+    unique_nypl_mass = sum(ctx.idf.score(token) for token in unique_nypl)
+    weighted_union = weighted_intersection + unique_marc_mass + unique_nypl_mass
+    coverage = _coverage(weighted_intersection, unique_marc_mass, unique_nypl_mass)
     raw = weighted_intersection / weighted_union if weighted_union > 0 else 0.0
     mass_floor = _GENERIC_TITLE_MASS_FACTOR * ctx.idf.default_idf
     confidence = min(1.0, weighted_intersection / mass_floor) if mass_floor > 0 else 1.0
@@ -290,6 +336,7 @@ def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerConte
         ("unique_to_marc", float(len(unique_marc))),
         ("unique_to_nypl", float(len(unique_nypl))),
         ("avg_token_idf", avg_idf),
+        ("coverage", coverage),
         ("marc_token_len", float(len(marc_set))),
         ("nypl_token_len", float(len(nypl_set))),
     )
