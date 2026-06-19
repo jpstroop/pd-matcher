@@ -28,10 +28,14 @@ normalized by ``default_idf`` (a distinctive-hit term). See
 :func:`_idf_gate` for the full rationale. An identical pair gates to
 ``1.0`` (literal match keeps its raw 100); a genuinely shared distinctive
 house token ("knopf") keeps the gate high; overlap on generics alone drives
-it toward zero. The gate is applied only when the token sets actually
-intersect — the disjoint fuzzy path above is left untouched so
-OCR/transcription typos on a distinctive token ("Macmillan" vs
-"Macmillian") still score high.
+it toward zero. When exactly one token is shared and the sets differ — a
+short side wholly contained in a longer one, which the raw ratio inflates to
+100 — the gate drops coverage's short-string credit and crushes a lone
+*common* token (a shared given name, surname, or initial) toward zero while
+preserving a lone *distinctive* token (issue #83). The gate is applied only
+when the token sets actually intersect — the disjoint fuzzy path above is
+left untouched so OCR/transcription typos on a distinctive token ("Macmillan"
+vs "Macmillian") still score high.
 
 The publisher scorer additionally consults a curated alias index when
 one is supplied (either via :class:`ScorerContext` or as an explicit
@@ -55,6 +59,7 @@ _AUTHOR_SCORER: str = "name.author"
 _PUBLISHER_SCORER: str = "name.publisher"
 _DISJOINT_FUZZY_FLOOR: float = 50.0
 _ALIAS_HIT_FLOOR: float = 95.0
+_SINGLE_TOKEN_IDF_FLOOR: float = 0.6
 
 
 def _prepare(value: str, language: str, stopwords: frozenset[str]) -> tuple[str, str]:
@@ -100,6 +105,22 @@ def _idf_gate(
     signal is driven toward zero. A genuinely shared distinctive house token
     keeps the gate high through the distinctive-hit term.
 
+    **Single-shared-token floor (issue #83).** When exactly one token is
+    shared *and the two sets are not identical* — i.e. a one-word side is a
+    strict subset of a longer side, the case ``token_set_ratio`` inflates to
+    100 — coverage still credits the shared token's slice of the union mass,
+    so a lone *common* given name or surname ("nicholas", "roy",
+    "montgomery") or a bare initial ("d") survives at 0.25-0.42. That is the
+    dominant labeling complaint: a one-word author should not match a
+    multi-word author on a single common token alone. In this regime the gate
+    is driven by distinctiveness only — coverage's short-string credit is
+    dropped — and a token below :data:`_SINGLE_TOKEN_IDF_FLOOR` (as a
+    fraction of ``default_idf``) is linearly crushed toward zero. A lone
+    *distinctive* shared token (a rare surname / house) clears the floor and
+    keeps its full distinctive-hit value, so genuine mononym and corporate
+    matches are preserved. Identical single-token names are exempt: the sets
+    are equal, coverage is ``1.0``, and an exact one-word match stays at 100.
+
     Callers only invoke this when ``shared`` is non-empty, so the union is
     non-empty and its IDF sum is strictly positive; no zero-division guard
     is needed.
@@ -109,6 +130,10 @@ def _idf_gate(
     coverage = shared_mass / union_mass
     best_shared = max(idf.score(token) for token in shared)
     distinctive_hit = min(best_shared / idf.default_idf, 1.0)
+    if len(shared) == 1 and marc_set != nypl_set:
+        if distinctive_hit >= _SINGLE_TOKEN_IDF_FLOOR:
+            return distinctive_hit
+        return distinctive_hit * (distinctive_hit / _SINGLE_TOKEN_IDF_FLOOR)
     return max(coverage, distinctive_hit)
 
 

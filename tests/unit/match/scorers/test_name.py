@@ -225,6 +225,102 @@ def test_score_author_generic_only_overlap_gated_to_low(
     assert ev.score < 20.0
 
 
+def test_score_author_lone_common_token_subset_crushed(
+    scorer_context: ScorerContext,
+) -> None:
+    """A one-word author sharing only a common given name scores near zero.
+
+    Issue #83: ``smith`` is a low-IDF common surname, so a one-word side that
+    is a strict subset of a longer side (``token_set_ratio`` inflates to 100)
+    is crushed by the single-shared-token floor instead of surviving on
+    coverage's short-string credit.
+    """
+    ev = score_author("Smith", "Smith, John", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score < 20.0
+
+
+def test_score_author_lone_common_initial_subset_crushed(
+    scorer_context: ScorerContext,
+) -> None:
+    """A bare shared initial does not inflate a one-word-vs-longer match.
+
+    ``john`` stands in for the lone-initial / common-token class; sharing it
+    alone against a longer name is driven toward zero (issue #83).
+    """
+    ev = score_author("John", "John Smith", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score < 20.0
+
+
+def test_score_author_lone_distinctive_token_subset_stays_high(
+    scorer_context: ScorerContext,
+) -> None:
+    """A one-word side sharing a rare token clears the single-token floor.
+
+    ``albuquerque`` is near ``default_idf``; a lone shared distinctive token
+    is strong evidence (a mononym / rare surname), so the single-token floor
+    leaves it high rather than crushing it (issue #83 backfire guard).
+    """
+    ev = score_author("Albuquerque", "Albuquerque, John", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score > 70.0
+
+
+def test_score_author_identical_single_token_stays_max(
+    scorer_context: ScorerContext,
+) -> None:
+    """An exact one-word match is exempt from the single-token floor.
+
+    The two sets are equal so coverage is ``1.0`` and the floor never fires —
+    a mononym matching itself keeps its full 100 even when the token is
+    common (issue #83 backfire guard).
+    """
+    ev = score_author("Smith", "Smith", scorer_context)
+    assert ev.score == 100.0
+
+
+def test_score_publisher_lone_common_token_subset_crushed(
+    scorer_context: ScorerContext,
+) -> None:
+    """The single-token floor applies symmetrically on the publisher side.
+
+    ``oxford`` is low-IDF in the publisher fixture; a one-word side that is a
+    subset of a longer side is crushed instead of inflating (issue #83).
+    """
+    ev = score_publisher("Oxford", "Oxford Macmillan", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score < 20.0
+
+
+def test_score_publisher_lone_distinctive_token_subset_stays_high(
+    scorer_context: ScorerContext,
+) -> None:
+    """A lone distinctive house token survives the single-token floor.
+
+    ``knopf`` is rare, so a one-word side sharing only it against a longer
+    side keeps a high score — distinctive corporate evidence is preserved
+    (issue #83 backfire guard).
+    """
+    ev = score_publisher("Knopf", "Alfred Knopf", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score > 70.0
+
+
+def test_score_author_multi_token_overlap_unaffected_by_floor(
+    scorer_context: ScorerContext,
+) -> None:
+    """Sharing two tokens bypasses the single-token floor entirely.
+
+    A two-token overlap keeps the ``max(coverage, distinctive_hit)`` path, so
+    a real reordered match stays at 100 (issue #83 only narrows the lone-token
+    regime).
+    """
+    ev = score_author("Albuquerque, John", "John Albuquerque", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 2.0
+    assert ev.score == 100.0
+
+
 def test_score_author_distinctive_token_overlap_stays_high(
     scorer_context: ScorerContext,
 ) -> None:
