@@ -27,6 +27,35 @@ def test_normalize_text_pure_punctuation_returns_empty() -> None:
     assert normalize_text("!!!---***") == ""
 
 
+def test_normalize_text_folds_oe_ligature() -> None:
+    assert normalize_text("œuvre") == "oeuvre"
+
+
+def test_normalize_text_folds_ae_ligature() -> None:
+    assert normalize_text("æsop") == "aesop"
+
+
+def test_normalize_text_folds_uppercase_ligatures() -> None:
+    assert normalize_text("ŒUVRE") == "oeuvre"
+    assert normalize_text("ÆSOP") == "aesop"
+
+
+def test_normalize_text_folds_latin_typographic_ligatures() -> None:
+    assert normalize_text("ﬁnal ﬂag") == "final flag"
+
+
+def test_normalize_text_diacritic_folding_unchanged() -> None:
+    assert normalize_text("José café Sénèque") == "jose cafe seneque"
+
+
+def test_tokenize_folds_oe_ligature() -> None:
+    assert tokenize("œuvre") == ("oeuvre",)
+
+
+def test_tokenize_folds_ae_ligature() -> None:
+    assert tokenize("æsop") == ("aesop",)
+
+
 def test_tokenize_splits_normalized_string() -> None:
     assert tokenize("Café CRÈME, fresh!") == ("cafe", "creme", "fresh")
 
