@@ -44,6 +44,5 @@ data/*.db-wal
 data/*.db.bak
 data/disagreements.txt
 
-# Published-data repo (separate git repo at jpstroop/cce-marc-linkage,
-# cloned in-tree here for the default --out of dump-vault-marcs).
-data/published/
+# Training bundle (jpstroop/cce-marc-linkage) is mounted as the data/training
+# submodule (vault + marc.xml), not gitignored.
