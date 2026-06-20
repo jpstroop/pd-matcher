@@ -6,7 +6,7 @@ Plain-language definitions of the statistics, matching, and software terms used 
 
 ## Matching & statistics
 
-**Ground truth.** The set of known-correct answers we measure against — here, the hand-labeled MARC↔CCE verdicts in `data/label_vault.jsonl` (~640 unique pairs as of mid-2026, growing as labeling continues). The matcher never sees it while matching; we only use it to score how well the matcher did.
+**Ground truth.** The set of known-correct answers we measure against — here, the hand-labeled MARC↔CCE verdicts in `data/training/label_vault.jsonl` (~2,000 pairs as of mid-2026, growing as labeling continues). The matcher never sees it while matching; we only use it to score how well the matcher did.
 
 **True positive / false positive / false negative.** For a yes/no decision: a true positive (TP) is a correct "yes" (we matched a record to the right CCE entry); a false positive (FP) is a wrong "yes" (we matched it to the wrong entry); a false negative (FN) is a missed "yes" (the right entry existed but we didn't find it).
 
@@ -70,7 +70,7 @@ Plain-language definitions of the statistics, matching, and software terms used 
 
 **Evidence.** The structured result a scorer returns — its score plus metadata (was the field present, etc.). The pipeline collects Evidence from all scorers.
 
-**Combiner.** The component that merges all the per-field Evidence into one overall match score (currently a weighted average, then calibrated).
+**Combiner.** The component that merges all the per-field Evidence into one overall match score. Two are available: the default `weighted_mean` (a weighted average over the per-field scores, optionally Platt-calibrated) and `learned` (a LightGBM gradient-boosted classifier that emits a calibrated probability directly, selected with `--scorer learned`).
 
 **Pairing.** A decision about *which* MARC field is compared against *which* CCE field. Most are obvious (title↔title), but some are cross-field (a MARC series title vs. a CCE title), because the data is sometimes transposed.
 
@@ -148,7 +148,7 @@ On the matching and statistics:
 
 On the copyright domain:
 
-- P. B. Hirtle, "Copyright Term and the Public Domain in the United States," Cornell University Library — the decision chart the rule engine encodes: <https://guides.library.cornell.edu/copyright/publicdomain>
+- P. B. Hirtle, "Copyright Term and the Public Domain in the United States," Cornell University Library — the decision chart consumers apply to the verified linkage (this project produces the links, not the copyright determination): <https://guides.library.cornell.edu/copyright/publicdomain>
 
 On the tools:
 

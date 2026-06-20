@@ -18,16 +18,20 @@ The shape:
 pdm run pd-groundtruth review
 ```
 
-Opens the local review UI at <http://127.0.0.1:8000>. Verdicts auto-save to both `data/review.db` and `data/label_vault.jsonl`. Ctrl-C stops the server; nothing is lost. For verdict decisions, see [LABELING_GUIDE.md](LABELING_GUIDE.md).
+Opens the local review UI at <http://127.0.0.1:8000>. Verdicts auto-save to both `data/review.db` and `data/training/label_vault.jsonl`. Ctrl-C stops the server; nothing is lost. For verdict decisions, see [LABELING_GUIDE.md](LABELING_GUIDE.md).
 
 ### 2. Commit the vault
 
+The vault lives in the `data/training/` submodule, so commit it there:
+
 ```bash
-git add data/label_vault.jsonl
+cd data/training
+git add label_vault.jsonl
 git commit -m "vault: <N> labels"
+cd -
 ```
 
-Just the vault — no other files. Whenever you stop labeling; once a day at a minimum.
+Just the vault — no other files. Whenever you stop labeling; once a day at a minimum. Push and bump the parent's submodule pointer when you publish (see below).
 
 ---
 
@@ -50,16 +54,22 @@ Useful for catching your own labeling mistakes and surfacing scoring/feature nua
 ### Regenerate + publish the dataset
 
 ```bash
-pdm run pd-groundtruth dump-vault-marcs
-pdm run pd-groundtruth publish-linkage
-cd data/published
-git add -A
+# Refresh the MARC snapshot to match the current vault.
+pdm run pd-groundtruth dump-vault-marcs        # writes data/training/marc.xml
+
+# Commit + push inside the submodule (the vault is already current there).
+cd data/training
+git add label_vault.jsonl marc.xml
 git commit -m "regenerate from vault @ <N> entries"
 git push origin main
 cd -
+
+# Record the new submodule commit in the main repo.
+git add data/training
+git commit -m "bump training submodule"
 ```
 
-Writes `marc.xml`, `training.jsonl`, and `matches.jsonl` into the [cce-marc-linkage](https://github.com/jpstroop/cce-marc-linkage) data repo, commits, and pushes. Run whenever you want the public artifact current.
+Refreshes `marc.xml` against the current vault, then commits + pushes both files in the [cce-marc-linkage](https://github.com/jpstroop/cce-marc-linkage) submodule and bumps the parent repo's submodule pointer. Run whenever you want the public dataset current. See [USER_GUIDE.md](USER_GUIDE.md#publishing-the-training-bundle) for detail.
 
 Read-only against the code repo's vault and pool. Safe to run mid-session.
 
@@ -124,11 +134,11 @@ label → commit vault → [diagnostic] → ask for code changes → [rebuild qu
 
 | File / dir | What it is | Who writes it | Stales when... |
 |---|---|---|---|
-| `data/label_vault.jsonl` | Source of truth for verdicts | You (via review UI) | Never — append-and-upsert |
+| `data/training/label_vault.jsonl` | Source of truth for verdicts (in the `data/training` submodule) | You (via review UI) | Never — append-and-upsert |
 | `data/review.db` | The queue you label against | `build-queue` | Matcher scoring code changes |
 | `data/candidates/` | Filtered MARC pool | `acquire` | Princeton publishes new dump |
 | `caches/cce.lmdb` | CCE index | `index build` | Parser code or NYPL submodules change |
-| `data/published/` | Published dataset (separate git repo) | `dump-vault-marcs` + `publish-linkage` | Vault grew |
+| `data/training/marc.xml` | MARC snapshot in the published dataset submodule | `dump-vault-marcs` | Vault grew |
 
 ## Where to find more
 
