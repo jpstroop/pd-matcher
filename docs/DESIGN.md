@@ -30,7 +30,7 @@ The codebase decomposes this into six layers, each independently testable and re
 2. **Normalization** (`normalize/`) — Unicode/diacritic stripping, multilingual stopword removal, Snowball stemming, multilingual number/ordinal/abbreviation expansion.
 3. **Indexing** (`index/`) — LMDB-backed persistent index with year-bucket blocking and a precomputed registration↔renewal join.
 4. **Scoring** (`match/scorers/`) — pure-function scorers, one per signal type, each emitting structured `Evidence`.
-5. **Combination + calibration** (`match/combiners/`) — weighted-mean and learned (LightGBM) combiners plus a Platt-scaled probability calibrator.
+5. **Combination + calibration** (`match/combiners/`) — weighted-mean (default, uncalibrated) and learned (LightGBM, self-calibrated) combiners, plus an optional Platt probability calibrator for the weighted mean.
 6. **Parallel execution** (`workers/`) — spawn-based multiprocessing harness with producer/worker/writer/reporter roles.
 
 A typer-based CLI (`cli.py`) is the thin wrapper that wires these layers into the user-facing commands.
@@ -108,7 +108,7 @@ The matching pipeline uses `multiprocessing.get_context("spawn")` unconditionall
 The exact process topology for one `run_match` invocation:
 
 - **Main**: orchestrates everything, hosts the producer (streams MARC), hosts the reporter thread (aggregates stats).
-- **N worker processes** (spawn): each opens LMDB read-only, loads the IDF + calibrator (and the LightGBM model when `--scorer learned`), then consumes batches of MARC records from the input queue.
+- **N worker processes** (spawn): each opens LMDB read-only, loads the IDF table (plus the Platt calibrator if `caches/calibrator.msgpack` exists, and the LightGBM model when `--scorer learned`), then consumes batches of MARC records from the input queue.
 - **1 writer process** (spawn): drains the output queue, writes CSV.
 
 Two `multiprocessing.Queue` instances thread the work:
@@ -165,7 +165,8 @@ for each candidate (typically 100s, not millions):
     │  combiner.combine(evidence_list)
     │      └─ weighted_mean (default):
     │           raw = Σ(weight_i × evidence_i.normalized) / Σ(weight_i)  over present evidence
-    │           calibrated = sigmoid(a × raw + b)                        Platt scaling
+    │           calibrated = raw / 100                                   uncalibrated pass-through (default)
+    │           calibrated = sigmoid(a × raw + b)                        only when a Platt calibrator artifact is present
     │      └─ learned (--scorer learned): LightGBM emits a calibrated probability directly
     │
     ▼
@@ -249,13 +250,13 @@ The combiner is a plain weighted mean over **present** (non-skipped) Evidence. D
 
 A perfect LCCN match in isolation contributes `0.10 × 100 = 10` to the raw score, not 100. **Hard identifiers do not short-circuit.** In Phase 4 we considered making `lccn.decisive = true` short-circuit to confidence 1.0; we walked that back when the user pointed out that LCCN and ISBN have ~5% transcription error rates in this corpus. The `decisive` flag is still on Evidence for audit and ML feature inspection, but the combiner is a plain weighted mean.
 
-The Platt calibrator then maps the raw score to a probability:
+By default the weighted-mean combiner runs **uncalibrated**: `calibrated = raw / 100`, a linear pass-through. Mapping the raw score to a genuine probability is optional and requires a separately-fit Platt calibrator artifact at `caches/calibrator.msgpack`. When that file is present the pipeline loads it and maps each raw score through the fitted sigmoid:
 
 ```
 calibrated = 1 / (1 + exp(-(a × raw + b)))
 ```
 
-`a` and `b` are fit by Newton iteration over the calibrator's training positives (the precomputed registration↔renewal matched pairs) plus 5–10× as many negatives sampled from the same year-buckets. The calibrator is trained once (during index build or first match) and persisted as `caches/calibrator.msgpack`. The published `combined_score` in the CSV is `calibrated × 100`.
+The artifact is **not** built during index or match — nothing in the engine fits it automatically. It is fit out-of-band by `scripts/fit_calibrator.py`, which scores the resolved labeled-vault pairs with the production combiner and partitions the raw scores into positives (`verdict=match`) and negatives (`verdict=no_match`), then fits `a` and `b` by Newton iteration. See `docs/findings/fit_calibrator_2026-06-07.md` for the most recent fit and its outcome. The published `combined_score` in the CSV is `calibrated × 100`.
 
 ### What happens to the match
 
@@ -329,21 +330,23 @@ The most negative-signal-positive scorer. If both sides have an extractable edit
 
 If both sides have no edition info, `skipped=True`. We don't penalize missing-on-both-sides.
 
-### Platt scaling
+### Platt scaling (optional, off by default)
 
-The raw weighted-mean score is between 0 and 100. It's a heuristic — there's no reason a raw 75 means "75% likely to be a real match." Platt scaling fixes that.
+The raw weighted-mean score is between 0 and 100. It's a heuristic — there's no reason a raw 75 means "75% likely to be a real match." Platt scaling is the optional step that would turn that heuristic into a probability, but the default `weighted_mean` combiner ships **without** a calibrator: with no `caches/calibrator.msgpack` present, `calibrated = raw / 100`, a linear pass-through. The rest of this section describes the calibrator you get only if you fit one.
 
-Given a labeled training set of pairs (raw score, is-match boolean), we fit a logistic regression:
+Platt scaling fits a logistic regression to labeled `(raw score, is-match boolean)` pairs:
 
 ```
 P(is_match | raw) = 1 / (1 + exp(-(a × raw + b)))
 ```
 
-The Newton iteration solves for `a` and `b` that maximize the log-likelihood of the training labels. We use the calibrator's matched-pair positives plus sampled hard negatives (other CCE records in the same year-bucket as a positive). With sufficient training data, the calibrator output is well-calibrated: P=0.75 means 75% of pairs predicted at 0.75 are actually matches.
+The training data is the **labeled vault**, not any precomputed registration↔renewal join: `scripts/fit_calibrator.py` resolves each non-`unsure` vault entry to its (MARC, CCE) pair, scores it with the production combiner, and partitions the resulting raw scores into positives (`verdict=match`) and negatives (`verdict=no_match`). A Newton iteration then solves for the `a` and `b` that maximize the log-likelihood of those labels. With enough well-separated training data the output is well-calibrated: P=0.75 means 75% of pairs predicted at 0.75 are actually matches.
 
-A side benefit: thresholds become meaningful. `--min-score 0.70` means "only show me matches with at least 70% probability of being correct" — not "only show me raw scores above 70 vibe points."
+A side benefit, when a calibrator is in place: thresholds become meaningful. `--min-score 0.70` means "only show me matches with at least 70% probability of being correct" — not "only show me raw scores above 70 vibe points."
 
-The learned combiner (`--scorer learned`) produces a probability directly, so it needs no Platt calibrator. The weighted-mean default still benefits from calibration as the empirical map from raw scores to truth — and when no calibrator artifact is fit, its `calibrated` value is simply `raw / 100`.
+In practice the most recent fit was **not** landed. The vault's negatives skew high (the labeler tends to surface borderline cases), so the sigmoid suppressed the mid-band and cost recall; see `docs/findings/fit_calibrator_2026-06-07.md` for the full numbers and the decision to keep running with the linear pass-through. The findings doc is the source of any concrete count or coefficient — they drift, so we don't pin them here.
+
+The learned combiner (`--scorer learned`) produces a probability directly from the LightGBM model, so it needs no Platt step at all.
 
 ---
 
