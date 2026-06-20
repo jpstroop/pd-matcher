@@ -1,18 +1,23 @@
 """Unit tests for the JSONL label vault."""
 
+from datetime import date
 from pathlib import Path
 
 from msgspec import DecodeError
 from pytest import raises
 
 from pd_groundtruth.label_vault import SCHEMA_VERSION
+from pd_groundtruth.label_vault import CceFacts
 from pd_groundtruth.label_vault import MarcIdentifiers
 from pd_groundtruth.label_vault import MatcherScores
 from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.label_vault import cce_facts
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.label_vault import iter_entries
+from pd_groundtruth.label_vault import renewal_year_of
 from pd_groundtruth.label_vault import upsert_entry
+from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 
 
@@ -282,6 +287,46 @@ def test_default_categories_is_empty_tuple() -> None:
     """A freshly constructed ``VaultEntry`` has an empty categories tuple."""
     entry = _entry()
     assert entry.categories == ()
+
+
+def test_renewal_year_of_returns_year_when_date_present() -> None:
+    assert renewal_year_of(date(1981, 4, 1)) == 1981
+
+
+def test_renewal_year_of_returns_none_when_date_absent() -> None:
+    assert renewal_year_of(None) is None
+
+
+def _cce(
+    *,
+    reg_year: int | None = 1953,
+    was_renewed: bool = True,
+    renewal_rdat: date | None = date(1981, 4, 1),
+) -> IndexedNyplRegRecord:
+    return IndexedNyplRegRecord(
+        uuid="uuid-1",
+        title="A Studied Title",
+        was_renewed=was_renewed,
+        reg_year=reg_year,
+        renewal_rdat=renewal_rdat,
+    )
+
+
+def test_cce_facts_projects_all_three_static_facts() -> None:
+    facts = cce_facts(_cce())
+    assert facts == CceFacts(reg_year=1953, renewal_year=1981, was_renewed=True)
+
+
+def test_cce_facts_leaves_renewal_year_none_when_not_renewed() -> None:
+    facts = cce_facts(_cce(was_renewed=False, renewal_rdat=None))
+    assert facts.renewal_year is None
+    assert facts.was_renewed is False
+    assert facts.reg_year == 1953
+
+
+def test_cce_facts_passes_through_missing_reg_year() -> None:
+    facts = cce_facts(_cce(reg_year=None))
+    assert facts.reg_year is None
 
 
 def test_round_trip_preserves_categories(tmp_path: Path) -> None:

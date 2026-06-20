@@ -31,13 +31,9 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
-from msgspec.json import decode as json_decode
 
-from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import CategoryKey
-from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
-from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.label_vault import upsert_entry
 from pd_groundtruth.review import nav_history
 from pd_groundtruth.review.filters import ReviewFilters
@@ -45,6 +41,7 @@ from pd_groundtruth.review.filters import label_filters_active
 from pd_groundtruth.review.filters import label_filters_query_string
 from pd_groundtruth.review.filters import parse_filters
 from pd_groundtruth.review.filters import parse_label_filters
+from pd_groundtruth.review.label_entry import build_label_entry
 from pd_groundtruth.review.view import build_card
 from pd_groundtruth.review.view import build_labeled_row
 from pd_groundtruth.review_db import CurrentLabelRow
@@ -56,7 +53,6 @@ from pd_groundtruth.sampling import BAND_70_80
 from pd_groundtruth.sampling import BAND_80_90
 from pd_groundtruth.sampling import BAND_BELOW
 from pd_groundtruth.sampling import BAND_GE90
-from pd_matcher.models import MarcRecord
 
 _LOGGER = getLogger(__name__)
 
@@ -218,14 +214,10 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
         if pair is not None:
             _append_vault_entry(
                 vault_path=_vault_path(request),
-                marc_json=pair.marc_json,
-                nypl_uuid=pair.nypl_uuid,
+                pair=pair,
                 verdict=verdict,
                 note=clean_note,
                 labeled_at=result.labeled_at,
-                cce_regnum=pair.cce_regnum,
-                cce_renewal_id=pair.cce_renewal_id,
-                cce_renewal_oreg=pair.cce_renewal_oreg,
                 categories=clean_categories,
             )
         return _redirect_to_next(filters)
@@ -343,17 +335,18 @@ def _vault_categories_for_pair(
 def _append_vault_entry(
     *,
     vault_path: Path,
-    marc_json: str,
-    nypl_uuid: str,
+    pair: ReviewPairRow,
     verdict: str,
     note: str | None,
     labeled_at: str,
-    cce_regnum: str | None,
-    cce_renewal_id: str | None,
-    cce_renewal_oreg: str | None,
     categories: tuple[CategoryKey, ...],
 ) -> None:
     """Append one verdict to the vault, swallowing and logging any I/O failure.
+
+    Stamps the static CCE facts (``reg_year`` / ``renewal_year`` /
+    ``was_renewed``) onto the schema-6 entry at label time via
+    :func:`build_label_entry`; ``scores`` / ``matcher_version`` stay ``None``
+    for ``enrich-vault`` to fill on publish.
 
     The DB write has already succeeded by the time this is called; failing the
     HTTP request because of a vault problem would punish the reviewer for an
@@ -361,27 +354,20 @@ def _append_vault_entry(
     to spot in the logs and the DB still carries the verdict.
     """
     try:
-        marc = json_decode(marc_json.encode("utf-8"), type=MarcRecord)
-        entry = VaultEntry(
-            schema=SCHEMA_VERSION,
-            marc_control_id=marc.control_id,
-            nypl_uuid=nypl_uuid,
+        entry = build_label_entry(
+            pair,
             verdict=verdict,
             note=note,
             labeled_at=labeled_at,
             labeler=_LABELER,
-            marc_identifiers=extract_marc_identifiers(marc),
-            cce_regnum=cce_regnum,
-            cce_renewal_id=cce_renewal_id,
-            cce_renewal_oreg=cce_renewal_oreg,
             categories=categories,
         )
         upsert_entry(vault_path, entry)
     except Exception:
         _LOGGER.exception(
             "label vault append failed for marc=%s nypl=%s",
-            marc_json[:80],
-            nypl_uuid,
+            pair.marc_json[:80],
+            pair.nypl_uuid,
         )
 
 

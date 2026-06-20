@@ -27,6 +27,7 @@ from msgspec import Struct
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MatcherScores
 from pd_groundtruth.label_vault import VaultEntry
+from pd_groundtruth.label_vault import cce_facts
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import upsert_entry
 from pd_groundtruth.matcher_version import matcher_version as resolve_matcher_version
@@ -92,19 +93,6 @@ def _matcher_scores(
     return MatcherScores(weighted_mean=weighted, learned=learned), True
 
 
-def _renewal_year(cce: IndexedNyplRegRecord) -> int | None:
-    """Return the renewal-recording year, or ``None`` when the join is absent.
-
-    The renewal year is derived from ``renewal_rdat`` (the renewal-recording
-    date copied onto the indexed registration during the index-build join);
-    when no renewal joined the registration the date — and the year — are
-    ``None``.
-    """
-    if cce.renewal_rdat is None:
-        return None
-    return cce.renewal_rdat.year
-
-
 def _enriched_entry(
     entry: VaultEntry,
     cce: IndexedNyplRegRecord,
@@ -116,6 +104,7 @@ def _enriched_entry(
     Every human-entered field is copied through unchanged; only the
     machine-derived fields and the schema version are written.
     """
+    facts = cce_facts(cce)
     return VaultEntry(
         schema=SCHEMA_VERSION,
         marc_control_id=entry.marc_control_id,
@@ -129,9 +118,9 @@ def _enriched_entry(
         cce_renewal_id=entry.cce_renewal_id,
         cce_renewal_oreg=entry.cce_renewal_oreg,
         categories=entry.categories,
-        reg_year=cce.reg_year,
-        renewal_year=_renewal_year(cce),
-        was_renewed=cce.was_renewed,
+        reg_year=facts.reg_year,
+        renewal_year=facts.renewal_year,
+        was_renewed=facts.was_renewed,
         scores=scores,
         matcher_version=matcher_version,
     )

@@ -33,16 +33,19 @@ vocabulary is fixed in code via the :data:`CategoryKey` ``Literal`` type;
 msgspec rejects unknown keys at decode. The default is the empty tuple,
 so v4 data still decodes via the v5 struct.
 
-Schema 6 adds machine-derived enrichment fields backfilled by the
-``enrich-vault`` command: ``reg_year`` and ``renewal_year`` (the CCE
-registration and renewal years), ``was_renewed`` (whether a renewal joined
-the registration), a :class:`MatcherScores` pair of matcher confidences, and
-the ``matcher_version`` that produced those scores. Every new field defaults
-to ``None`` so schema-5 entries still decode via the v6 struct; the command
-only ADDS derived data and never alters a human-entered field.
+Schema 6 adds machine-derived fields, all defaulting to ``None`` so schema-5
+entries still decode via the v6 struct. They split by when they are written:
+the three static CCE facts — ``reg_year`` and ``renewal_year`` (the CCE
+registration and renewal years) and ``was_renewed`` (whether a renewal joined
+the registration) — never change for a pair, so the review server stamps them
+at label time via :func:`cce_facts`. The version-bound fields — a
+:class:`MatcherScores` pair of matcher confidences and the ``matcher_version``
+that produced them — stay ``None`` on label-time writes and are filled by the
+``enrich-vault`` command on publish. Neither path alters a human-entered field.
 """
 
 from collections.abc import Iterator
+from datetime import date
 from os import fsync
 from pathlib import Path
 from typing import Literal
@@ -51,6 +54,7 @@ from msgspec import Struct
 from msgspec.json import decode as json_decode
 from msgspec.json import encode as json_encode
 
+from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 
 SCHEMA_VERSION: int = 6
@@ -88,6 +92,51 @@ class MatcherScores(Struct, frozen=True, forbid_unknown_fields=True):
 
     weighted_mean: float | None = None
     learned: float | None = None
+
+
+class CceFacts(Struct, frozen=True, forbid_unknown_fields=True):
+    """The three static, version-independent CCE facts for a pair.
+
+    These derive only from the joined CCE registration and never change for a
+    given pair, so they are stamped onto a :class:`VaultEntry` both at label
+    time (by the review server) and by ``enrich-vault``. They are the
+    schema-6 ``reg_year`` / ``renewal_year`` / ``was_renewed`` fields, kept
+    apart from the version-bound ``scores`` / ``matcher_version`` that only
+    ``enrich-vault`` writes.
+    """
+
+    reg_year: int | None
+    renewal_year: int | None
+    was_renewed: bool | None
+
+
+def renewal_year_of(renewal_rdat: date | None) -> int | None:
+    """Return the renewal-recording year, or ``None`` when no renewal joined.
+
+    The renewal year is the year of ``renewal_rdat`` (the renewal-recording
+    date copied onto the indexed registration during the index-build join);
+    when no renewal joined the registration the date — and the year — are
+    ``None``. The single source of the rdat-to-year derivation shared by
+    :func:`cce_facts` and the review server's label-time write path.
+    """
+    if renewal_rdat is None:
+        return None
+    return renewal_rdat.year
+
+
+def cce_facts(cce: IndexedNyplRegRecord) -> CceFacts:
+    """Project the static CCE facts off a joined registration record.
+
+    Args:
+        cce: The indexed registration, carrying ``reg_year``, ``was_renewed``,
+            and the joined ``renewal_rdat`` from which the renewal year is
+            derived.
+    """
+    return CceFacts(
+        reg_year=cce.reg_year,
+        renewal_year=renewal_year_of(cce.renewal_rdat),
+        was_renewed=cce.was_renewed,
+    )
 
 
 class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
@@ -129,8 +178,10 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     for old data (which has empty tuples) but not backward-compat for
     new keys read by old code.
 
-    Schema 6 adds five machine-derived fields the ``enrich-vault`` command
-    backfills, all defaulting to ``None`` so schema-5 entries decode cleanly:
+    Schema 6 adds five machine-derived fields, all defaulting to ``None`` so
+    schema-5 entries decode cleanly. The three static CCE facts are stamped at
+    label time by the review server; the two version-bound fields are filled
+    by ``enrich-vault`` on publish:
 
     * ``reg_year`` — the CCE registration year.
     * ``renewal_year`` — the renewal-recording year, present only when a
@@ -239,11 +290,14 @@ def extract_marc_identifiers(marc: MarcRecord) -> MarcIdentifiers:
 __all__ = [
     "SCHEMA_VERSION",
     "CategoryKey",
+    "CceFacts",
     "MarcIdentifiers",
     "MatcherScores",
     "VaultEntry",
+    "cce_facts",
     "current_entries",
     "extract_marc_identifiers",
     "iter_entries",
+    "renewal_year_of",
     "upsert_entry",
 ]
