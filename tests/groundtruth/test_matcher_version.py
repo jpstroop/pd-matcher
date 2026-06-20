@@ -61,3 +61,17 @@ def test_git_returns_stripped_stdout(monkeypatch: MonkeyPatch) -> None:
 
     monkeypatch.setattr(module, "run", lambda *_a, **_k: _Completed())
     assert module._git("rev-parse", "--short", "HEAD") == "abc1234"
+
+
+def test_git_real_invocation_does_not_raise() -> None:
+    """Exercise the REAL subprocess call (no mock) to guard the ``run`` kwargs.
+
+    A malformed invocation — e.g. ``capture_output=True`` together with an
+    explicit ``stderr`` — raises ``ValueError`` from ``subprocess.run``, which is
+    NOT one of the exceptions ``_git`` swallows, so it surfaces here. Mocking
+    ``run`` (as the other tests do) hides that class of bug entirely. Returns the
+    short hash inside a git checkout or ``None`` outside one; either is fine, but
+    it must not raise.
+    """
+    result = module._git("rev-parse", "--short", "HEAD")
+    assert result is None or (result != "" and result.strip() == result)

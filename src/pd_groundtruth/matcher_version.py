@@ -15,6 +15,7 @@ the subprocess cost is irrelevant and avoids a libgit2 dependency.
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from subprocess import DEVNULL
+from subprocess import PIPE
 from subprocess import CalledProcessError
 from subprocess import run
 
@@ -33,7 +34,7 @@ def _git(*args: str) -> str | None:
     try:
         completed = run(
             ("git", *args),
-            capture_output=True,
+            stdout=PIPE,
             stderr=DEVNULL,
             text=True,
             check=True,
