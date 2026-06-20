@@ -67,18 +67,22 @@ pdm install
 pdm run pre-commit install
 ```
 
-That's it for code. The CCE registration and renewal data come in as git submodules: the NYPL-transcribed CCE under `data/nypl-reg/` and `data/nypl-ren/`, and the labeled training bundle (vault + `marc.xml`) under `data/training/`. If you forgot `--recurse-submodules`, run `git submodule update --init`.
+That's it for code. The data comes in as git submodules. The labeled training bundle (vault + `marc.xml`) under `data/training/` is pulled normally by `--recurse-submodules`. The NYPL-transcribed CCE under `data/nypl-reg/` and `data/nypl-ren/` is **lazy** (~1.5 GB) — `--recurse-submodules` skips it, and so does a plain `git submodule update --init`. You fetch it on demand right before the first CCE index build (below). If you forgot `--recurse-submodules` entirely, `git submodule update --init` pulls `data/training`.
 
 Two data caches need to be built before the matcher can do anything useful. Order matters:
 
 ```bash
-# 1. Build the CCE LMDB index from the submodule data (~37 seconds).
+# 1. Fetch the lazy NYPL CCE submodules (skipped by --recurse-submodules; needed
+#    before the first index build, and any time you don't yet have them locally).
+git submodule update --init --checkout data/nypl-reg data/nypl-ren
+
+# 2. Build the CCE LMDB index from the submodule data (~37 seconds).
 pdm run pd-matcher index build \
   --reg-dir data/nypl-reg/xml \
   --ren-dir data/nypl-ren/data \
   --out caches/cce.lmdb
 
-# 2. Acquire and filter a MARC pool from Princeton (~1 hour first run).
+# 3. Acquire and filter a MARC pool from Princeton (~1 hour first run).
 pdm run pd-groundtruth acquire --out-dir data/candidates
 ```
 

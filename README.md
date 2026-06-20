@@ -46,7 +46,7 @@ pdm install
 pdm run pre-commit install
 ```
 
-Data is pulled in via git submodules: the NYPL-transcribed CCE under `data/nypl-reg/` and `data/nypl-ren/`, and the labeled **training bundle** (the vault + the MARC it references) under `data/training/`. If you forgot `--recurse-submodules`, run `git submodule update --init`.
+Data comes in via git submodules. The labeled **training bundle** (the vault + the MARC it references) under `data/training/` is pulled normally — `--recurse-submodules` gets it. The NYPL-transcribed CCE reference corpus under `data/nypl-reg/` and `data/nypl-ren/` (~1.5 GB) is **lazy**: `--recurse-submodules` does **not** pull it, so a casual clone stays small. You fetch it on demand only when you need to build the CCE index — see [docs/USER_GUIDE.md](docs/USER_GUIDE.md#setup-once-per-machine) for the command. If you forgot `--recurse-submodules`, `git submodule update --init` pulls `data/training` (but still not the lazy NYPL submodules).
 
 ## Where to go next
 
