@@ -75,7 +75,7 @@ _LEARNED_SCORER: str = "learned"
 _YEAR_WINDOW_MIN: int = 0
 _YEAR_WINDOW_MAX: int = 100
 
-_DEFAULT_VAULT_PATH: Path = Path("data/label_vault.jsonl")
+_DEFAULT_VAULT_PATH: Path = Path("data/training/label_vault.jsonl")
 _DEFAULT_POOL_PATH: Path = Path("data/candidates")
 _SWEEP_PREVIEW_STEP: int = 4
 
@@ -661,7 +661,7 @@ def eval_(
 
     Examples:
         pd-matcher eval \\
-            --vault data/label_vault.jsonl \\
+            --vault data/training/label_vault.jsonl \\
             --pool data/candidates \\
             --index caches/cce.lmdb \\
             --scorer learned \\
@@ -740,7 +740,7 @@ def train_scorer(
     Examples:
         pd-matcher train-scorer \\
             --index caches/cce.lmdb \\
-            --vault data/label_vault.jsonl \\
+            --vault data/training/label_vault.jsonl \\
             --pool data/candidates
     """
     _enable_log_file("train-scorer", log_file)

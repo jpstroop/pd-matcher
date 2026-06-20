@@ -27,7 +27,6 @@ from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.label_vault import upsert_entry
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
-from pd_groundtruth.publish_linkage import publish_linkage
 from pd_groundtruth.review.server import serve
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
@@ -55,10 +54,8 @@ _DEFAULT_REVIEW_PORT = 8000
 _DEFAULT_POOL_PATH = Path("data/candidates")
 _DEFAULT_INDEX_PATH = Path("caches/cce.lmdb")
 _DEFAULT_REVIEW_DB_PATH = Path("data/review.db")
-_DEFAULT_VAULT_PATH = Path("data/label_vault.jsonl")
-_DEFAULT_VAULT_MARCS_PATH = Path("data/published/marc.xml")
-_DEFAULT_PUBLISHED_TRAINING_PATH = Path("data/published/training.jsonl")
-_DEFAULT_PUBLISHED_MATCHES_PATH = Path("data/published/matches.jsonl")
+_DEFAULT_VAULT_PATH = Path("data/training/label_vault.jsonl")
+_DEFAULT_VAULT_MARCS_PATH = Path("data/training/marc.xml")
 _LABELER = "jpstroop"
 _LOG_DIR_NAME = "logs"
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -407,38 +404,6 @@ def dump_vault_marcs_command(
         f"(vault_entries={report.vault_entries} "
         f"distinct_marcs={report.distinct_marcs_requested} "
         f"missing={report.marcs_missing})"
-    )
-
-
-@app.command(name="publish-linkage")
-def publish_linkage_command(
-    vault: Annotated[
-        Path,
-        Option("--vault", help="JSONL label vault to reshape for publication."),
-    ] = _DEFAULT_VAULT_PATH,
-    training_out: Annotated[
-        Path,
-        Option(
-            "--training-out",
-            help="Destination JSONL with every adjudicated verdict (match / no_match / unsure).",
-        ),
-    ] = _DEFAULT_PUBLISHED_TRAINING_PATH,
-    matches_out: Annotated[
-        Path,
-        Option("--matches-out", help="Destination JSONL with match rows only."),
-    ] = _DEFAULT_PUBLISHED_MATCHES_PATH,
-    log_file: Annotated[
-        Path | None,
-        Option("--log-file", help="Override the auto-generated log file path."),
-    ] = None,
-) -> None:
-    """Reshape the vault into the published JSONL pair (training + matches-only)."""
-    _configure_logging("publish-linkage", log_file)
-    report = publish_linkage(vault, training_out, matches_out)
-    echo(
-        f"wrote {report.rows_written} rows to {training_out} "
-        f"({report.matches} matches also written to {matches_out}; "
-        f"no_matches={report.no_matches} unsures={report.unsures})"
     )
 
 

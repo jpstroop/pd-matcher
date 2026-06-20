@@ -17,7 +17,7 @@ from pd_matcher.eval.regression import load_baseline
 
 def _params() -> BaselineParams:
     return BaselineParams(
-        vault="data/label_vault.jsonl",
+        vault="data/training/label_vault.jsonl",
         pool="data/candidates",
         year_window=0,
     )
@@ -151,7 +151,7 @@ def test_load_baseline_happy(tmp_path: Path) -> None:
     path.write_text(
         """
         {
-          "params": {"vault": "data/label_vault.jsonl",
+          "params": {"vault": "data/training/label_vault.jsonl",
                      "pool": "data/candidates",
                      "year_window": 0},
           "metrics": {"precision": 0.85, "recall": 0.78, "f1": 0.81,
@@ -167,7 +167,7 @@ def test_load_baseline_happy(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     baseline = load_baseline(path)
-    assert baseline.params.vault == "data/label_vault.jsonl"
+    assert baseline.params.vault == "data/training/label_vault.jsonl"
     assert baseline.metrics.precision == 0.85
     assert baseline.metrics.auc_roc == 0.9
     assert baseline.counts.pairs_evaluated == 300

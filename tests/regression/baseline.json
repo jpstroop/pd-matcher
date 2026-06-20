@@ -1,6 +1,6 @@
 {
   "params": {
-    "vault": "data/label_vault.jsonl",
+    "vault": "data/training/label_vault.jsonl",
     "pool": "data/candidates",
     "year_window": 0
   },
@@ -21,5 +21,5 @@
     "marcs_with_correct_top": 917
   },
   "tolerance": 0.02,
-  "notes": "Vault-driven eval. Pair-level AUC/AP plus per-MARC P/R; gate is precision/recall only on linkage agreement (latest 'match' verdict wins). Generated: vault=data/label_vault.jsonl pool=data/candidates year_window=0."
+  "notes": "Vault-driven eval. Pair-level AUC/AP plus per-MARC P/R; gate is precision/recall only on linkage agreement (latest 'match' verdict wins). Generated: vault=data/training/label_vault.jsonl pool=data/candidates year_window=0."
 }

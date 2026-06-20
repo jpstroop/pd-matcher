@@ -266,7 +266,7 @@ def run_eval(
 
     Args:
         vault_path: Append-only JSONL label vault
-            (``data/label_vault.jsonl``).
+            (``data/training/label_vault.jsonl``).
         pool_path: Root of the gitignored MARC candidate pool
             (``data/candidates``); shards live under
             ``<pool>/<lang>/*.xml``.
