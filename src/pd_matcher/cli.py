@@ -77,6 +77,7 @@ _YEAR_WINDOW_MAX: int = 100
 
 _DEFAULT_VAULT_PATH: Path = Path("data/training/label_vault.jsonl")
 _DEFAULT_POOL_PATH: Path = Path("data/candidates")
+_DEFAULT_MARC_COLLECTION_PATH: Path = Path("data/training/marc.xml")
 _SWEEP_PREVIEW_STEP: int = 4
 
 
@@ -718,9 +719,22 @@ def train_scorer(
         Option("--vault", help="Label vault JSONL path."),
     ] = _DEFAULT_VAULT_PATH,
     pool: Annotated[
+        Path | None,
+        Option(
+            "--pool",
+            help=(
+                "MARC candidate pool root directory (<pool>/<lang>/*.xml). "
+                "Overrides --marc-collection when given."
+            ),
+        ),
+    ] = None,
+    marc_collection: Annotated[
         Path,
-        Option("--pool", help="MARC candidate pool root directory (<pool>/<lang>/*.xml)."),
-    ] = _DEFAULT_POOL_PATH,
+        Option(
+            "--marc-collection",
+            help="Single MARCXML <collection> file of vault MARCs (used when --pool is absent).",
+        ),
+    ] = _DEFAULT_MARC_COLLECTION_PATH,
     out_dir: Annotated[
         Path | None,
         Option("--out-dir", help="Artifact directory (default: the index's parent)."),
@@ -737,7 +751,14 @@ def train_scorer(
     issue #4 model, and writes ``learned_scorer.txt`` + ``learned_scorer.msgpack``
     under ``--out-dir`` (defaulting to the index's parent).
 
+    By default the MARCs are read from the committed training collection
+    (``--marc-collection``, ``data/training/marc.xml``), so a fresh clone with
+    submodules can train without acquiring a candidate pool. Pass ``--pool`` to
+    read from a sharded acquired pool instead.
+
     Examples:
+        pd-matcher train-scorer --index caches/cce.lmdb
+
         pd-matcher train-scorer \\
             --index caches/cce.lmdb \\
             --vault data/training/label_vault.jsonl \\
@@ -746,8 +767,10 @@ def train_scorer(
     _enable_log_file("train-scorer", log_file)
     if not vault.is_file():
         raise _fail(f"--vault does not exist or is not a file: {vault}")
-    if not pool.is_dir():
+    if pool is not None and not pool.is_dir():
         raise _fail(f"--pool does not exist or is not a directory: {pool}")
+    if pool is None and not marc_collection.is_file():
+        raise _fail(f"--marc-collection does not exist or is not a file: {marc_collection}")
     if not index.exists():
         raise _fail(f"--index does not exist: {index}")
     destination = out_dir if out_dir is not None else index.parent
@@ -765,10 +788,11 @@ def train_scorer(
     try:
         matrix = build_training_matrix(
             vault_path=vault,
-            pool_path=pool,
             index_path=index,
             matching_config=matching_config,
             pairing_config=pairing_config,
+            pool_path=pool,
+            marc_collection_path=None if pool is not None else marc_collection,
         )
         trained = train_learned_model(matrix)
     except (OSError, ValueError) as exc:

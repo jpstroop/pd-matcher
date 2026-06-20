@@ -16,6 +16,7 @@ from pd_groundtruth.vault_pair_resolver import IDF_CACHE_NAME
 from pd_groundtruth.vault_pair_resolver import ResolvedVaultPair
 from pd_groundtruth.vault_pair_resolver import ResolveSummary
 from pd_groundtruth.vault_pair_resolver import build_marc_index
+from pd_groundtruth.vault_pair_resolver import build_marc_index_from_collection
 from pd_groundtruth.vault_pair_resolver import iter_pool_shards
 from pd_groundtruth.vault_pair_resolver import make_pair_scorer
 from pd_groundtruth.vault_pair_resolver import resolve_vault_pairs
@@ -42,9 +43,29 @@ _MARCXML_TEMPLATE = (
 )
 
 
+_MARCXML_RECORD = (
+    "<record>"
+    "<leader>00000nam a2200000 a 4500</leader>"
+    '<controlfield tag="001">{control_id}</controlfield>'
+    '<controlfield tag="008">750101s1953    xxu           000 0 eng d</controlfield>'
+    '<datafield tag="245" ind1="0" ind2="0"><subfield code="a">{title}</subfield></datafield>'
+    "</record>"
+)
+
+
 def _write_shard(path: Path, control_id: str, title: str = "A Title") -> None:
     path.write_text(
         _MARCXML_TEMPLATE.format(ns=_MARC_NS, control_id=control_id, title=title),
+        encoding="utf-8",
+    )
+
+
+def _write_collection(path: Path, control_ids: list[str]) -> None:
+    records = "".join(
+        _MARCXML_RECORD.format(control_id=control_id, title="A Title") for control_id in control_ids
+    )
+    path.write_text(
+        f'<collection xmlns="{_MARC_NS}">{records}</collection>',
         encoding="utf-8",
     )
 
@@ -171,6 +192,34 @@ def test_build_marc_index_short_circuits_on_empty_request(tmp_path: Path) -> Non
     pool = tmp_path / "pool"
     pool.mkdir()
     assert build_marc_index(pool, set()) == {}
+
+
+def test_build_marc_index_from_collection_resolves_wanted_ids(tmp_path: Path) -> None:
+    collection = tmp_path / "marc.xml"
+    _write_collection(collection, ["id-1", "id-2", "id-3"])
+    found = build_marc_index_from_collection(collection, {"id-1", "id-3"})
+    assert set(found.keys()) == {"id-1", "id-3"}
+    assert found["id-1"].title == "A Title"
+
+
+def test_build_marc_index_from_collection_returns_partial_when_absent(tmp_path: Path) -> None:
+    collection = tmp_path / "marc.xml"
+    _write_collection(collection, ["id-1"])
+    found = build_marc_index_from_collection(collection, {"id-1", "id-missing"})
+    assert set(found.keys()) == {"id-1"}
+
+
+def test_build_marc_index_from_collection_short_circuits_on_empty_request(tmp_path: Path) -> None:
+    collection = tmp_path / "marc.xml"
+    _write_collection(collection, ["id-1"])
+    assert build_marc_index_from_collection(collection, set()) == {}
+
+
+def test_build_marc_index_from_collection_stops_once_all_resolved(tmp_path: Path) -> None:
+    collection = tmp_path / "marc.xml"
+    _write_collection(collection, ["id-1", "id-2"])
+    found = build_marc_index_from_collection(collection, {"id-1"})
+    assert set(found.keys()) == {"id-1"}
 
 
 def test_resolve_vault_pairs_scores_each_resolvable_entry() -> None:

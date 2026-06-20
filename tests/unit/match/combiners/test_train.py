@@ -86,6 +86,13 @@ def _write_pool(pool_root: Path, control_id: str) -> None:
     )
 
 
+def _write_collection(path: Path, control_id: str) -> None:
+    path.write_text(
+        _MARCXML_PROLOG + _marc_xml(control_id) + _MARCXML_EPILOG,
+        encoding="utf-8",
+    )
+
+
 def _entry(marc_control_id: str, nypl_uuid: str, verdict: str, minute: int) -> VaultEntry:
     return VaultEntry(
         schema=SCHEMA_VERSION,
@@ -194,6 +201,65 @@ def test_build_training_matrix_warns_cce_not_in_index(
         )
     assert matrix.missing_in_index == 1
     assert "cce_not_in_index" in caplog.text
+
+
+def test_build_training_matrix_reads_from_collection(tmp_path: Path) -> None:
+    """A single MARCXML collection is a valid MARC source for training."""
+    index_path = _build_index(tmp_path)
+    collection_path = tmp_path / "marc.xml"
+    _write_collection(collection_path, "marc-aaa")
+    vault_path = tmp_path / "vault.jsonl"
+    _seed(
+        vault_path,
+        (
+            _entry("marc-aaa", "UUID-0001", "match", 0),
+            _entry("marc-aaa", "UUID-0002", "no_match", 1),
+        ),
+    )
+    matrix = build_training_matrix(
+        vault_path=vault_path,
+        index_path=index_path,
+        matching_config=_matching_config(),
+        pairing_config=_pairing_config(),
+        marc_collection_path=collection_path,
+    )
+    assert matrix.x.shape[1] == len(feature_names())
+    assert matrix.n_positive == 1
+    assert matrix.n_negative == 1
+
+
+def test_build_training_matrix_rejects_both_marc_sources(tmp_path: Path) -> None:
+    """Supplying both a pool and a collection is ambiguous and rejected."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, "marc-aaa")
+    collection_path = tmp_path / "marc.xml"
+    _write_collection(collection_path, "marc-aaa")
+    vault_path = tmp_path / "vault.jsonl"
+    _seed(vault_path, (_entry("marc-aaa", "UUID-0001", "match", 0),))
+    with raises(ValueError, match="exactly one of pool_path or marc_collection_path"):
+        build_training_matrix(
+            vault_path=vault_path,
+            index_path=index_path,
+            matching_config=_matching_config(),
+            pairing_config=_pairing_config(),
+            pool_path=pool_path,
+            marc_collection_path=collection_path,
+        )
+
+
+def test_build_training_matrix_rejects_no_marc_source(tmp_path: Path) -> None:
+    """Supplying neither a pool nor a collection is rejected."""
+    index_path = _build_index(tmp_path)
+    vault_path = tmp_path / "vault.jsonl"
+    _seed(vault_path, (_entry("marc-aaa", "UUID-0001", "match", 0),))
+    with raises(ValueError, match="exactly one of pool_path or marc_collection_path"):
+        build_training_matrix(
+            vault_path=vault_path,
+            index_path=index_path,
+            matching_config=_matching_config(),
+            pairing_config=_pairing_config(),
+        )
 
 
 def test_train_learned_model_rejects_single_class(tmp_path: Path) -> None:
