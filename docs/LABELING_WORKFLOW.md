@@ -96,6 +96,10 @@ Vault verdicts pre-apply automatically — no labels are lost. Runtime: ~5–10 
 ### Rebuild the CCE index
 
 ```bash
+# The NYPL CCE submodules are lazy (--recurse-submodules skips them), so fetch
+# them first if you don't already have them locally.
+git submodule update --init --checkout data/nypl-reg data/nypl-ren
+
 pdm run pd-matcher index build \
   --reg-dir data/nypl-reg/xml \
   --ren-dir data/nypl-ren/data \

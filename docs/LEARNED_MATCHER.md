@@ -63,12 +63,15 @@ If you have a full acquired MARC pool (from `pd-groundtruth acquire`), pass `--p
 
 ### Training from a fresh clone
 
-Because the labels and the MARC they reference ship in the `data/training` submodule, you can train from a clean checkout — no `acquire` step:
+Because the labels and the MARC they reference ship in the `data/training` submodule, you can train from a clean checkout — no `acquire` step. The one extra step: the NYPL CCE submodules are lazy, so `--recurse-submodules` doesn't pull them and you fetch them on demand before building the index.
 
 ```bash
 git clone --recurse-submodules https://github.com/jpstroop/pd-matcher
 cd pd-matcher
 pdm install --group ml                   # learned-combiner deps (lightgbm/sklearn)
+
+# Fetch the lazy NYPL CCE submodules (--recurse-submodules skips them):
+git submodule update --init --checkout data/nypl-reg data/nypl-ren
 
 # Build the CCE index from the NYPL submodules:
 pdm run pd-matcher index build \
