@@ -19,6 +19,9 @@ from typer import echo
 
 from pd_groundtruth.acquire import acquire
 from pd_groundtruth.acquire import default_min_year
+from pd_groundtruth.active_learning import ActiveLearningSummary
+from pd_groundtruth.active_learning import run_active_learning
+from pd_groundtruth.active_select import DEFAULT_LANGUAGE_WEIGHTS
 from pd_groundtruth.build_queue import build_queue
 from pd_groundtruth.dump_vault_marcs import dump_vault_marcs
 from pd_groundtruth.enrich_vault import run_enrich
@@ -55,6 +58,8 @@ _DEFAULT_REVIEW_PORT = 8000
 _DEFAULT_POOL_PATH = Path("data/candidates")
 _DEFAULT_INDEX_PATH = Path("caches/cce.lmdb")
 _DEFAULT_REVIEW_DB_PATH = Path("data/review.db")
+_DEFAULT_ACTIVE_DB_PATH = Path("data/active_learning.db")
+_DEFAULT_ACTIVE_TARGET = 1000
 _DEFAULT_VAULT_PATH = Path("data/training/label_vault.jsonl")
 _DEFAULT_VAULT_MARCS_PATH = Path("data/training/marc.xml")
 _LABELER = "jpstroop"
@@ -295,6 +300,149 @@ def build_queue_command(
         f"pairs_written={summary.pairs_written} "
         f"strata=[{strata}]"
     )
+
+
+def _parse_language_weights(values: list[str] | None) -> dict[str, float]:
+    """Parse repeated ``lang=weight`` options into a weights mapping.
+
+    ``None`` or an empty list returns the English-heavy default
+    (:data:`pd_groundtruth.active_select.DEFAULT_LANGUAGE_WEIGHTS`). Each value
+    is ``"<lang>=<weight>"`` (e.g. ``"eng=0.7"``); duplicate languages take the
+    last value.
+
+    Raises:
+        BadParameter: On a malformed token or a non-positive / unparseable
+            weight.
+    """
+    if not values:
+        return dict(DEFAULT_LANGUAGE_WEIGHTS)
+    weights: dict[str, float] = {}
+    for token in values:
+        language, separator, raw = token.partition("=")
+        if not separator or not language:
+            raise BadParameter(f"--weight expects 'lang=weight', got {token!r}")
+        try:
+            weight = float(raw)
+        except ValueError as exc:
+            raise BadParameter(f"--weight: {raw!r} is not a number") from exc
+        if weight <= 0.0:
+            raise BadParameter(f"--weight: {language} weight must be positive, got {weight!r}")
+        weights[language] = weight
+    return weights
+
+
+def _echo_active_summary(summary: ActiveLearningSummary, out: Path) -> None:
+    """Print the per-bucket distribution + disagreement spread for one run."""
+    mode = "(dry-run) " if summary.dry_run else ""
+    plans = " ".join(
+        f"{plan.language}={plan.selected}/{plan.target}" for plan in summary.language_plans
+    )
+    echo(
+        f"{mode}selected={summary.selected} excluded_in_vault={summary.excluded} "
+        f"out_of_scope={summary.out_of_scope} scored={summary.scored} "
+        f"by_language=[{plans}]"
+    )
+    echo(f"{'bucket':<14} {'count':>6} {'min':>7} {'mean':>7} {'max':>7}")
+    echo("-" * 44)
+    for stats in summary.buckets:
+        echo(
+            f"{stats.bucket:<14} {stats.count:>6} "
+            f"{stats.min_disagreement:>7.3f} {stats.mean_disagreement:>7.3f} "
+            f"{stats.max_disagreement:>7.3f}"
+        )
+    if summary.dry_run:
+        echo(f"dry-run: {summary.informative()} informative pairs would be written to {out}")
+    else:
+        echo(f"wrote {summary.written} informative pairs to {out}")
+
+
+@app.command(name="build-active-queue")
+def build_active_queue_command(
+    pool: Annotated[
+        Path,
+        Option("--pool", help="Root dir whose <lang>/*.xml shards form the candidate pool."),
+    ] = _DEFAULT_POOL_PATH,
+    index: Annotated[
+        Path, Option("--index", help="LMDB env produced by `pd-matcher index build`.")
+    ] = _DEFAULT_INDEX_PATH,
+    out: Annotated[
+        Path, Option("--out", help="Destination SQLite review DB for the informative pairs.")
+    ] = _DEFAULT_ACTIVE_DB_PATH,
+    vault: Annotated[
+        Path,
+        Option(
+            "--vault",
+            help="JSONL label vault; its MARCs are excluded from selection.",
+        ),
+    ] = _DEFAULT_VAULT_PATH,
+    target: Annotated[
+        int,
+        Option("--target", help="Number of unseen records to select across all languages."),
+    ] = _DEFAULT_ACTIVE_TARGET,
+    weight: Annotated[
+        list[str] | None,
+        Option(
+            "--weight",
+            help=(
+                "Language selection weight as 'lang=weight' (repeatable). "
+                "Default is English-heavy: eng=0.70, fre/ger/ita/spa=0.075 each."
+            ),
+        ),
+    ] = None,
+    seed: Annotated[int, Option("--seed", help="Seed for the reservoir samplers.")] = _DEFAULT_SEED,
+    dry_run: Annotated[
+        bool,
+        Option(
+            "--dry-run",
+            help="Print the per-bucket distribution but write no DB (preview a run).",
+        ),
+    ] = False,
+    rebuild: Annotated[
+        bool,
+        Option("--rebuild", help="Delete the target --out database before writing (destructive)."),
+    ] = False,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Select unseen records, dual-score them, and queue matcher disagreements.
+
+    Active-learning sibling of ``build-queue`` (issue #81): instead of a
+    stratified sweep, it selects ~``--target`` MARC records NOT already in the
+    vault, scores each with BOTH the weighted-mean and learned matchers over one
+    shared Evidence stream, buckets them by matcher-vs-matcher disagreement, and
+    writes the ``informative`` pairs (committee splits, large same-pick gaps,
+    both-uncertain) into ``--out`` for review via ``pd-groundtruth review``.
+
+    The learned model is required; if its artifact or ``lightgbm`` is missing
+    the run aborts naming ``train-scorer`` / ``pdm install --group ml``. Pass
+    ``--dry-run`` to preview the bucket distribution without writing.
+    """
+    if not dry_run and not rebuild and out.exists():
+        echo(
+            f"active-learning DB at {out} already exists. "
+            f"Pass --rebuild to drop and recreate, or --dry-run to preview only.",
+            err=True,
+        )
+        raise Exit(code=2)
+    if not dry_run and rebuild and out.exists():
+        out.unlink()
+    _configure_logging("build-active-queue", log_file)
+    weights = _parse_language_weights(weight)
+    summary = run_active_learning(
+        pool=pool,
+        index_path=index,
+        out_path=out,
+        vault_path=vault,
+        matching_config=_load_default_matching_config(),
+        pairing_config=_load_default_pairing_config(),
+        weights=weights,
+        target=target,
+        seed=seed,
+        dry_run=dry_run,
+    )
+    _echo_active_summary(summary, out)
 
 
 @app.command(name="review")
