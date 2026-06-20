@@ -57,10 +57,6 @@ BUCKET_ORDER: tuple[str, ...] = (BUCKET_INFORMATIVE, BUCKET_AGREE_HIGH, BUCKET_A
 _HIGH: float = 0.70
 _LOW: float = 0.30
 
-# A "large gap" on the SAME top-1 candidate: the two combiners agree on which
-# CCE is best but their probabilities are this far apart.
-_GAP: float = 0.30
-
 # Candidate retrieval for one MARC: yields ``(cce_record, weighted_scored)``
 # pairs so the full CCE registration travels alongside the score for the queue
 # write. Injected so the scoring policy is testable without an LMDB index (the
