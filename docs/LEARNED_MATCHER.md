@@ -85,10 +85,11 @@ DYLD_LIBRARY_PATH="$(pwd)/.venv/lib/python3.14/site-packages/sklearn/.dylibs:$DY
 pdm run pd-matcher train-scorer --index caches/cce.lmdb
 ```
 
-Defaults: `--vault data/label_vault.jsonl`, `--pool data/candidates`,
-`--out-dir` is the index's parent (`caches/`). It scores every non-`unsure` vault
-pair through the production pipeline, fits the locked model, prints the 5-fold OOF
-AUC, and writes two artifacts:
+Defaults: `--vault data/training/label_vault.jsonl`, MARC records from
+`--marc-collection data/training/marc.xml` (the training-bundle submodule),
+`--out-dir` the index's parent (`caches/`). It scores every non-`unsure` vault
+pair through the production pipeline, fits the locked model, prints the 5-fold
+OOF AUC, and writes two artifacts:
 
 - `caches/learned_scorer.txt` — the LightGBM model
 - `caches/learned_scorer.msgpack` — feature metadata
@@ -97,6 +98,31 @@ These live under `caches/` and are **gitignored** (regenerable, never committed)
 **Retrain whenever the vault grows meaningfully or a scorer's feature set
 changes** — the feature row is part of the model contract, so a scorer change
 makes the on-disk artifact stale.
+
+If you have a full acquired MARC pool (from `pd-groundtruth acquire`), pass
+`--pool data/candidates` to source MARCs from the sharded pool instead of the
+bundled collection; the two sources are mutually exclusive.
+
+### Training from a fresh clone
+
+Because the labels and the MARC they reference ship in the `data/training`
+submodule, you can train from a clean checkout — no `acquire` step:
+
+```bash
+git clone --recurse-submodules https://github.com/jpstroop/pd-matcher
+cd pd-matcher
+pdm install --group ml                   # learned-combiner deps (lightgbm/sklearn)
+
+# Build the CCE index from the NYPL submodules:
+pdm run pd-matcher index build \
+    --reg-dir data/nypl-reg/xml --ren-dir data/nypl-ren/data --out caches/cce.lmdb
+
+pdm run pd-matcher train-scorer --index caches/cce.lmdb
+```
+
+`train-scorer` resolves every vault pair's MARC from `data/training/marc.xml`
+(which holds exactly the MARCs the vault references) and the CCE side from the
+index built off the NYPL submodules — no acquired candidate pool required.
 
 ## Use it
 

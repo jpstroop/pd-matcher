@@ -407,7 +407,7 @@ The Newton iteration solves for `a` and `b` that maximize the log-likelihood of 
 
 A side benefit: thresholds become meaningful. `--min-score 0.70` means "only show me matches with at least 70% probability of being correct" — not "only show me raw scores above 70 vibe points."
 
-If a learned scorer (#4) replaces the weighted mean, the Platt calibrator becomes unnecessary — the learned model produces a probability directly. Until then, calibration is the right place for empirical knowledge of how raw scores relate to truth.
+The learned combiner (`--scorer learned`) produces a probability directly, so it needs no Platt calibrator. The weighted-mean default still benefits from calibration as the empirical map from raw scores to truth — and when no calibrator artifact is fit, its `calibrated` value is simply `raw / 100`.
 
 ---
 
@@ -423,7 +423,7 @@ The single most important design call. The prior project (which this repo is a r
 - Evidence is a frozen struct with named sub-features. A failing scorer returns `skipped=True` instead of a misleading 0.
 - The combiner sees only Evidence — it doesn't know how any score was produced. Swapping the title scorer affects only `title.py` and its tests.
 
-This makes the learned scorer (#4) a drop-in: the LightGBM model reads features from the same Evidence objects the rule-based pipeline produces. No second feature pipeline to maintain.
+This is why the learned combiner is a clean drop-in: the LightGBM model reads features from the same Evidence objects the rule-based pipeline produces. No second feature pipeline to maintain.
 
 ### One class per file
 
@@ -491,7 +491,7 @@ If a future contributor reads this file and asks "why msgspec?", the answer is h
 
 ## 6. Open questions and future work
 
-- **Learned scorer (#4)**: replace the weighted mean + Platt calibrator with a LightGBM model trained on the same Evidence features. Plan calls for an A/B with the current pipeline and a ≥2 F1-point threshold for adoption.
+- **Learned scorer (#4)** — *done.* The LightGBM combiner is built, validated on held-out pair-level separation (it beats the weighted mean), and selectable via `--scorer learned`; see [LEARNED_MATCHER.md](LEARNED_MATCHER.md). The weighted mean remains the zero-dependency default; promoting the learned combiner to the default is a possible future change.
 - **Baselined regression eval (Phase 8)**: built — see §6, "Regression baseline + local gate". The gate is local-only for now; wiring it into CI is deferred until the code is published.
 - **HTML report viewer (Phase 7 follow-up)**: a tiny static-site generator over the CSV that lets a human auditor click into individual matches and see the per-scorer Evidence with its sub-features. Mocked up; not yet built.
 - **Delayed-URAA accession dates**: Cornell's matrix references country-specific Berne / WTO accession dates that replace the 1996 baseline. Phase 5 punts these to `UNKNOWN_INSUFFICIENT_DATA`. Could be tabulated if the corpus contains enough such works to justify it.

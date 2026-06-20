@@ -1,5 +1,14 @@
 # Learned-scorer diagnostic
 
+> **Historical / superseded.** This describes the original *read-only diagnostic*
+> from when the LightGBM model was only a sanity check on the hand-tuned weights
+> (gated on a 1,500–2,500-label corpus it hadn't yet reached). The learned
+> combiner is now a production-capable scorer — built, validated on held-out
+> separation, and selectable via `--scorer learned`. For the current model (what
+> it is, how to train and use it, how to train from the `data/training` bundle),
+> see [LEARNED_MATCHER.md](LEARNED_MATCHER.md). This page is kept for the
+> diagnostic script's provenance.
+
 A periodic ML-style sanity check on the hand-tuned scoring architecture in
 `matching.yaml`. Trains a small LightGBM classifier on the labeled vault as a
 *diagnostic instrument* — never as a production combiner replacement — to

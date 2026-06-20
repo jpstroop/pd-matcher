@@ -45,7 +45,7 @@ pdm install
 pdm run pre-commit install
 ```
 
-The CCE data is pulled in via git submodules under `data/nypl-reg/` and `data/nypl-ren/`. If you forgot `--recurse-submodules`, run `git submodule update --init`.
+Data is pulled in via git submodules: the NYPL-transcribed CCE under `data/nypl-reg/` and `data/nypl-ren/`, and the labeled **training bundle** (the vault + the MARC it references) under `data/training/`. If you forgot `--recurse-submodules`, run `git submodule update --init`.
 
 ## Where to go next
 
