@@ -601,6 +601,28 @@ def test_label_appends_cce_fields_with_nulls_when_no_renewal(
     assert entry.cce_renewal_oreg is None
 
 
+def test_label_stamps_static_cce_facts_and_leaves_scores_none(
+    client: TestClient, vault_path: Path
+) -> None:
+    client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
+    [entry] = list(iter_entries(vault_path))
+    assert entry.reg_year == 1953
+    assert entry.renewal_year == 1968
+    assert entry.was_renewed is True
+    assert entry.scores is None
+    assert entry.matcher_version is None
+
+
+def test_label_renewal_year_none_when_pair_not_renewed(
+    no_renewal_details_client: TestClient, vault_path: Path
+) -> None:
+    no_renewal_details_client.post(
+        "/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False
+    )
+    [entry] = list(iter_entries(vault_path))
+    assert entry.renewal_year is None
+
+
 def test_label_appends_one_line_per_post(client: TestClient, vault_path: Path) -> None:
     client.post("/label", data={"pair_id": "1", "verdict": "match"}, follow_redirects=False)
     after_first = vault_path.read_text(encoding="utf-8")
