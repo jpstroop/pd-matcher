@@ -29,6 +29,7 @@ from numpy.typing import NDArray
 
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.vault_pair_resolver import build_marc_index
+from pd_groundtruth.vault_pair_resolver import build_marc_index_from_collection
 from pd_groundtruth.vault_pair_resolver import make_pair_scorer
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
@@ -110,23 +111,38 @@ class TrainedModel:
 def build_training_matrix(
     *,
     vault_path: Path,
-    pool_path: Path,
     index_path: Path,
     matching_config: MatchingConfig,
     pairing_config: PairingConfig,
+    pool_path: Path | None = None,
+    marc_collection_path: Path | None = None,
 ) -> TrainingMatrix:
     """Resolve and score every trainable vault pair into a feature matrix.
 
     Reuses the same resolution machinery as the eval pass A
     (:func:`make_pair_scorer`, :func:`build_marc_index`) so the rows carry the
     exact Evidence the production matcher would emit. ``unsure`` verdicts are
-    excluded. Pairs whose MARC is absent from the pool or whose CCE is absent
+    excluded. Pairs whose MARC is absent from the source or whose CCE is absent
     from the index are logged and skipped.
+
+    Exactly one MARC source must be supplied. ``pool_path`` reads each vault
+    MARC from the sharded acquired pool (``<pool>/<lang>/*.xml``);
+    ``marc_collection_path`` reads them from a single MARCXML ``<collection>``
+    file (the committed ``data/training/marc.xml``), which lets a fresh clone
+    train without acquiring a candidate pool.
+
+    Raises:
+        ValueError: If neither or both MARC sources are supplied.
     """
     raw = current_entries(vault_path)
     kept = [entry for entry in raw.values() if entry.verdict != _VERDICT_UNSURE]
     needed_marc_ids = {entry.marc_control_id for entry in kept}
-    marc_by_id = build_marc_index(pool_path, needed_marc_ids)
+    if pool_path is not None and marc_collection_path is None:
+        marc_by_id = build_marc_index(pool_path, needed_marc_ids)
+    elif pool_path is None and marc_collection_path is not None:
+        marc_by_id = build_marc_index_from_collection(marc_collection_path, needed_marc_ids)
+    else:
+        raise ValueError("provide exactly one of pool_path or marc_collection_path")
     pairings = compile_pairings(pairing_config)
     scoring_config = _scoring_config(matching_config)
 

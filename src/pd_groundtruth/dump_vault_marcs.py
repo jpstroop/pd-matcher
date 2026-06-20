@@ -3,9 +3,8 @@
 The published dataset's MARC half: for every distinct ``marc_control_id``
 in the label vault, copy the matching ``<record>`` element from
 ``data/candidates/`` into a single MARCXML file. The default destination is
-``data/published/marc.xml`` — a path inside the in-tree clone of the
-separate ``jpstroop/cce-marc-linkage`` data repository (gitignored from the
-code repo). The output is the durable bibliographic context for the
+``data/training/marc.xml`` — a path inside the ``cce-marc-linkage`` data
+submodule. The output is the durable bibliographic context for the
 labeled linkage so downstream consumers can reproduce or refine the
 dataset without access to Princeton's full bibdata dump.
 

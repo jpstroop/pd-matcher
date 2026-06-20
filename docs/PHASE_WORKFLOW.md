@@ -138,12 +138,12 @@ So every change ships as an isolated phase branch with its own regenerated basel
                       │
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 11. REGENERATE PUBLISHED ARTIFACTS                          │
+│ 11. REGENERATE PUBLISHED DATASET                           │
 │     (if vault grew meaningfully; batchable)                 │
 │    pdm run pd-groundtruth dump-vault-marcs                  │
-│    pdm run pd-groundtruth publish-linkage                   │
-│    cd data/published && git add -A && git commit && \\      │
-│      git push origin main                                   │
+│    cd data/training && git add label_vault.jsonl marc.xml \\ │
+│      && git commit && git push origin main && cd -         │
+│    git add data/training && git commit  # bump pointer     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -160,9 +160,9 @@ So every change ships as an isolated phase branch with its own regenerated basel
 ## Invariants
 
 - **Never amend.** New commits only; a failing pre-commit hook means re-stage and commit again, not `--amend`.
-- **Never touch `data/label_vault.jsonl` during branch ops.** The vault is append-only and labeled by hand; commit it separately on `main` only. Run `git stash list` after any agent delegation to verify nothing stashed it.
+- **Never touch `data/training/label_vault.jsonl` during branch ops.** The vault is append-only and labeled by hand; it lives in the `data/training` submodule and is committed there, never on a code phase branch. Run `git stash list` after any agent delegation to verify nothing stashed it.
 - **Two branches both moved `baseline.json` → regenerate post-merge on main.** Neither branch's baseline is the combined-effect baseline; trusting one of them publishes a misleading number.
-- **Vault parity for cross-branch diffs.** When the labeled corpus has grown on `main` since the branch was created, copy `main`'s vault into the branch's working tree before dumping (`git show main:data/label_vault.jsonl > data/label_vault.jsonl`), dump, then restore (`git checkout HEAD -- data/label_vault.jsonl`). The diff script requires identical vault rows on both sides to be meaningful.
+- **Vault parity for cross-branch diffs.** The vault lives in the `data/training` submodule, so vault parity is a submodule operation. When the labeled corpus has grown since the branch's submodule pointer, sync the submodule to the same vault commit on both sides (`cd data/training && git checkout <commit> -- label_vault.jsonl`), dump, then restore (`git checkout HEAD -- label_vault.jsonl`). The diff script requires identical vault rows on both sides to be meaningful.
 
 ## When to skip the diff
 
@@ -178,28 +178,27 @@ After merging any branch that changes how the matcher scores (new pairings, new 
 pdm run pd-groundtruth build-queue --rebuild
 ```
 
-`--rebuild` drops the existing `data/review.db` and re-runs scoring against the current pool and matcher. Vault verdicts are preserved automatically — every entry in `data/label_vault.jsonl` is pre-applied into the freshly-built queue, so pairs you've already labeled stay labeled.
+`--rebuild` drops the existing `data/review.db` and re-runs scoring against the current pool and matcher. Vault verdicts are preserved automatically — every entry in `data/training/label_vault.jsonl` is pre-applied into the freshly-built queue, so pairs you've already labeled stay labeled.
 
 **Batching.** The rebuild is the same cost regardless of how many scoring branches merged since the last one, so defer it until a cluster of related branches has all landed. The previous status snapshot in the resume-here memory tracks when a rebuild is pending; check it before labeling.
 
 Skip the rebuild when the change cannot affect scoring (docs, tests, scripts, refactors).
 
-## After vault changes: regenerate published artifacts
+## After vault changes: regenerate the published dataset
 
-The published linkage dataset lives in a separate repo at [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage), cloned in-tree at the gitignored `data/published/` path. Three files make up the published set:
+The published dataset lives in a separate repo at [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage), pinned in-tree as the `data/training` submodule. Two files make up the published set:
 
-- `marc.xml` — MARCXML of every MARC referenced by the vault.
-- `training.jsonl` — every adjudicated row (`match`, `no_match`, `unsure`). The training input for a learned matcher.
-- `matches.jsonl` — same schema, filtered to `match` rows only. The curated linkage table.
+- `label_vault.jsonl` — every adjudicated row (`match`, `no_match`, `unsure`) with the labeler's notes. The vault is the source of truth *and* the training table. The labeling UI writes here directly, so it is always current.
+- `marc.xml` — MARCXML of every MARC referenced by the vault, regenerated by `dump-vault-marcs`.
 
-All three are regenerated by command:
+Only `marc.xml` needs regenerating (the vault is already current); then commit + push both files inside the submodule and bump the parent's pointer:
 
 ```bash
-pdm run pd-groundtruth dump-vault-marcs
-pdm run pd-groundtruth publish-linkage
-cd data/published && git add -A && git commit && git push origin main
+pdm run pd-groundtruth dump-vault-marcs        # writes data/training/marc.xml
+cd data/training && git add label_vault.jsonl marc.xml && git commit && git push origin main && cd -
+git add data/training && git commit            # bump submodule pointer
 ```
 
-Run after a labeling session that added enough verdicts to be worth re-publishing. Both commands are read-only against the code repo's vault and pool; they touch only `data/published/`. Like the queue rebuild, this step is **batchable** — defer until a cluster of label additions or scoring changes has accumulated.
+Run after a labeling session that added enough verdicts to be worth re-publishing. `dump-vault-marcs` is read-only against the code repo's vault and pool. Like the queue rebuild, this step is **batchable** — defer until a cluster of label additions has accumulated. See [USER_GUIDE.md](USER_GUIDE.md#publishing-the-training-bundle) for detail.
 
-**When to skip.** A change that doesn't touch the vault and doesn't change matcher scoring doesn't need a regeneration. Pure code refactors, doc edits, and test changes leave all three published files byte-identical to their last commits.
+**When to skip.** A change that doesn't touch the vault doesn't need a regeneration. Pure code refactors, doc edits, and test changes leave both published files byte-identical to their last commits.

@@ -88,6 +88,21 @@ def _write_pool(pool_root: Path) -> None:
     )
 
 
+def _write_collection(collection_path: Path) -> None:
+    """Write a single MARCXML <collection> file mirroring UUID-0001."""
+    body = _marc_record_xml(
+        control_id="marc-aaa",
+        title="A study of widgets",
+        author="Smith, John",
+        publisher="Acme Press",
+        year="1940",
+    )
+    collection_path.write_text(
+        _MARCXML_PROLOG + body + _MARCXML_EPILOG,
+        encoding="utf-8",
+    )
+
+
 def _write_vault(vault_path: Path) -> None:
     """Append two entries to ``vault_path``: one match + one no_match."""
     match_entry = VaultEntry(
@@ -1379,6 +1394,87 @@ def test_train_scorer_writes_artifact(tmp_path: Path) -> None:
     assert "5-fold OOF AUC" in result.stdout
     assert (out_dir / "learned_scorer.txt").is_file()
     assert (out_dir / "learned_scorer.msgpack").is_file()
+
+
+def test_train_scorer_trains_from_marc_collection(tmp_path: Path) -> None:
+    """Without ``--pool`` the MARCs resolve from ``--marc-collection``."""
+    index_path = _build_index(tmp_path)
+    collection_path = tmp_path / "marc.xml"
+    _write_collection(collection_path)
+    vault_path = tmp_path / "vault.jsonl"
+    _write_trainable_vault(vault_path)
+    out_dir = tmp_path / "model"
+    result = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(index_path),
+            "--vault",
+            str(vault_path),
+            "--marc-collection",
+            str(collection_path),
+            "--out-dir",
+            str(out_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (out_dir / "learned_scorer.txt").is_file()
+    assert (out_dir / "learned_scorer.msgpack").is_file()
+
+
+def test_train_scorer_defaults_to_bundled_collection() -> None:
+    """The default MARC source is the committed training collection path."""
+    from pd_matcher.cli import _DEFAULT_MARC_COLLECTION_PATH
+
+    assert Path("data/training/marc.xml") == _DEFAULT_MARC_COLLECTION_PATH
+
+
+def test_train_scorer_pool_overrides_collection(tmp_path: Path) -> None:
+    """When ``--pool`` is given it is used even though a collection exists."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path)
+    collection_path = tmp_path / "missing-marc.xml"
+    vault_path = tmp_path / "vault.jsonl"
+    _write_trainable_vault(vault_path)
+    result = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(index_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+            "--marc-collection",
+            str(collection_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (index_path.parent / "learned_scorer.msgpack").is_file()
+
+
+def test_train_scorer_rejects_missing_collection(tmp_path: Path) -> None:
+    """``train-scorer`` exits 1 when the MARC collection file is absent."""
+    index_path = _build_index(tmp_path)
+    vault_path = tmp_path / "vault.jsonl"
+    _write_trainable_vault(vault_path)
+    result = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(index_path),
+            "--vault",
+            str(vault_path),
+            "--marc-collection",
+            str(tmp_path / "missing-marc.xml"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--marc-collection" in result.output
 
 
 def test_train_scorer_defaults_out_dir_to_index_parent(tmp_path: Path) -> None:

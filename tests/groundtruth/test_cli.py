@@ -110,7 +110,7 @@ def test_build_queue_command_defaults(tmp_path: Path) -> None:
     assert kwargs["workers"] == 8
     assert kwargs["sample_per_lang"] == 1500
     assert kwargs["budget"].caps == default_budget().caps
-    assert kwargs["vault_path"] == Path("data/label_vault.jsonl")
+    assert kwargs["vault_path"] == Path("data/training/label_vault.jsonl")
     assert "pairs_written=5" in result.stdout
     assert "eng/ge90=3" in result.stdout
 

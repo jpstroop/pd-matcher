@@ -3,9 +3,9 @@
 The vault is the *source of truth* for ground-truth labels.
 :class:`~pd_groundtruth.review_db.ReviewDb` is a transient working queue: it is
 rebuilt each time ``acquire`` and ``build-queue`` re-run (for example after a
-new filter lands). The vault, ``data/label_vault.jsonl``, lives in the repo and is
-committed to git so the human labor invested in adjudicating pairs survives
-those rebuilds.
+new filter lands). The vault, ``data/training/label_vault.jsonl``, lives in the
+``cce-marc-linkage`` submodule and is committed to git so the human labor invested
+in adjudicating pairs survives those rebuilds.
 
 The file is an upsert table: exactly one :class:`VaultEntry` per
 ``(marc_control_id, nypl_uuid)`` pair, encoded with

@@ -100,6 +100,36 @@ def build_marc_index(pool: Path, wanted: set[str]) -> dict[str, MarcRecord]:
     return found
 
 
+def build_marc_index_from_collection(path: Path, wanted: set[str]) -> dict[str, MarcRecord]:
+    """Return a ``control_id -> MarcRecord`` map for ``wanted`` ids in a collection.
+
+    Reads a single MARCXML ``<collection>`` file (such as the bundled
+    ``data/training/marc.xml``) with the same :func:`iter_marc_records` parser
+    the sharded pool path uses, keeping only records whose ``control_id`` is in
+    ``wanted``. This lets ``train-scorer`` resolve every vault MARC from the
+    committed training collection without an acquired candidate pool, since the
+    collection contains exactly every MARC the vault references by construction.
+
+    Args:
+        path: A single MARCXML file wrapping one ``<collection>`` of records.
+        wanted: The MARC control ids to materialize.
+
+    Returns:
+        A dict with one entry per resolved id; missing ids are simply absent.
+    """
+    if not wanted:
+        return {}
+    found: dict[str, MarcRecord] = {}
+    remaining = set(wanted)
+    for record in iter_marc_records(path):
+        if record.control_id in remaining:
+            found[record.control_id] = record
+            remaining.discard(record.control_id)
+            if not remaining:
+                return found
+    return found
+
+
 def make_pair_scorer(
     *,
     matching_config: MatchingConfig,
@@ -199,6 +229,7 @@ __all__ = [
     "ResolvedVaultPair",
     "ScorePairFn",
     "build_marc_index",
+    "build_marc_index_from_collection",
     "iter_pool_shards",
     "make_pair_scorer",
     "resolve_vault_pairs",

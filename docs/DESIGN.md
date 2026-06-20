@@ -10,7 +10,9 @@ This document is for developers and reviewers who need to understand the codebas
 
 The tool answers one question, at scale:
 
-> Given a MARC bibliographic record for a book, what is the most likely matching entry in the U.S. Copyright Office's Catalog of Copyright Entries, and what is the resulting public-domain status under U.S. law as of today?
+> Given a MARC bibliographic record for a book, what is the most likely matching entry (registration, and optional renewal) in the U.S. Copyright Office's Catalog of Copyright Entries?
+
+The tool is a **linkage producer, not a public-domain determiner**: it outputs verified MARC↔CCE links and the evidence behind them. Downstream consumers apply their own copyright reasoning (Cornell's matrix, the URAA restoration rules, country-of-origin analysis) to those links.
 
 The answer is non-trivial because:
 
@@ -19,19 +21,19 @@ The answer is non-trivial because:
 - Titles, authors, and publishers drift between sources (transcription errors, abbreviation conventions, embedded edition info, OCR artifacts).
 - The corpus is multilingual — Spanish, French, German, Italian, with diacritics and language-specific stopword and stemming rules.
 - Years drift by 1–2 between publication, registration, and renewal.
-- U.S. copyright law itself is a piecewise function over publication year, registration status, renewal status, country of origin, and the current date (the "moving wall").
 
-The codebase decomposes this into seven layers, each independently testable and reviewable:
+(Whether a matched work is in the public domain — a piecewise function over publication year, registration status, renewal status, country of origin, and the current "moving wall" date — is the consumer's determination to make, not this tool's. We produce the link and surface the registration/renewal evidence it rests on.)
+
+The codebase decomposes this into six layers, each independently testable and reviewable:
 
 1. **Parsing** (`parsers/`) — streaming readers for MARCXML, CCE registration XML, CCE renewal TSV (the CCE files in their NYPL-transcribed form).
 2. **Normalization** (`normalize/`) — Unicode/diacritic stripping, multilingual stopword removal, Snowball stemming, multilingual number/ordinal/abbreviation expansion.
 3. **Indexing** (`index/`) — LMDB-backed persistent index with year-bucket blocking and a precomputed registration↔renewal join.
 4. **Scoring** (`match/scorers/`) — pure-function scorers, one per signal type, each emitting structured `Evidence`.
-5. **Combination + calibration** (`match/combiners/`) — weighted-mean combiner plus a Platt-scaled probability calibrator.
-6. **Copyright assessment** (`copyright/`) — typed `Facts`, predicate primitives, pragmatic-assumption wrappers, and a YAML-driven rule engine implementing Cornell's matrix.
-7. **Parallel execution** (`workers/`) — spawn-based multiprocessing harness with producer/worker/writer/reporter roles.
+5. **Combination + calibration** (`match/combiners/`) — weighted-mean (default, uncalibrated) and learned (LightGBM, self-calibrated) combiners, plus an optional Platt probability calibrator for the weighted mean.
+6. **Parallel execution** (`workers/`) — spawn-based multiprocessing harness with producer/worker/writer/reporter roles.
 
-A typer-based CLI (`cli.py`) is the thin wrapper that wires these layers into the four user-facing commands.
+A typer-based CLI (`cli.py`) is the thin wrapper that wires these layers into the user-facing commands.
 
 ---
 
@@ -106,7 +108,7 @@ The matching pipeline uses `multiprocessing.get_context("spawn")` unconditionall
 The exact process topology for one `run_match` invocation:
 
 - **Main**: orchestrates everything, hosts the producer (streams MARC), hosts the reporter thread (aggregates stats).
-- **N worker processes** (spawn): each opens LMDB read-only, loads the IDF + calibrator + ruleset, then consumes batches of MARC records from the input queue.
+- **N worker processes** (spawn): each opens LMDB read-only, loads the IDF table (plus the Platt calibrator if `caches/calibrator.msgpack` exists, and the LightGBM model when `--scorer learned`), then consumes batches of MARC records from the input queue.
 - **1 writer process** (spawn): drains the output queue, writes CSV.
 
 Two `multiprocessing.Queue` instances thread the work:
@@ -150,7 +152,7 @@ The end-to-end flow for one MARC record:
 MarcRecord
     │
     ▼
-lookup.candidates_for_year(year, window=2)        # year-bucket blocking
+lookup.candidates_for_year(year, window=0)        # year-bucket blocking (exact year by default)
     │
     ▼
 for each candidate (typically 100s, not millions):
@@ -161,32 +163,26 @@ for each candidate (typically 100s, not millions):
     │      Evidence = scorer.score(marc_field, candidate_field, ctx)
     │
     │  combiner.combine(evidence_list)
-    │      └─ raw = Σ(weight_i × evidence_i.normalized) / Σ(weight_i)  over present evidence
-    │      └─ calibrated = sigmoid(a × raw + b)                        Platt scaling
+    │      └─ weighted_mean (default):
+    │           raw = Σ(weight_i × evidence_i.normalized) / Σ(weight_i)  over present evidence
+    │           calibrated = raw / 100                                   uncalibrated pass-through (default)
+    │           calibrated = sigmoid(a × raw + b)                        only when a Platt calibrator artifact is present
+    │      └─ learned (--scorer learned): LightGBM emits a calibrated probability directly
     │
     ▼
 sort candidates by calibrated desc, keep best + top-3 alternates
     │
     ▼
 MatchResult(best, alternates, candidates_considered)
-    │
-    ▼
-build_facts(marc, MatchResult, today)
-    │
-    ▼
-copyright.assess(facts, ruleset)
-    │      └─ in_pd_by_age short-circuit first (moving wall)
-    │      └─ otherwise: walk ordered rules, first match wins
-    │
-    ▼
-CopyrightAssessment(status, matched_rule_name, explanation, assumptions)
 ```
+
+The output is the ranked linkage. Copyright status is not computed here — a downstream consumer reads `MatchResult` (the matched registration, optional renewal, and per-field evidence) and applies its own copyright reasoning.
 
 ### Step 1: Blocking by year
 
-A naïve nested-loop pass is 2.17M registrations × M MARC records = quadratic and infeasible. The CCE index has a `reg_by_year` sub-DB mapping each year to a list of UUIDs. The matcher pulls `[year - window, year + window]` (default window = 2, so 5 buckets) and dedupes. For a record published in 1955, that's a few thousand candidates instead of 2.17M.
+A naïve nested-loop pass is 2.17M registrations × M MARC records = quadratic and infeasible. The CCE index has a `reg_by_year` sub-DB mapping each year to a list of UUIDs. The matcher pulls `[year - window, year + window]` and dedupes. The default window is **0** (the exact publication year only), so for a record published in 1955 the matcher considers just that year's bucket instead of all 2.17M registrations.
 
-The window of ±2 is chosen empirically: publication, copyright registration, and renewal dates drift among the three sources but rarely by more than 2 years. Wider windows multiply candidate counts (and runtime) without improving recall on the ground-truth set.
+The exact-year default is chosen empirically (see [studies/year-window.md](studies/year-window.md)): on the ground-truth set, window 0 beats ±1/±2/±3 on F1 and is roughly 7× faster. Publication, registration, and renewal years do drift among the three sources, but the renewal join and the year recorded in the index absorb most of that, so widening the window adds candidates (and runtime) without improving recall. The window remains configurable in `matching.yaml` for catalogs with noisier years.
 
 ### Step 2: Per-field scoring
 
@@ -254,78 +250,19 @@ The combiner is a plain weighted mean over **present** (non-skipped) Evidence. D
 
 A perfect LCCN match in isolation contributes `0.10 × 100 = 10` to the raw score, not 100. **Hard identifiers do not short-circuit.** In Phase 4 we considered making `lccn.decisive = true` short-circuit to confidence 1.0; we walked that back when the user pointed out that LCCN and ISBN have ~5% transcription error rates in this corpus. The `decisive` flag is still on Evidence for audit and ML feature inspection, but the combiner is a plain weighted mean.
 
-The Platt calibrator then maps the raw score to a probability:
+By default the weighted-mean combiner runs **uncalibrated**: `calibrated = raw / 100`, a linear pass-through. Mapping the raw score to a genuine probability is optional and requires a separately-fit Platt calibrator artifact at `caches/calibrator.msgpack`. When that file is present the pipeline loads it and maps each raw score through the fitted sigmoid:
 
 ```
 calibrated = 1 / (1 + exp(-(a × raw + b)))
 ```
 
-`a` and `b` are fit by Newton iteration over the project's 19,970 ground-truth positives plus 5–10× as many negatives sampled from the same year-buckets. The calibrator is trained once (during index build or first match) and persisted as `caches/calibrator.msgpack`. The published `combined_score` in the CSV is `calibrated × 100`.
+The artifact is **not** built during index or match — nothing in the engine fits it automatically. It is fit out-of-band by `scripts/fit_calibrator.py`, which scores the resolved labeled-vault pairs with the production combiner and partitions the raw scores into positives (`verdict=match`) and negatives (`verdict=no_match`), then fits `a` and `b` by Newton iteration. See `docs/findings/fit_calibrator_2026-06-07.md` for the most recent fit and its outcome. The published `combined_score` in the CSV is `calibrated × 100`.
 
-### Step 5: Copyright assessment
+### What happens to the match
 
-The assessment engine consumes a `Facts` struct (built from the MarcRecord + MatchResult + today's date) and produces a `CopyrightAssessment`. The flow:
+The pipeline stops at the ranked `MatchResult`. There is no copyright-assessment stage in this codebase: an earlier design embedded a YAML rule engine (`copyright/`, `assess()`, `CopyrightAssessment`) that applied Cornell's matrix, but it was removed — the project is a **linkage producer, not a public-domain determiner**. The published output is the verified MARC↔CCE link plus the registration/renewal evidence behind it. A consumer decides public-domain status by reading that linkage and applying its own copyright reasoning (Cornell's matrix, the URAA restoration rules, country-of-origin analysis, the current moving wall).
 
-```python
-def assess(facts, ruleset):
-    # 1. Moving-wall short-circuit FIRST.
-    if in_pd_by_age(facts.pub_year, facts.today):
-        return CopyrightAssessment(status=PD_BY_AGE_PRE_95_YEARS, ...)
-
-    # 2. Walk ordered rules. First match wins.
-    for rule in ruleset.rules:
-        if all_predicates_match(rule.when, facts):
-            return CopyrightAssessment(
-                status=CopyrightStatus[rule.then],
-                matched_rule_name=rule.name,
-                explanation=rule.explanation,
-                assumptions=accumulated_assumptions,
-            )
-
-    # 3. Fallback.
-    return CopyrightAssessment(status=UNKNOWN_NO_RULE_MATCHED, ...)
-```
-
-The moving wall is dynamic: `in_pd_by_age` returns `pub_year < today.year - 95`. As of project init (2026-05-18), that's anything published 1930 or earlier. On 2027-01-01 it'll auto-advance to "1931 or earlier" with zero code changes. Statutory year cutoffs inside the YAML rules (1931-1963, 1964-1977, etc.) are correctly static — those come from the 1976 Act and don't move.
-
-Each rule in `copyright_rules.yaml` is a structured PredicateCall list:
-
-```yaml
-- name: registered_1931_1963_not_renewed
-  when:
-    - predicate: published_between
-      args: [1931, 1963]
-    - predicate: was_registered
-    - predicate: was_renewed
-      negate: true
-  then: PD_REGISTERED_NOT_RENEWED
-  explanation: >
-    Registered work, regardless of country of first publication, that was
-    not renewed during its initial 28-year term. The copyright lapsed at
-    the end of that term and the work is in the public domain.
-  assumptions: ["Assumed notice: registered work"]
-```
-
-Predicates are pure functions over Facts. They live in two modules:
-
-- `predicates.py` — `(facts, *args) -> bool`. Used when the rule simply needs an objective check.
-- `inference.py` — `(facts) -> tuple[bool, str | None]`. Used when the rule needs a pragmatic assumption. The returned assumption string is accumulated into the assessment's `assumptions` tuple so a human auditor can see what the engine took on faith.
-
-Three pragmatic assumptions are wired in:
-
-1. **Registered work → assume bore copyright notice.** The CCE registration itself implies the cataloger claimed copyright via the standard notice convention.
-2. **Publisher matches GPO / agency patterns → US-government work.** A small regex tests `publisher_text` for "u.s. government printing office", "government printing office", "department of", "bureau of", etc.
-3. **Foreign work pre-1923 → assume in source-country PD by 1996.** The URAA's 1996 baseline almost certainly held for any foreign work whose author was already dead 50+ years by then.
-
-The user can disable all pragmatic assumptions with the (currently config-only) `enable_assumptions = False`, useful for sensitivity analysis.
-
-#### Foreign-registered short-circuit
-
-A subtle but important point: Cornell's Category 2 header is *"Works Registered **or** First Published in the US."* Foreign authors could (and frequently did) register works with the U.S. Copyright Office to obtain U.S. copyright protection — pre-Berne it was often required. Those registrations appear in the CCE.
-
-If a MARC record matches a CCE registration, the work was U.S.-registered, and the standard U.S.-formality rules apply regardless of where the book was first published. Phase 5's first cut got this wrong (it forced `country_is_us` on every Category 2 rule, which routed matched foreign works through Category 3's URAA logic — but URAA only restores works that *failed* U.S. formalities, which a registered work by definition did not). The Phase 5 corrections branch fixed it: Category 2's registration-gated rules apply to any registered work; Category 3's URAA rules explicitly require `NOT was_registered`.
-
-The status enum naming reflects this: `PD_REGISTERED_NOT_RENEWED` (not `PD_US_PUB_REGISTERED_NOT_RENEWED`) — it applies to a foreign-registered work just as well as a U.S.-published one.
+One nuance that consumers should carry over: Cornell's Category 2 header is *"Works Registered **or** First Published in the US."* Foreign authors could (and frequently did) register works with the U.S. Copyright Office, and those registrations appear in the CCE. So a MARC record that matches a CCE registration was U.S.-registered, and the standard U.S.-formality rules apply regardless of where the book was first published — URAA restoration (Category 3) only applies to works that *failed* U.S. formalities, which a registered work by definition did not. This is exactly the kind of reasoning the linkage enables and deliberately leaves to the consumer.
 
 ---
 
@@ -369,13 +306,13 @@ In effect it rewards shared tokens while ignoring order. "Co." vs "Company" stil
 
 ### Year as a soft signal (year scorer)
 
-The blocker enforces ±2 years; within that window we want closer years to outweigh further ones. The year scorer is a linear penalty:
+The blocker bounds the year delta to `± year_window`; within that window we want closer years to outweigh further ones. The year scorer is a linear penalty:
 
 ```
 score = max(0, 100 - |Δyear| × 25)
 ```
 
-So `Δyear = 0` → 100, `Δyear = 1` → 75, `Δyear = 2` → 50. Beyond 2 the blocker excludes the candidate; we never see deltas > 2 in practice.
+So `Δyear = 0` → 100, `Δyear = 1` → 75, `Δyear = 2` → 50. With the shipped default `year_window = 0` (exact year, see Step 1) the only candidates the blocker admits already have `Δyear = 0`, so the scorer effectively always sees a perfect year; the penalty exists for catalogs that widen the window in `matching.yaml`.
 
 ### LCCN exact match (LCCN scorer)
 
@@ -393,21 +330,23 @@ The most negative-signal-positive scorer. If both sides have an extractable edit
 
 If both sides have no edition info, `skipped=True`. We don't penalize missing-on-both-sides.
 
-### Platt scaling
+### Platt scaling (optional, off by default)
 
-The raw weighted-mean score is between 0 and 100. It's a heuristic — there's no reason a raw 75 means "75% likely to be a real match." Platt scaling fixes that.
+The raw weighted-mean score is between 0 and 100. It's a heuristic — there's no reason a raw 75 means "75% likely to be a real match." Platt scaling is the optional step that would turn that heuristic into a probability, but the default `weighted_mean` combiner ships **without** a calibrator: with no `caches/calibrator.msgpack` present, `calibrated = raw / 100`, a linear pass-through. The rest of this section describes the calibrator you get only if you fit one.
 
-Given a labeled training set of pairs (raw score, is-match boolean), we fit a logistic regression:
+Platt scaling fits a logistic regression to labeled `(raw score, is-match boolean)` pairs:
 
 ```
 P(is_match | raw) = 1 / (1 + exp(-(a × raw + b)))
 ```
 
-The Newton iteration solves for `a` and `b` that maximize the log-likelihood of the training labels. We use the 19,970 ground-truth positives plus sampled hard negatives (other CCE records in the same year-bucket as a positive). With sufficient training data, the calibrator output is well-calibrated: P=0.75 means 75% of pairs predicted at 0.75 are actually matches.
+The training data is the **labeled vault**, not any precomputed registration↔renewal join: `scripts/fit_calibrator.py` resolves each non-`unsure` vault entry to its (MARC, CCE) pair, scores it with the production combiner, and partitions the resulting raw scores into positives (`verdict=match`) and negatives (`verdict=no_match`). A Newton iteration then solves for the `a` and `b` that maximize the log-likelihood of those labels. With enough well-separated training data the output is well-calibrated: P=0.75 means 75% of pairs predicted at 0.75 are actually matches.
 
-A side benefit: thresholds become meaningful. `--min-score 0.70` means "only show me matches with at least 70% probability of being correct" — not "only show me raw scores above 70 vibe points."
+A side benefit, when a calibrator is in place: thresholds become meaningful. `--min-score 0.70` means "only show me matches with at least 70% probability of being correct" — not "only show me raw scores above 70 vibe points."
 
-If a learned scorer (#4) replaces the weighted mean, the Platt calibrator becomes unnecessary — the learned model produces a probability directly. Until then, calibration is the right place for empirical knowledge of how raw scores relate to truth.
+In practice the most recent fit was **not** landed. The vault's negatives skew high (the labeler tends to surface borderline cases), so the sigmoid suppressed the mid-band and cost recall; see `docs/findings/fit_calibrator_2026-06-07.md` for the full numbers and the decision to keep running with the linear pass-through. The findings doc is the source of any concrete count or coefficient — they drift, so we don't pin them here.
+
+The learned combiner (`--scorer learned`) produces a probability directly from the LightGBM model, so it needs no Platt step at all.
 
 ---
 
@@ -423,7 +362,7 @@ The single most important design call. The prior project (which this repo is a r
 - Evidence is a frozen struct with named sub-features. A failing scorer returns `skipped=True` instead of a misleading 0.
 - The combiner sees only Evidence — it doesn't know how any score was produced. Swapping the title scorer affects only `title.py` and its tests.
 
-This makes the learned scorer (#4) a drop-in: the LightGBM model reads features from the same Evidence objects the rule-based pipeline produces. No second feature pipeline to maintain.
+This is why the learned combiner is a clean drop-in: the LightGBM model reads features from the same Evidence objects the rule-based pipeline produces. No second feature pipeline to maintain.
 
 ### One class per file
 
@@ -463,23 +402,28 @@ Line coverage proves code *ran*; it says nothing about whether the matcher still
 
 The baseline lives at `tests/regression/baseline.json` (schema: `pd_matcher.eval.regression.Baseline`). It records the eval invocation params (vault path, MARC pool path, `year_window`), the locked per-MARC linkage precision/recall/F1, the threshold-independent AUC and average precision, the row counts (pairs evaluated by label, MARCs evaluated, MARCs with a top pick, MARCs with the correct top pick), and the tolerance. The gate (`tests/regression/test_regression.py`) re-runs the same eval against the current vault and LMDB index and calls `compare(...)`: it **fails if precision OR recall drops more than 2 percentage points below the baseline**. Improvements, and drops within tolerance, pass. F1 is reported alongside (fully determined by P and R). AUC and average precision are reported but not currently gated — informational while the negative-label corpus is small.
 
-The gate is local-only — **CI is deferred** until the code is published. It is excluded from the default `pdm run pytest` run (and from coverage) by the `regression` marker, and it **skips gracefully** when `data/label_vault.jsonl`, `data/candidates/`, or `caches/cce.lmdb` is absent, so a fresh clone without the built index still passes the default suite. All of `regression.py` reaches 100% coverage through fast unit tests that fabricate `EvalReport` instances, never touching the index.
+The gate is local-only — **CI is deferred** until the code is published. It is excluded from the default `pdm run pytest` run (and from coverage) by the `regression` marker, and it **skips gracefully** when `data/training/label_vault.jsonl`, `data/candidates/`, or `caches/cce.lmdb` is absent, so a fresh clone without the built index still passes the default suite. All of `regression.py` reaches 100% coverage through fast unit tests that fabricate `EvalReport` instances, never touching the index.
 
-Run the gate with `pdm run regression` (re-runs the full vault-driven eval; ~10 minutes for the current ~1000-entry vault). Refresh the baseline after an intentional pipeline change with `pdm run regression-baseline`, which reruns the eval and rewrites the JSON.
+Run the gate with `pdm run regression` (re-runs the full vault-driven eval; ~10 minutes for the current ~2,000-entry vault). Refresh the baseline after an intentional pipeline change with `pdm run regression-baseline`, which reruns the eval and rewrites the JSON.
 
 The gate alone is necessary but not sufficient — precision and recall can move by a few thousandths and conceal individual flips. The full per-branch shipping flow, including the per-pair diff against `main` that surfaces those flips, is documented in [PHASE_WORKFLOW.md](PHASE_WORKFLOW.md).
 
 Two caveats. **AUC and average precision are reported but not gated**: locking them requires more `no_match` labels than the vault currently carries — the threshold-sweep precision numbers are noisy at small negative-sample sizes, so a strict gate would cry wolf. Bias labeling toward the `below_sample` band to firm them up. And **the eval drops entries gracefully when their MARC is missing from the pool** (data drift after a pool rebuild); a few drops per run is normal, but a large drop count signals the pool's composition shifted and is worth investigating before trusting the metrics.
 
-### Code repo vs data repo: published artifacts live elsewhere
+### Code repo vs data repo: the training bundle is a submodule
 
-The code repo (`jpstroop/pd-matcher`) tracks code, tests, the live working vault, the regression baseline, and the NYPL submodules. It does **not** track the published consumer-facing artifacts. Those live in a separate repository at [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage) — a CC0-licensed dataset repo containing the MARCXML dump (`marc.xml`) and the reshaped linkage JSONL pair (`training.jsonl` + `matches.jsonl`).
+The code repo (`jpstroop/pd-matcher`) tracks code, tests, the regression baseline, and the NYPL submodules. It does **not** track the labeled data directly. That lives in a separate repository at [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage) — a CC0-licensed dataset repo pulled in-tree as the `data/training` submodule, pinned to a specific commit. The submodule holds exactly two files:
+
+- `label_vault.jsonl` — the vault: every adjudicated verdict with the labeler's notes. The labeling UI writes here directly, so it is always current. This is the source of truth *and* the training labels.
+- `marc.xml` — MARCXML of every MARC the vault references, regenerated by `dump-vault-marcs` (its default `--out`), so the pairs can be re-scored without the full candidate pool.
+
+There is no reshaped/filtered table and no separate publish command: a frozen matches list is only valid for one catalog, and the vault *is* the training table.
 
 The split is deliberate. The two repos have different audiences (developers vs. data consumers), different update cadences (per-feature vs. per-labeling-session), and different size trajectories (the code is bounded; the data grows with labeling effort). Bundling them would penalize one audience for the other's churn and bloat a code-only clone with data the matcher doesn't read.
 
-The connection between the two is loose. The data repo is cloned in-tree at the gitignored path `data/published/`, which is the default `--out` for `dump-vault-marcs` and `publish-linkage`. Anyone running a regeneration commits and pushes from inside that directory directly; the parent repo doesn't notice. The matcher's tests, the regression baseline, and the labeling UI never touch `data/published/`.
+Because the vault lives in the submodule, publishing is ordinary submodule hygiene: refresh `marc.xml` with `dump-vault-marcs`, commit + push both files inside `data/training`, then bump the parent repo's submodule pointer. The end-to-end commands are in [USER_GUIDE.md](USER_GUIDE.md#publishing-the-training-bundle).
 
-The live vault stays in the code repo specifically because it's tightly coupled to the regression baseline (locked metrics depend on specific vault contents) and to the labeling UI's write path. Moving it would double the per-label workflow and create a footgun around baseline reproducibility. Only the *derived* publishable artifacts split out.
+The regression baseline is pinned to the submodule's vault commit — the locked metrics depend on specific vault contents — so a baseline regeneration and a vault publish move together. The matcher's matching path and the live labeling UI both read the vault straight from `data/training/`.
 
 ### DESIGN.md and git history as the durable design record
 
@@ -491,8 +435,8 @@ If a future contributor reads this file and asks "why msgspec?", the answer is h
 
 ## 6. Open questions and future work
 
-- **Learned scorer (#4)**: replace the weighted mean + Platt calibrator with a LightGBM model trained on the same Evidence features. Plan calls for an A/B with the current pipeline and a ≥2 F1-point threshold for adoption.
-- **Baselined regression eval (Phase 8)**: built — see §6, "Regression baseline + local gate". The gate is local-only for now; wiring it into CI is deferred until the code is published.
+- **Learned scorer (#4)** — *done.* The LightGBM combiner is built, validated on held-out pair-level separation (it beats the weighted mean), and selectable via `--scorer learned`; see [LEARNED_MATCHER.md](LEARNED_MATCHER.md). The weighted mean remains the zero-dependency default; promoting the learned combiner to the default is a possible future change.
+- **Baselined regression eval (Phase 8)**: built — see §5, "Regression baseline + local gate". The gate is local-only for now; wiring it into CI is deferred until the code is published.
 - **HTML report viewer (Phase 7 follow-up)**: a tiny static-site generator over the CSV that lets a human auditor click into individual matches and see the per-scorer Evidence with its sub-features. Mocked up; not yet built.
-- **Delayed-URAA accession dates**: Cornell's matrix references country-specific Berne / WTO accession dates that replace the 1996 baseline. Phase 5 punts these to `UNKNOWN_INSUFFICIENT_DATA`. Could be tabulated if the corpus contains enough such works to justify it.
+- **Country-of-origin signals for consumers**: country-of-origin and the URAA's country-specific Berne / WTO accession dates matter to a consumer applying copyright reasoning to the linkage, but the matcher does not compute them. Surfacing the relevant MARC fields (e.g. place/country of publication) more explicitly in the output could make that downstream reasoning easier; not currently done.
 - **MARC field richness**: the parser currently extracts ~15 MARC fields. Adding 6xx (subject), 5xx (notes) could improve title disambiguation in the IDF-weighted Jaccard, at the cost of more noisy tokens.

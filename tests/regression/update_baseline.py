@@ -26,7 +26,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _INDEX_PATH = _REPO_ROOT / "caches" / "cce.lmdb"
 _BASELINE_PATH = Path(__file__).resolve().parent / "baseline.json"
 
-_VAULT = "data/label_vault.jsonl"
+_VAULT = "data/training/label_vault.jsonl"
 _POOL = "data/candidates"
 _YEAR_WINDOW = 0
 _TOLERANCE = 0.02
