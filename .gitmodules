@@ -4,3 +4,6 @@
 [submodule "data/nypl-reg"]
 	path = data/nypl-reg
 	url = https://github.com/NYPL/catalog_of_copyright_entries_project.git
+[submodule "data/training"]
+	path = data/training
+	url = https://github.com/jpstroop/cce-marc-linkage

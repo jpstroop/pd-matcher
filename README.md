@@ -12,13 +12,13 @@ Library catalogs use a different format: **MARC** (MAchine-Readable Cataloging).
 
 These two corpora describe the same underlying works but were never designed to link to each other. ISBNs barely existed during the CCE period. LCCNs appear in many MARC records but not the CCE side. Titles, authors, publishers, and years drift between sources (transcription errors, abbreviation conventions, OCR garbles, edition variants). Matching them is fuzzy work.
 
-**The long-term goal**: a learned matcher — a gradient-boosted model (LightGBM) trained on verified pairs — that replaces the current hand-tuned scoring weights and can do this matching across many institutions' catalogs, not just Princeton's. Building it requires a labeled training set of confirmed (match / no_match / unsure) pairs across the full score range. **This project produces both: the labeled training set and the learned matcher that consumes it.** The current matcher (weighted-mean combiner + Platt calibration) is the bootstrap — it surfaces candidates for human verification, and the resulting vault feeds the learned successor.
+**The long-term goal**: a learned matcher — a gradient-boosted model (LightGBM) trained on verified pairs — that outperforms hand-tuned scoring weights and can do this matching across many institutions' catalogs, not just Princeton's. Building it requires a labeled training set of confirmed (match / no_match / unsure) pairs across the full score range. **This project produces both: the labeled training set and the learned matcher that consumes it.** That learned combiner is now built and validated — it beats the weighted-mean baseline on held-out pair-level separation (see [docs/LEARNED_MATCHER.md](docs/LEARNED_MATCHER.md)). The weighted-mean combiner remains the zero-dependency default that bootstraps labeling: it surfaces candidates for human verification, and every verdict grows the vault the learned matcher trains on.
 
 ## What this project is
 
 A two-CLI pipeline:
 
-- **`pd-matcher`** — proposes candidate `(MARC record, CCE registration, optional CCE renewal)` triples with per-field scores and a calibrated confidence. Today the combiner is a weighted mean over per-field scorers; the LightGBM learned combiner is in progress under `pd-matcher train-scorer` and tracked at [#4](https://github.com/jpstroop/pd-matcher/issues/4).
+- **`pd-matcher`** — proposes candidate `(MARC record, CCE registration, optional CCE renewal)` triples with per-field scores and a confidence. The **default** combiner is a weighted mean over per-field scorers (no extra dependencies; optionally Platt-calibrated). A **LightGBM learned combiner** is also built and selectable with `--scorer learned`: train it with `pd-matcher train-scorer` (needs the optional `ml` extra), and it emits a calibrated match probability directly. It outperforms the weighted mean on held-out separation — see [docs/LEARNED_MATCHER.md](docs/LEARNED_MATCHER.md).
 - **`pd-groundtruth`** — turns those proposals into a labeled corpus. It samples candidates across the score range, serves a local labeling UI, and persists every human verdict to `data/label_vault.jsonl` — the vault, source of truth.
 
 The matcher's role is **candidate surfacing**, not direct publishing. Every published row is human-verified. The matcher's mistakes only matter for labeling throughput, not output quality.
@@ -32,7 +32,7 @@ This project does not decide public-domain status. Consumers apply whatever copy
 
 ## Status
 
-Pre-1.0. Single institution today (Princeton MARC against the NYPL-transcribed CCE). The matcher achieves ~99% precision and ~99% recall against the current labeled vault; the labeled vault is the bottleneck on calibration and training-set size. The labeling subsystem is single-user and local; multi-user labeling behind OAuth is tracked at [GitHub #34](https://github.com/jpstroop/pd-matcher/issues/34).
+Pre-1.0. Single institution today (Princeton MARC against the NYPL-transcribed CCE). Top-1 linkage precision/recall against the labeled vault is high (~99%), but that metric is in-sample and saturated; the operative measure now is pair-level **separation** — whether a score threshold can auto-decide a pair without a human. On a (deliberately hard) held-out sample the learned combiner reaches ROC-AUC ≈ 0.95 against the weighted mean's ≈ 0.94. The labeled vault (~2,000 verified pairs) is the bottleneck on training-set size and triage thresholds. The labeling subsystem is single-user and local; multi-user labeling behind OAuth is tracked at [GitHub #34](https://github.com/jpstroop/pd-matcher/issues/34).
 
 ## Install
 
@@ -55,6 +55,7 @@ The CCE data is pulled in via git submodules under `data/nypl-reg/` and `data/ny
 | Label pairs | [docs/LABELING_WORKFLOW.md](docs/LABELING_WORKFLOW.md) (operational) + [docs/LABELING_GUIDE.md](docs/LABELING_GUIDE.md) (decision rules) |
 | Understand the matching algorithm | [docs/DESIGN.md](docs/DESIGN.md) |
 | Understand candidate retrieval vs scoring | [docs/MATCHING_ARCHITECTURE.md](docs/MATCHING_ARCHITECTURE.md) |
+| Train and use the learned (LightGBM) matcher | [docs/LEARNED_MATCHER.md](docs/LEARNED_MATCHER.md) |
 | Ship a code change | [docs/PHASE_WORKFLOW.md](docs/PHASE_WORKFLOW.md) |
 | Look up a term | [docs/GLOSSARY.md](docs/GLOSSARY.md) |
 | Read past experiments | [docs/studies/](docs/studies/) (committed studies) and [docs/findings/](docs/findings/) (durable diagnostic records) |
