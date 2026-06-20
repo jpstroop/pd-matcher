@@ -32,6 +32,14 @@ recurring rationale patterns the labeler used to type into ``note``
 vocabulary is fixed in code via the :data:`CategoryKey` ``Literal`` type;
 msgspec rejects unknown keys at decode. The default is the empty tuple,
 so v4 data still decodes via the v5 struct.
+
+Schema 6 adds machine-derived enrichment fields backfilled by the
+``enrich-vault`` command: ``reg_year`` and ``renewal_year`` (the CCE
+registration and renewal years), ``was_renewed`` (whether a renewal joined
+the registration), a :class:`MatcherScores` pair of matcher confidences, and
+the ``matcher_version`` that produced those scores. Every new field defaults
+to ``None`` so schema-5 entries still decode via the v6 struct; the command
+only ADDS derived data and never alters a human-entered field.
 """
 
 from collections.abc import Iterator
@@ -45,7 +53,7 @@ from msgspec.json import encode as json_encode
 
 from pd_matcher.models import MarcRecord
 
-SCHEMA_VERSION: int = 5
+SCHEMA_VERSION: int = 6
 
 CategoryKey = Literal[
     "marc_whole_cce_part",
@@ -64,6 +72,22 @@ class MarcIdentifiers(Struct, frozen=True, forbid_unknown_fields=True):
     lccn: str | None
     oclc: str | None
     isbns: tuple[str, ...]
+
+
+class MatcherScores(Struct, frozen=True, forbid_unknown_fields=True):
+    """Both matchers' confidence in the pair, as recorded by ``enrich-vault``.
+
+    Each value is a confidence in ``[0.0, 1.0]`` where higher means more
+    confident the pair is a true match, rounded to 4 decimals. The two are
+    independently scaled and need NOT share a derivation: ``weighted_mean`` is
+    the weighted-mean combiner's raw score divided by 100, while ``learned`` is
+    the LightGBM combiner's calibrated probability. Both are only meaningful
+    relative to ``1.0``, not to each other. ``learned`` is ``None`` when no
+    learned-model artifact was available at enrichment time.
+    """
+
+    weighted_mean: float | None = None
+    learned: float | None = None
 
 
 class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
@@ -104,6 +128,16 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     extended by appending new keys to that type, which is forward-compat
     for old data (which has empty tuples) but not backward-compat for
     new keys read by old code.
+
+    Schema 6 adds five machine-derived fields the ``enrich-vault`` command
+    backfills, all defaulting to ``None`` so schema-5 entries decode cleanly:
+
+    * ``reg_year`` — the CCE registration year.
+    * ``renewal_year`` — the renewal-recording year, present only when a
+      renewal joined the registration.
+    * ``was_renewed`` — ``True`` when a renewal joined this registration.
+    * ``scores`` — both matchers' confidence (:class:`MatcherScores`).
+    * ``matcher_version`` — the matcher build that produced ``scores``.
     """
 
     schema: int
@@ -118,6 +152,11 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     cce_renewal_id: str | None = None
     cce_renewal_oreg: str | None = None
     categories: tuple[CategoryKey, ...] = ()
+    reg_year: int | None = None
+    renewal_year: int | None = None
+    was_renewed: bool | None = None
+    scores: MatcherScores | None = None
+    matcher_version: str | None = None
 
 
 def upsert_entry(path: Path, entry: VaultEntry) -> None:
@@ -201,6 +240,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "CategoryKey",
     "MarcIdentifiers",
+    "MatcherScores",
     "VaultEntry",
     "current_entries",
     "extract_marc_identifiers",

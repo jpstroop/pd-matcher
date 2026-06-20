@@ -21,6 +21,7 @@ from pd_groundtruth.acquire import acquire
 from pd_groundtruth.acquire import default_min_year
 from pd_groundtruth.build_queue import build_queue
 from pd_groundtruth.dump_vault_marcs import dump_vault_marcs
+from pd_groundtruth.enrich_vault import run_enrich
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
@@ -556,3 +557,68 @@ def migrate_vault_v5_command(
     _configure_logging("migrate-vault-v5", log_file)
     report = migrate_vault_v5(vault)
     echo(f"migrated {report.total_entries} entries; bumped {report.migrated} to schema 5")
+
+
+@app.command(name="enrich-vault")
+def enrich_vault_command(
+    vault: Annotated[
+        Path,
+        Option("--vault", help="JSONL label vault to enrich in place."),
+    ] = _DEFAULT_VAULT_PATH,
+    index: Annotated[
+        Path, Option("--index", help="LMDB env produced by `pd-matcher index build`.")
+    ] = _DEFAULT_INDEX_PATH,
+    marc_collection: Annotated[
+        Path,
+        Option(
+            "--marc-collection",
+            help="Single MARCXML <collection> of vault MARCs (used when --pool is absent).",
+        ),
+    ] = _DEFAULT_VAULT_MARCS_PATH,
+    pool: Annotated[
+        Path | None,
+        Option(
+            "--pool",
+            help=(
+                "Root dir whose <lang>/*.xml shards form the candidate pool. "
+                "Mutually exclusive with --marc-collection."
+            ),
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        Option("--dry-run", help="Compute and report the enrichment without writing the vault."),
+    ] = False,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Backfill schema-6 machine-derived fields onto every vault entry.
+
+    For each entry, resolves the MARC and CCE registration, copies the CCE-side
+    ``reg_year`` / ``was_renewed`` / ``renewal_year``, scores the pair through
+    both matcher combiners over one shared Evidence stream, and stamps the
+    producing ``matcher_version``. Human-entered fields are preserved verbatim;
+    the enriched vault is written atomically at schema 6. Pass ``--dry-run`` to
+    report the counts without writing. By default the MARCs are read from the
+    committed training collection (``--marc-collection``); pass ``--pool`` to
+    read from a sharded acquired pool instead.
+    """
+    _configure_logging("enrich-vault", log_file)
+    report = run_enrich(
+        vault_path=vault,
+        index_path=index,
+        matching_config=_load_default_matching_config(),
+        pairing_config=_load_default_pairing_config(),
+        pool_path=pool,
+        marc_collection_path=None if pool is not None else marc_collection,
+        dry_run=dry_run,
+    )
+    mode = "(dry-run) " if dry_run else ""
+    echo(
+        f"{mode}enriched {report.enriched}/{report.total_entries} entries; "
+        f"learned_scored={report.learned_scored}; "
+        f"{report.missing_in_pool} MARC records not found in pool; "
+        f"{report.missing_in_index} CCE records not found in index"
+    )

@@ -7,6 +7,7 @@ from pytest import raises
 
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MarcIdentifiers
+from pd_groundtruth.label_vault import MatcherScores
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import extract_marc_identifiers
@@ -208,9 +209,9 @@ def test_extract_marc_identifiers_handles_missing_identifiers() -> None:
     assert identifiers.isbns == ()
 
 
-def test_schema_version_is_five() -> None:
-    """New vault writes use schema 5 (adds the ``categories`` tuple)."""
-    assert SCHEMA_VERSION == 5
+def test_schema_version_is_six() -> None:
+    """New vault writes use schema 6 (adds the enrichment fields)."""
+    assert SCHEMA_VERSION == 6
 
 
 def test_legacy_schema_entries_with_old_fields_reject_decode(tmp_path: Path) -> None:
@@ -330,3 +331,77 @@ def test_schema_4_entry_decodes_with_empty_categories(tmp_path: Path) -> None:
     [entry] = list(iter_entries(path))
     assert entry.schema == 4
     assert entry.categories == ()
+
+
+def test_matcher_scores_default_to_none() -> None:
+    """A freshly constructed ``MatcherScores`` has both confidences unset."""
+    scores = MatcherScores()
+    assert scores.weighted_mean is None
+    assert scores.learned is None
+
+
+def test_default_enrichment_fields_are_none() -> None:
+    """A freshly constructed schema-6 entry has all derived fields ``None``."""
+    entry = _entry()
+    assert entry.reg_year is None
+    assert entry.renewal_year is None
+    assert entry.was_renewed is None
+    assert entry.scores is None
+    assert entry.matcher_version is None
+
+
+def test_round_trip_preserves_enrichment_fields(tmp_path: Path) -> None:
+    """The schema-6 derived fields survive encode/decode through the vault file."""
+    path = tmp_path / "vault.jsonl"
+    entry = VaultEntry(
+        schema=SCHEMA_VERSION,
+        marc_control_id="ctrl-1",
+        nypl_uuid="uuid-1",
+        verdict="match",
+        note=None,
+        labeled_at="2026-06-20T00:00:00+00:00",
+        labeler="jpstroop",
+        marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+        reg_year=1953,
+        renewal_year=1981,
+        was_renewed=True,
+        scores=MatcherScores(weighted_mean=0.8421, learned=0.9133),
+        matcher_version="abc1234-dirty",
+    )
+    upsert_entry(path, entry)
+    [read_back] = list(iter_entries(path))
+    assert read_back == entry
+    assert read_back.scores is not None
+    assert read_back.scores.weighted_mean == 0.8421
+    assert read_back.scores.learned == 0.9133
+
+
+def test_schema_5_entry_decodes_with_none_enrichment_fields(tmp_path: Path) -> None:
+    """Forward-compat: a schema-5 line decodes with ``None`` enrichment defaults."""
+    path = tmp_path / "vault.jsonl"
+    path.write_text(
+        '{"schema":5,"marc_control_id":"a","nypl_uuid":"u","verdict":"match",'
+        '"note":null,"labeled_at":"2026-06-01T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]},'
+        '"cce_regnum":"A1","cce_renewal_id":null,"cce_renewal_oreg":null,"categories":[]}\n',
+        encoding="utf-8",
+    )
+    [entry] = list(iter_entries(path))
+    assert entry.schema == 5
+    assert entry.reg_year is None
+    assert entry.scores is None
+    assert entry.matcher_version is None
+
+
+def test_matcher_scores_rejects_unknown_field(tmp_path: Path) -> None:
+    """msgspec rejects unexpected keys inside the nested ``scores`` struct."""
+    path = tmp_path / "vault.jsonl"
+    path.write_text(
+        '{"schema":6,"marc_control_id":"a","nypl_uuid":"u","verdict":"match",'
+        '"note":null,"labeled_at":"2026-06-01T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]},'
+        '"scores":{"weighted_mean":0.5,"bogus":1.0}}\n',
+        encoding="utf-8",
+    )
+    with raises(Exception, match=r"bogus|scores"):
+        list(iter_entries(path))

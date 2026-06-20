@@ -8,7 +8,6 @@ from msgspec.json import decode as json_decode
 from typer.testing import CliRunner
 
 from pd_groundtruth.cli import app
-from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import iter_entries
 from pd_groundtruth.vault_migration import migrate_vault_v3
 from pd_groundtruth.vault_migration import migrate_vault_v4
@@ -572,7 +571,7 @@ def test_v5_migrates_v4_vault_to_schema_5_with_empty_categories(tmp_path: Path) 
     assert report.total_entries == 2
     assert report.migrated == 2
     entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
-    assert entries["a"].schema == SCHEMA_VERSION == 5
+    assert entries["a"].schema == 5
     assert entries["a"].categories == ()
     assert entries["b"].categories == ()
     # Pre-existing v4 fields are preserved.
