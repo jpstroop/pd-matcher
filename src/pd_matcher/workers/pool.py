@@ -1,7 +1,7 @@
 """Public entry point for Phase 6's spawn-based worker pool.
 
 ``run_match`` is the single function the CLI calls to match every MARC
-record in a file against the indexed CCE corpus and emit one CSV row per
+record in a file against the indexed CCE corpus and emit one JSONL record per
 record. It owns the orchestration: it spawns workers and one writer,
 runs the producer inline in main, drives a reporter thread, hands a
 shared :class:`multiprocessing.Event` to every party so SIGINT drains
@@ -35,8 +35,8 @@ from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.prepare import iter_prepared_records
 from pd_matcher.models import MarcRecord
-from pd_matcher.output.csv_writer import CsvResultWriter
-from pd_matcher.output.csv_writer import ResultWriter
+from pd_matcher.output.jsonl_writer import JsonlResultWriter
+from pd_matcher.output.jsonl_writer import ResultWriter
 from pd_matcher.parsers.marc import iter_marc_records
 from pd_matcher.workers.events import ShutdownEvent
 from pd_matcher.workers.events import encode_stats_event
@@ -99,9 +99,9 @@ def _default_workers() -> int:
     return max(1, cpus - 1)
 
 
-def _build_csv_writer(path: Path) -> ResultWriter:
-    """Construct the default CSV writer."""
-    return CsvResultWriter(path)
+def _build_jsonl_writer(path: Path) -> ResultWriter:
+    """Construct the default JSONL writer."""
+    return JsonlResultWriter(path)
 
 
 def _spawn_workers(
@@ -271,7 +271,7 @@ def run_match(
     workers: int | None = None,
     batch_size: int = _DEFAULT_BATCH_SIZE,
     queue_maxsize: int | None = None,
-    writer_factory: WriterFactory = _build_csv_writer,
+    writer_factory: WriterFactory = _build_jsonl_writer,
     report_interval_seconds: float = _DEFAULT_REPORT_INTERVAL_SECONDS,
     verbosity: int = 0,
     log_level: str = "INFO",
@@ -295,7 +295,7 @@ def run_match(
             Threaded into the reporter to enable percent/ETA; ``None`` omits
             both gracefully (the typical ``--marc`` case).
         index_path: LMDB env directory produced by ``pd-matcher index build``.
-        output_path: Destination CSV path.
+        output_path: Destination JSONL path.
         matching_config: Loaded :class:`MatchingConfig`.
         pairing_config: Loaded :class:`PairingConfig`; each worker compiles
             it into :class:`CompiledPairings` once at init.
@@ -309,8 +309,8 @@ def run_match(
         workers: Number of worker processes. ``None`` uses ``cpu_count - 1``.
         batch_size: MARC records per IPC batch.
         queue_maxsize: Bound on the input queue. ``None`` derives ``workers * 4``.
-        writer_factory: Factory producing the per-row CSV writer. Defaults
-            to :class:`CsvResultWriter`.
+        writer_factory: Factory producing the per-record JSONL writer. Defaults
+            to :class:`JsonlResultWriter`.
         report_interval_seconds: Reporter cadence.
         verbosity: ``0`` aggregate-only; ``1`` adds per-worker heartbeats;
             ``2`` adds per-record hit lines. Forwarded to each worker.

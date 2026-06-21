@@ -1,19 +1,29 @@
 """Tests for :mod:`pd_matcher.workers.writer`."""
 
 from collections.abc import Callable
-from csv import DictReader
 from itertools import count
 from pathlib import Path
 
+from msgspec.json import decode as json_decode
+
 from pd_matcher.match.result import MatchResult
 from pd_matcher.models import MarcRecord
-from pd_matcher.output.csv_writer import CsvResultWriter
+from pd_matcher.output.jsonl_writer import JsonlResultWriter
 from pd_matcher.workers.events import WriterHeartbeat
 from pd_matcher.workers.events import decode_stats_event
 from pd_matcher.workers.messages import WorkerOutput
 from pd_matcher.workers.messages import encode_worker_output
 from pd_matcher.workers.writer import run_writer_loop
 from pd_matcher.workers.writer import writer_main
+
+
+def _read_records(path: Path) -> list[dict[str, str]]:
+    """Decode each non-empty JSONL line into a record dict."""
+    return [
+        json_decode(line, type=dict[str, str])
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
 
 
 def _make_payload(control_id: str) -> bytes:
@@ -41,8 +51,8 @@ def _build_get(blobs: list[bytes | None]) -> Callable[[], bytes | None]:
     return get
 
 
-def test_writer_main_writes_csv_to_disk(tmp_path: Path) -> None:
-    path = tmp_path / "out.csv"
+def test_writer_main_writes_jsonl_to_disk(tmp_path: Path) -> None:
+    path = tmp_path / "out.jsonl"
     blobs: list[bytes | None] = [
         _make_payload("m-1"),
         _make_payload("m-2"),
@@ -52,21 +62,21 @@ def test_writer_main_writes_csv_to_disk(tmp_path: Path) -> None:
     stats: list[bytes] = []
     written = writer_main(
         output_path=path,
-        writer_factory=CsvResultWriter,
+        writer_factory=JsonlResultWriter,
         output_get=_build_get(blobs),
         stats_put=stats.append,
         is_shutdown=lambda: False,
     )
     assert written == 3
-    rows = list(DictReader(path.open(encoding="utf-8")))
-    assert [row["marc_id"] for row in rows] == ["m-1", "m-2", "m-3"]
+    records = _read_records(path)
+    assert [record["marc_id"] for record in records] == ["m-1", "m-2", "m-3"]
     final = decode_stats_event(stats[-1])
     assert isinstance(final, WriterHeartbeat)
     assert final.records_written == 3
 
 
 def test_run_writer_loop_emits_periodic_heartbeats(tmp_path: Path) -> None:
-    path = tmp_path / "out.csv"
+    path = tmp_path / "out.jsonl"
     blobs: list[bytes | None] = [
         _make_payload("m-1"),
         _make_payload("m-2"),
@@ -75,7 +85,7 @@ def test_run_writer_loop_emits_periodic_heartbeats(tmp_path: Path) -> None:
     ]
     stats: list[bytes] = []
     ticks = count(0, step=10)
-    with CsvResultWriter(path) as writer:
+    with JsonlResultWriter(path) as writer:
         written = run_writer_loop(
             writer=writer,
             output_get=_build_get(blobs),
@@ -96,14 +106,14 @@ def test_run_writer_loop_emits_periodic_heartbeats(tmp_path: Path) -> None:
 
 def test_run_writer_loop_breaks_when_shutdown_flips(tmp_path: Path) -> None:
     """A flipped shutdown flag terminates the loop after the next write."""
-    path = tmp_path / "out.csv"
+    path = tmp_path / "out.jsonl"
     blobs: list[bytes | None] = [
         _make_payload("m-1"),
         _make_payload("m-2"),
         _make_payload("m-3"),
     ]
     stats: list[bytes] = []
-    with CsvResultWriter(path) as writer:
+    with JsonlResultWriter(path) as writer:
         written = run_writer_loop(
             writer=writer,
             output_get=_build_get(blobs),
@@ -111,18 +121,17 @@ def test_run_writer_loop_breaks_when_shutdown_flips(tmp_path: Path) -> None:
             is_shutdown=lambda: True,
             heartbeat_interval_seconds=5.0,
         )
-    with path.open(encoding="utf-8") as fp:
-        rows = list(DictReader(fp))
+    records = _read_records(path)
     assert written == 1
-    assert len(rows) == 1
+    assert len(records) == 1
 
 
 def test_run_writer_loop_breaks_on_poison_pill_before_shutdown(tmp_path: Path) -> None:
     """An explicit ``None`` sentinel terminates the loop even when no shutdown is set."""
-    path = tmp_path / "out.csv"
+    path = tmp_path / "out.jsonl"
     blobs: list[bytes | None] = [None]
     stats: list[bytes] = []
-    with CsvResultWriter(path) as writer:
+    with JsonlResultWriter(path) as writer:
         written = run_writer_loop(
             writer=writer,
             output_get=_build_get(blobs),

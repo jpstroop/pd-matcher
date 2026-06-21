@@ -2,10 +2,10 @@
 
 Stands up the tiny LMDB index, runs the producer/worker/writer pipeline
 under a real spawn context with two worker processes, and asserts that
-the resulting CSV has one row per MARC record in the fixture.
+the resulting JSONL has one record per MARC record in the fixture.
 """
 
-from csv import DictReader
+from json import loads
 from pathlib import Path
 
 from pd_matcher.config.loader import load_pairing_config
@@ -41,7 +41,7 @@ def _build_index_and_idf(tmp_path: Path) -> Path:
     return out_path
 
 
-def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
+def test_run_match_emits_one_record_per_input_record(tmp_path: Path) -> None:
     index_path = _build_index_and_idf(tmp_path)
     with NyplIndexLookup(index_path) as lookup:
         idf = build_idf_table(lookup)
@@ -49,7 +49,7 @@ def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
         publisher_idf = build_publisher_idf_table(lookup)
     marc_path = _FIXTURES / "tiny.marcxml"
     expected_records = sum(1 for _ in iter_marc_records(marc_path))
-    output_path = tmp_path / "results.csv"
+    output_path = tmp_path / "results.jsonl"
     config = MatchingConfig(
         title_weight=0.50,
         author_weight=0.20,
@@ -77,10 +77,9 @@ def test_run_match_emits_one_row_per_input_record(tmp_path: Path) -> None:
         batch_size=2,
         report_interval_seconds=0.05,
     )
-    with output_path.open(encoding="utf-8") as fp:
-        rows = list(DictReader(fp))
+    records = [loads(line) for line in output_path.read_text(encoding="utf-8").splitlines() if line]
     assert report.records_processed == expected_records
     assert report.records_written == expected_records
     assert report.records_enqueued == expected_records
-    assert len(rows) == expected_records
+    assert len(records) == expected_records
     assert report.interrupted is False

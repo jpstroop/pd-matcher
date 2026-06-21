@@ -2,7 +2,7 @@
 
 Workers encode one :class:`WorkerOutput` per processed MARC record and
 push it on the output queue; the writer process decodes the same struct
-and hands it to a :class:`pd_matcher.output.csv_writer.ResultWriter`.
+and hands it to a :class:`pd_matcher.output.jsonl_writer.ResultWriter`.
 
 Keeping the on-wire payload as a single msgspec Struct lets us add audit
 fields (matched NYPL UUID, year buckets considered, etc.) without

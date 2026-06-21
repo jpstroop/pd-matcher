@@ -1,1 +1,1 @@
-"""Output writers (CSV, future HTML)."""
+"""Output writers (JSONL, future HTML)."""

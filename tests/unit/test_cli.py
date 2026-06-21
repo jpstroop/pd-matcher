@@ -1,6 +1,5 @@
 """Tests for :mod:`pd_matcher.cli`."""
 
-from csv import DictReader
 from json import loads
 from pathlib import Path
 from typing import Literal
@@ -23,6 +22,11 @@ from pd_matcher.match.combiners.calibrator import PlattCalibrator
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 _runner: CliRunner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
+
+
+def _read_jsonl(path: Path) -> list[dict[str, str]]:
+    """Decode each non-empty JSONL line in ``path`` into a record dict."""
+    return [loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
 def _stage_sources(tmp_path: Path) -> tuple[Path, Path]:
@@ -182,6 +186,7 @@ def test_match_help_lists_options() -> None:
         "--workers",
         "--year-window",
         "--min-score",
+        "--scorer",
     ):
         assert flag in result.stdout
 
@@ -486,7 +491,7 @@ def test_prepare_marc_surfaces_oserror(tmp_path: Path, monkeypatch: MonkeyPatch)
 
 
 def test_match_consumes_prepared_directory(tmp_path: Path) -> None:
-    """``match --prepared`` runs against a prepared cache and writes a CSV."""
+    """``match --prepared`` runs against a prepared cache and writes JSONL."""
     index_path = _build_index(tmp_path)
     prepared = tmp_path / "prepared"
     prep = _runner.invoke(
@@ -500,7 +505,7 @@ def test_match_consumes_prepared_directory(tmp_path: Path) -> None:
         ],
     )
     assert prep.exit_code == 0, prep.output
-    out_csv = tmp_path / "out.csv"
+    out_jsonl = tmp_path / "out.jsonl"
     result = _runner.invoke(
         app,
         [
@@ -510,7 +515,7 @@ def test_match_consumes_prepared_directory(tmp_path: Path) -> None:
             "--index",
             str(index_path),
             "--out",
-            str(out_csv),
+            str(out_jsonl),
             "--workers",
             "1",
             "--min-score",
@@ -519,8 +524,7 @@ def test_match_consumes_prepared_directory(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
-    with out_csv.open(encoding="utf-8") as fp:
-        assert list(DictReader(fp))
+    assert _read_jsonl(out_jsonl)
 
 
 def test_match_rejects_both_marc_and_prepared(tmp_path: Path) -> None:
@@ -537,7 +541,7 @@ def test_match_rejects_both_marc_and_prepared(tmp_path: Path) -> None:
             "--index",
             str(index_path),
             "--out",
-            str(tmp_path / "out.csv"),
+            str(tmp_path / "out.jsonl"),
         ],
     )
     assert result.exit_code == 2
@@ -554,7 +558,7 @@ def test_match_rejects_neither_marc_nor_prepared(tmp_path: Path) -> None:
             "--index",
             str(index_path),
             "--out",
-            str(tmp_path / "out.csv"),
+            str(tmp_path / "out.jsonl"),
         ],
     )
     assert result.exit_code == 2
@@ -573,7 +577,7 @@ def test_match_rejects_prepared_directory_missing(tmp_path: Path) -> None:
             "--index",
             str(index_path),
             "--out",
-            str(tmp_path / "out.csv"),
+            str(tmp_path / "out.jsonl"),
         ],
     )
     assert result.exit_code == 1
@@ -594,7 +598,7 @@ def test_match_rejects_prepared_directory_without_manifest(tmp_path: Path) -> No
             "--index",
             str(index_path),
             "--out",
-            str(tmp_path / "out.csv"),
+            str(tmp_path / "out.jsonl"),
         ],
     )
     assert result.exit_code == 1
@@ -602,9 +606,9 @@ def test_match_rejects_prepared_directory_without_manifest(tmp_path: Path) -> No
 
 
 def test_match_runs_against_tiny_fixtures(tmp_path: Path) -> None:
-    """``match`` end-to-end produces a CSV with one row per MARC record."""
+    """``match`` end-to-end produces JSONL with one record per MARC record."""
     index_path = _build_index(tmp_path)
-    out_csv = tmp_path / "out.csv"
+    out_jsonl = tmp_path / "out.jsonl"
     result = _runner.invoke(
         app,
         [
@@ -614,7 +618,7 @@ def test_match_runs_against_tiny_fixtures(tmp_path: Path) -> None:
             "--index",
             str(index_path),
             "--out",
-            str(out_csv),
+            str(out_jsonl),
             "--workers",
             "1",
             "--year-window",
@@ -624,10 +628,9 @@ def test_match_runs_against_tiny_fixtures(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
-    assert out_csv.exists()
-    with out_csv.open(encoding="utf-8") as fp:
-        rows = list(DictReader(fp))
-    assert rows
+    assert out_jsonl.exists()
+    records = _read_jsonl(out_jsonl)
+    assert records
     assert (tmp_path / "idf.msgpack").exists()
 
 
@@ -643,7 +646,7 @@ def test_match_loads_calibrator_when_present(tmp_path: Path) -> None:
         n_negative=20,
     )
     (tmp_path / "calibrator.msgpack").write_bytes(encoder.encode(cal))
-    out_csv = tmp_path / "out.csv"
+    out_jsonl = tmp_path / "out.jsonl"
     result = _runner.invoke(
         app,
         [
@@ -653,7 +656,7 @@ def test_match_loads_calibrator_when_present(tmp_path: Path) -> None:
             "--index",
             str(index_path),
             "--out",
-            str(out_csv),
+            str(out_jsonl),
             "--workers",
             "1",
             "--min-score",
@@ -666,7 +669,7 @@ def test_match_loads_calibrator_when_present(tmp_path: Path) -> None:
 def test_match_with_default_workers(tmp_path: Path) -> None:
     """``match`` without ``--workers`` uses the worker default (cpu_count - 1)."""
     index_path = _build_index(tmp_path)
-    out_csv = tmp_path / "out.csv"
+    out_jsonl = tmp_path / "out.jsonl"
     result = _runner.invoke(
         app,
         [
@@ -676,7 +679,7 @@ def test_match_with_default_workers(tmp_path: Path) -> None:
             "--index",
             str(index_path),
             "--out",
-            str(out_csv),
+            str(out_jsonl),
             "--min-score",
             "1.0",
         ],
@@ -696,7 +699,7 @@ def test_match_rejects_missing_marc(tmp_path: Path) -> None:
             "--index",
             str(index_path),
             "--out",
-            str(tmp_path / "out.csv"),
+            str(tmp_path / "out.jsonl"),
         ],
     )
     assert result.exit_code == 1
@@ -714,7 +717,7 @@ def test_match_rejects_missing_index(tmp_path: Path) -> None:
             "--index",
             str(tmp_path / "missing.lmdb"),
             "--out",
-            str(tmp_path / "out.csv"),
+            str(tmp_path / "out.jsonl"),
         ],
     )
     assert result.exit_code == 1
@@ -727,7 +730,7 @@ def test_match_reports_interrupted(
 ) -> None:
     """When ``run_match`` reports ``interrupted=True`` the CLI exits 130."""
     index_path = _build_index(tmp_path)
-    out_csv = tmp_path / "out.csv"
+    out_jsonl = tmp_path / "out.jsonl"
 
     from pd_matcher.workers.pool import RunReport
 
@@ -750,7 +753,7 @@ def test_match_reports_interrupted(
             "--index",
             str(index_path),
             "--out",
-            str(out_csv),
+            str(out_jsonl),
         ],
     )
     assert result.exit_code == 130
@@ -777,7 +780,7 @@ def test_match_surfaces_oserror_from_run_match(
             "--index",
             str(index_path),
             "--out",
-            str(tmp_path / "out.csv"),
+            str(tmp_path / "out.jsonl"),
         ],
     )
     assert result.exit_code == 1
@@ -804,7 +807,7 @@ def test_match_surfaces_idf_oserror(
             "--index",
             str(index_path),
             "--out",
-            str(tmp_path / "out.csv"),
+            str(tmp_path / "out.jsonl"),
         ],
     )
     assert result.exit_code == 1
@@ -832,7 +835,7 @@ def test_match_surfaces_matching_config_error(
             "--index",
             str(index_path),
             "--out",
-            str(tmp_path / "out.csv"),
+            str(tmp_path / "out.jsonl"),
         ],
     )
     assert result.exit_code == 1
@@ -860,7 +863,7 @@ def test_match_surfaces_pairing_config_error(
             "--index",
             str(index_path),
             "--out",
-            str(tmp_path / "out.csv"),
+            str(tmp_path / "out.jsonl"),
         ],
     )
     assert result.exit_code == 1
@@ -1306,7 +1309,7 @@ def test_match_writes_log_file_with_explicit_path(tmp_path: Path) -> None:
     """``match --log-file`` lands log lines at the requested path."""
     index_path = _build_index(tmp_path)
     target = tmp_path / "match-run.log"
-    out_csv = tmp_path / "out.csv"
+    out_jsonl = tmp_path / "out.jsonl"
     result = _runner.invoke(
         app,
         [
@@ -1316,7 +1319,7 @@ def test_match_writes_log_file_with_explicit_path(tmp_path: Path) -> None:
             "--index",
             str(index_path),
             "--out",
-            str(out_csv),
+            str(out_jsonl),
             "--workers",
             "1",
             "--min-score",
@@ -1733,3 +1736,98 @@ def test_eval_scorer_rejects_invalid_value(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 2
+
+
+def test_match_scorer_override_weighted_mean(tmp_path: Path) -> None:
+    """``match --scorer weighted_mean`` runs without needing a learned artifact."""
+    index_path = _build_index(tmp_path)
+    out_jsonl = tmp_path / "out.jsonl"
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(out_jsonl),
+            "--workers",
+            "1",
+            "--min-score",
+            "1.0",
+            "--scorer",
+            "weighted_mean",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert _read_jsonl(out_jsonl)
+
+
+def test_match_scorer_override_learned(tmp_path: Path) -> None:
+    """``match --scorer learned`` loads the artifact trained beside the index."""
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path)
+    vault_path = tmp_path / "vault.jsonl"
+    _write_trainable_vault(vault_path)
+    train = _runner.invoke(
+        app,
+        [
+            "train-scorer",
+            "--index",
+            str(index_path),
+            "--vault",
+            str(vault_path),
+            "--pool",
+            str(pool_path),
+        ],
+    )
+    assert train.exit_code == 0, train.output
+    out_jsonl = tmp_path / "out.jsonl"
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(out_jsonl),
+            "--workers",
+            "1",
+            "--min-score",
+            "1.0",
+            "--scorer",
+            "learned",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert _read_jsonl(out_jsonl)
+
+
+def test_match_scorer_learned_without_artifact_errors(tmp_path: Path) -> None:
+    """``match --scorer learned`` fails loudly when no artifact is present."""
+    index_path = _build_index(tmp_path)
+    out_jsonl = tmp_path / "out.jsonl"
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(out_jsonl),
+            "--workers",
+            "1",
+            "--min-score",
+            "1.0",
+            "--scorer",
+            "learned",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "train-scorer" in result.output

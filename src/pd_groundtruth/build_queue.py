@@ -238,7 +238,7 @@ def _build_pair_insert(
 
 
 class StratifyingResultWriter:
-    """A :class:`pd_matcher.output.csv_writer.ResultWriter` that stratifies.
+    """A :class:`pd_matcher.output.jsonl_writer.ResultWriter` that stratifies.
 
     Constructed inside the matcher's writer process from a
     :class:`StratifyingWriterFactory`. Every matched record arrives once via
