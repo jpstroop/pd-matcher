@@ -1,23 +1,25 @@
-"""Streaming CSV writer for matcher output rows.
+"""Streaming JSONL writer for matcher output rows.
 
-The output schema is a flat linkage row: MARC metadata, matched CCE metadata,
-and per-field plus combined scores. :class:`CsvResultWriter` is a
-context-manager :class:`ResultWriter` that buffers a single underlying file
-handle and flushes after every row so a partial run is always readable.
+The output schema is a flat linkage record — MARC metadata, matched CCE
+metadata, and per-field plus combined scores — serialized as one JSON object
+per line (JSONL). :class:`JsonlResultWriter` is a context-manager
+:class:`ResultWriter` that buffers a single underlying file handle and flushes
+after every record so a partial run is always readable.
 
 Per-record normalization/stemming is recomputed at write time to keep
 this module independent from the matcher: it expects only a
 :class:`MarcRecord` and a :class:`MatchResult`. This is intentionally a
-per-row cost — a single CSV row's normalize+stem work is dwarfed by the
+per-record cost — a single record's normalize+stem work is dwarfed by the
 matcher pipeline that produced it.
 """
 
-from csv import DictWriter
 from pathlib import Path
 from types import TracebackType
 from typing import IO
 from typing import Protocol
 from typing import Self
+
+from msgspec.json import encode as json_encode
 
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.result import MatchResult
@@ -28,8 +30,9 @@ from pd_matcher.normalize.text import normalize_text
 from pd_matcher.normalize.text import tokenize
 
 _DEFAULT_LANGUAGE: str = "eng"
+_NEWLINE: bytes = b"\n"
 
-CSV_COLUMNS: tuple[str, ...] = (
+RECORD_FIELDS: tuple[str, ...] = (
     "marc_id",
     "marc_title_original",
     "marc_title_normalized",
@@ -67,7 +70,7 @@ CSV_COLUMNS: tuple[str, ...] = (
 
 
 class ResultWriter(Protocol):
-    """Streaming writer for one linkage row per processed MARC record."""
+    """Streaming writer for one linkage record per processed MARC record."""
 
     def __enter__(self) -> Self:  # pragma: no cover
         """Open the underlying sink."""
@@ -88,7 +91,7 @@ class ResultWriter(Protocol):
         match: MatchResult | None,
         matched_nypl: IndexedNyplRegRecord | None = None,
     ) -> None:
-        """Emit one CSV row for the supplied triple."""
+        """Emit one JSONL record for the supplied triple."""
         ...
 
 
@@ -111,10 +114,10 @@ def _normalize_and_stem(value: str | None, language: str) -> tuple[str, str, str
 def _evidence_score(evidence: tuple[Evidence, ...], scorer: str) -> str:
     """Return the integer string of the named scorer's Evidence score.
 
-    The combined CSV uses integers for per-field scores; we round half-to-even
-    because the underlying scorers emit float scores in ``[0, 100]``. When the
-    Evidence is missing or skipped, an empty string is returned so the column
-    survives joins against records that have no match.
+    The combined record uses integers for per-field scores; we round
+    half-to-even because the underlying scorers emit float scores in
+    ``[0, 100]``. When the Evidence is missing or skipped, an empty string is
+    returned so the field survives joins against records that have no match.
     """
     for ev in evidence:
         if ev.scorer == scorer:
@@ -209,23 +212,20 @@ def _build_row(
     return row
 
 
-class CsvResultWriter:
-    """:class:`ResultWriter` that emits the verified-linkage CSV schema."""
+class JsonlResultWriter:
+    """:class:`ResultWriter` that emits the verified-linkage records as JSONL."""
 
-    __slots__ = ("_fp", "_path", "_writer")
+    __slots__ = ("_fp", "_path")
 
     def __init__(self, path: Path) -> None:
         """Capture ``path``; the file is opened on context-manager entry."""
         self._path = path
-        self._fp: IO[str] | None = None
-        self._writer: DictWriter[str] | None = None
+        self._fp: IO[bytes] | None = None
 
     def __enter__(self) -> Self:
-        """Open the destination file and write the header row."""
+        """Open the destination file for line-delimited JSON output."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._fp = self._path.open("w", encoding="utf-8", newline="")
-        self._writer = DictWriter(self._fp, fieldnames=list(CSV_COLUMNS))
-        self._writer.writeheader()
+        self._fp = self._path.open("wb")
         return self
 
     def __exit__(
@@ -239,7 +239,6 @@ class CsvResultWriter:
             self._fp.flush()
             self._fp.close()
             self._fp = None
-            self._writer = None
 
     def write(
         self,
@@ -247,25 +246,26 @@ class CsvResultWriter:
         match: MatchResult | None,
         matched_nypl: IndexedNyplRegRecord | None = None,
     ) -> None:
-        """Emit one CSV row for the supplied triple.
+        """Emit one JSONL record for the supplied triple.
 
         Args:
             marc: The MARC record being matched.
             match: The matcher's verdict, or ``None`` when no match was made.
             matched_nypl: The CCE registration corresponding to
-                ``match.best``. When omitted the row's ``match_*`` columns
+                ``match.best``. When omitted the record's ``match_*`` fields
                 are blank even if ``match.best`` is set, because the writer
                 cannot resolve the indexed record on its own.
         """
-        if self._writer is None or self._fp is None:
-            raise RuntimeError("CsvResultWriter not entered; use as a context manager")
+        if self._fp is None:
+            raise RuntimeError("JsonlResultWriter not entered; use as a context manager")
         row = _build_row(marc, match, matched_nypl)
-        self._writer.writerow(row)
+        self._fp.write(json_encode(row))
+        self._fp.write(_NEWLINE)
         self._fp.flush()
 
 
 __all__ = [
-    "CSV_COLUMNS",
-    "CsvResultWriter",
+    "RECORD_FIELDS",
+    "JsonlResultWriter",
     "ResultWriter",
 ]

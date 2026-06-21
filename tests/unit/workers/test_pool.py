@@ -1,11 +1,11 @@
 """Tests for :mod:`pd_matcher.workers.pool` (non-spawn paths)."""
 
-from csv import DictReader
 from multiprocessing import Event
 from multiprocessing import get_context
 from multiprocessing.queues import Queue as MpQueue
 from pathlib import Path
 
+from msgspec.json import decode as json_decode
 from pytest import raises
 
 from pd_matcher.config.schemas import MatchingConfig
@@ -18,13 +18,13 @@ from pd_matcher.match.idf import build_publisher_idf_table
 from pd_matcher.match.prepare import prepare_marc
 from pd_matcher.match.result import MatchResult
 from pd_matcher.models import MarcRecord
-from pd_matcher.output.csv_writer import CsvResultWriter
+from pd_matcher.output.jsonl_writer import JsonlResultWriter
 from pd_matcher.parsers.marc import iter_marc_records
 from pd_matcher.workers.events import decode_stats_event
 from pd_matcher.workers.messages import WorkerOutput
 from pd_matcher.workers.messages import encode_worker_output
 from pd_matcher.workers.pool import RunReport
-from pd_matcher.workers.pool import _build_csv_writer
+from pd_matcher.workers.pool import _build_jsonl_writer
 from pd_matcher.workers.pool import _default_workers
 from pd_matcher.workers.pool import _resolve_source
 from pd_matcher.workers.pool import _shutdown_predicate
@@ -41,9 +41,9 @@ def test_default_workers_returns_positive_count() -> None:
     assert _default_workers() >= 1
 
 
-def test_build_csv_writer_returns_csv_writer(tmp_path: Path) -> None:
-    writer = _build_csv_writer(tmp_path / "x.csv")
-    assert isinstance(writer, CsvResultWriter)
+def test_build_jsonl_writer_returns_jsonl_writer(tmp_path: Path) -> None:
+    writer = _build_jsonl_writer(tmp_path / "x.jsonl")
+    assert isinstance(writer, JsonlResultWriter)
 
 
 def test_shutdown_predicate_tracks_event() -> None:
@@ -110,16 +110,20 @@ def test_writer_entry_runs_in_process_against_real_queues(tmp_path: Path) -> Non
     )
     output_queue.put(encode_worker_output(payload))
     output_queue.put(None)
-    path = tmp_path / "out.csv"
+    path = tmp_path / "out.jsonl"
     _writer_entry(
         output_path=path,
-        writer_factory=CsvResultWriter,
+        writer_factory=JsonlResultWriter,
         output_queue=output_queue,
         stats_queue=stats_queue,
         shutdown_event=event,
     )
-    rows = list(DictReader(path.open(encoding="utf-8")))
-    assert len(rows) == 1
+    records = [
+        json_decode(line, type=dict[str, str])
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    assert len(records) == 1
 
 
 def test_run_match_rejects_zero_workers(
@@ -135,7 +139,7 @@ def test_run_match_rejects_zero_workers(
         run_match(
             marc_path=_FIXTURES / "tiny.marcxml",
             index_path=tiny_index_path,
-            output_path=tmp_path / "results.csv",
+            output_path=tmp_path / "results.jsonl",
             matching_config=matching_config,
             pairing_config=pairing_config,
             idf=tiny_idf,
@@ -177,7 +181,7 @@ def test_run_match_returns_run_report(
         min_combined_score=30.0,
         scorer="weighted_mean",
     )
-    output_path = tmp_path / "results.csv"
+    output_path = tmp_path / "results.jsonl"
     report = run_match(
         marc_path=_FIXTURES / "tiny.marcxml",
         index_path=index_path,
@@ -304,7 +308,7 @@ def test_run_match_consumes_prepared_chunks(
     )
     prepared = tmp_path / "prepared"
     prepare_report = prepare_marc(_FIXTURES / "tiny.marcxml", prepared, chunk_size=4)
-    output_path = tmp_path / "results.csv"
+    output_path = tmp_path / "results.jsonl"
     report = run_match(
         prepared_dir=prepared,
         expected_total=prepare_report.total_records,

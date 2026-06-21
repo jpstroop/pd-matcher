@@ -2,12 +2,13 @@
 
 Builds a tiny LMDB index in ``tmp_path``, invokes ``pd-matcher match``
 through :class:`typer.testing.CliRunner` against the shared MARC
-fixture, and asserts the destination CSV has one row per record. This
-catches CLI-only regressions (argument wiring, default lookup paths,
-IDF cache placement) that the in-process Phase 6 smoke test cannot.
+fixture, and asserts the destination JSONL has one record per MARC
+record. This catches CLI-only regressions (argument wiring, default
+lookup paths, IDF cache placement) that the in-process Phase 6 smoke
+test cannot.
 """
 
-from csv import DictReader
+from json import loads
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -33,11 +34,11 @@ def _build_index(tmp_path: Path) -> Path:
 
 
 def test_match_cli_produces_one_row_per_record(tmp_path: Path) -> None:
-    """``pd-matcher match`` end-to-end writes one CSV row per MARC record."""
+    """``pd-matcher match`` end-to-end writes one JSONL record per MARC record."""
     index_path = _build_index(tmp_path)
     marc_path = _FIXTURES / "tiny.marcxml"
     expected = sum(1 for _ in iter_marc_records(marc_path))
-    out_csv = tmp_path / "results.csv"
+    out_jsonl = tmp_path / "results.jsonl"
     result = _runner.invoke(
         app,
         [
@@ -47,7 +48,7 @@ def test_match_cli_produces_one_row_per_record(tmp_path: Path) -> None:
             "--index",
             str(index_path),
             "--out",
-            str(out_csv),
+            str(out_jsonl),
             "--workers",
             "1",
             "--min-score",
@@ -55,6 +56,5 @@ def test_match_cli_produces_one_row_per_record(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
-    with out_csv.open(encoding="utf-8") as fp:
-        rows = list(DictReader(fp))
-    assert len(rows) == expected
+    records = [loads(line) for line in out_jsonl.read_text(encoding="utf-8").splitlines() if line]
+    assert len(records) == expected

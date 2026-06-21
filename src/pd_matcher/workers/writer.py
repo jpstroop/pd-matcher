@@ -1,8 +1,8 @@
 """Writer process body for the Phase 6 pool.
 
 A single dedicated writer process drains the output queue, decodes each
-:class:`WorkerOutput`, and emits one row through the supplied
-:class:`pd_matcher.output.csv_writer.ResultWriter`. Serialising the write
+:class:`WorkerOutput`, and emits one record through the supplied
+:class:`pd_matcher.output.jsonl_writer.ResultWriter`. Serialising the write
 side eliminates inter-process contention on the destination file: workers
 queue, the writer flushes.
 
@@ -11,8 +11,8 @@ on the output queue by the orchestrator after every worker has joined.
 A final :class:`WriterHeartbeat` is emitted before exit so the reporter
 always sees the canonical record count.
 
-The writer is currently tied to :class:`pd_matcher.output.csv_writer.ResultWriter`'s
-three-argument signature ``(marc, match, matched_nypl)`` — the linkage CSV.
+The writer is currently tied to :class:`pd_matcher.output.jsonl_writer.ResultWriter`'s
+three-argument signature ``(marc, match, matched_nypl)`` — the linkage JSONL.
 The groundtruth queue builder swaps in its own writer factory.
 """
 
@@ -22,7 +22,7 @@ from time import monotonic
 
 from structlog import get_logger
 
-from pd_matcher.output.csv_writer import ResultWriter
+from pd_matcher.output.jsonl_writer import ResultWriter
 from pd_matcher.workers.events import WriterHeartbeat
 from pd_matcher.workers.events import encode_stats_event
 from pd_matcher.workers.messages import decode_worker_output

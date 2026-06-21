@@ -45,6 +45,7 @@ from pd_matcher.index.builder import build_index
 from pd_matcher.index.lookup import IndexStats
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.logging_config import configure_logging
+from pd_matcher.match.combiners import build_combiner
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.combiners.calibrator import load_calibrator
 from pd_matcher.match.combiners.learned import META_FILENAME as _LEARNED_META_FILENAME
@@ -82,7 +83,7 @@ _SWEEP_PREVIEW_STEP: int = 4
 
 
 class _ScorerChoice(StrEnum):
-    """Combiner choices accepted by ``eval --scorer``."""
+    """Combiner choices accepted by ``match --scorer`` and ``eval --scorer``."""
 
     WEIGHTED_MEAN = "weighted_mean"
     LEARNED = "learned"
@@ -503,7 +504,7 @@ def prepare_marc_command(
 @app.command("match")
 def match(
     index: Annotated[Path, Option("--index", help="LMDB index directory.")],
-    out: Annotated[Path, Option("--out", help="Output CSV path.")],
+    out: Annotated[Path, Option("--out", help="Output JSONL path.")],
     marc: Annotated[
         Path | None,
         Option("--marc", help="MARC XML file (mutually exclusive with --prepared)."),
@@ -536,18 +537,26 @@ def match(
         float | None,
         Option("--min-score", help="Override the matching config's min_combined_score."),
     ] = None,
+    scorer: Annotated[
+        _ScorerChoice | None,
+        Option(
+            "--scorer",
+            help="Override the matching config's scorer (weighted_mean|learned) for this run.",
+        ),
+    ] = None,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
     ] = None,
 ) -> None:
-    """Match MARC records against the NYPL index and write a CSV linkage report.
+    """Match MARC records against the NYPL index and write a JSONL linkage report.
 
     Examples:
         pd-matcher match \\
             --marc data/sample.marcxml \\
             --index caches/cce.lmdb \\
-            --out /tmp/results.csv \\
+            --out /tmp/results.jsonl \\
+            --scorer learned \\
             --workers 4
     """
     resolved_log_file = _enable_log_file("match", log_file)
@@ -572,11 +581,12 @@ def match(
         matching_config = _load_default_matching_config()
     except ConfigError as exc:
         raise _fail(f"failed to load matching defaults: {exc}") from exc
-    if year_window is not None or min_score is not None:
+    if year_window is not None or min_score is not None or scorer is not None:
         matching_config = _override_matching_config(
             matching_config,
             year_window=year_window,
             min_combined_score=min_score,
+            scorer=scorer.value if scorer is not None else None,
         )
     try:
         pairing_config = _load_default_pairing_config()
@@ -595,6 +605,10 @@ def match(
         raise _fail(f"failed to load/build IDF table: {exc}") from exc
     calibrator = _load_calibrator(index.parent)
     learned_model_dir = _learned_model_dir(index.parent, matching_config)
+    try:
+        build_combiner(matching_config, learned_model_dir=learned_model_dir)
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
     try:
         report = run_match(
             marc_path=marc,
