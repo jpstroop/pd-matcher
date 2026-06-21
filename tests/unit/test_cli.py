@@ -738,6 +738,7 @@ def test_match_reports_interrupted(
     def _fake_run_match(**_kwargs: object) -> RunReport:
         return RunReport(
             records_processed=2,
+            records_skipped=0,
             records_written=1,
             records_enqueued=3,
             duration_seconds=0.01,
@@ -775,6 +776,7 @@ def test_match_matches_only_flag_forwards_to_run_match(
         captured.update(kwargs)
         return RunReport(
             records_processed=1,
+            records_skipped=0,
             records_written=1,
             records_enqueued=1,
             duration_seconds=0.01,
@@ -813,6 +815,7 @@ def test_match_defaults_to_full_report_without_flag(
         captured.update(kwargs)
         return RunReport(
             records_processed=1,
+            records_skipped=0,
             records_written=1,
             records_enqueued=1,
             duration_seconds=0.01,

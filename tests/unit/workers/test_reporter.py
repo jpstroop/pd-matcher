@@ -66,6 +66,16 @@ def test_format_progress_line_with_known_total_shows_percent_and_eta() -> None:
     assert "written=50" in line
 
 
+def test_format_progress_line_includes_skipped_and_counts_it_as_done() -> None:
+    """Skipped records show in the suffix and advance the ``done`` figure."""
+    totals = RunningTotals(started_at=0.0)
+    totals.records_processed = 8
+    totals.records_skipped = 2
+    line = _format_progress_line(totals, now=10.0, expected_total=100)
+    assert "10/100" in line
+    assert "skipped=2" in line
+
+
 def test_format_progress_line_without_total_omits_percent_and_eta() -> None:
     """An unknown total prints neither ``0/0 (0%)`` nor a misleading ETA."""
     totals = RunningTotals(started_at=0.0)

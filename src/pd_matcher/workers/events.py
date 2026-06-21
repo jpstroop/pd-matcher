@@ -30,6 +30,12 @@ class RecordProcessed(Struct, frozen=True, forbid_unknown_fields=True, tag="reco
     candidates_considered: int
 
 
+class RecordSkipped(Struct, frozen=True, forbid_unknown_fields=True, tag="record_skipped"):
+    """One MARC record was skipped after its processing raised."""
+
+    control_id: str
+
+
 class ProducerHeartbeat(Struct, frozen=True, forbid_unknown_fields=True, tag="producer_heartbeat"):
     """Periodic stats from the producer: how many records have been queued."""
 
@@ -48,7 +54,7 @@ class ShutdownEvent(Struct, frozen=True, forbid_unknown_fields=True, tag="shutdo
     reason: str
 
 
-StatsEvent = RecordProcessed | ProducerHeartbeat | WriterHeartbeat | ShutdownEvent
+StatsEvent = RecordProcessed | RecordSkipped | ProducerHeartbeat | WriterHeartbeat | ShutdownEvent
 
 
 _ENCODER: Final[Encoder] = Encoder()
@@ -68,6 +74,7 @@ def decode_stats_event(blob: bytes) -> StatsEvent:
 __all__ = [
     "ProducerHeartbeat",
     "RecordProcessed",
+    "RecordSkipped",
     "ShutdownEvent",
     "StatsEvent",
     "WriterHeartbeat",

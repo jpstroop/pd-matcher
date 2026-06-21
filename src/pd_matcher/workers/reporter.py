@@ -27,6 +27,7 @@ from structlog import get_logger
 from pd_matcher.progress import ProgressSnapshot
 from pd_matcher.workers.events import ProducerHeartbeat
 from pd_matcher.workers.events import RecordProcessed
+from pd_matcher.workers.events import RecordSkipped
 from pd_matcher.workers.events import StatsEvent
 from pd_matcher.workers.events import WriterHeartbeat
 from pd_matcher.workers.events import decode_stats_event
@@ -59,6 +60,7 @@ class RunningTotals:
     __slots__ = (
         "records_enqueued",
         "records_processed",
+        "records_skipped",
         "records_written",
         "started_at",
         "stop_reason",
@@ -67,10 +69,16 @@ class RunningTotals:
     def __init__(self, *, started_at: float) -> None:
         """Initialize all counters to zero and record the start time."""
         self.records_processed: int = 0
+        self.records_skipped: int = 0
         self.records_written: int = 0
         self.records_enqueued: int = 0
         self.started_at: float = started_at
         self.stop_reason: str = "running"
+
+    @property
+    def records_done(self) -> int:
+        """Records that have finished, whether scored or skipped on error."""
+        return self.records_processed + self.records_skipped
 
     def apply(self, event: StatsEvent) -> bool:
         """Fold ``event`` into the running totals.
@@ -82,6 +90,9 @@ class RunningTotals:
         if isinstance(event, RecordProcessed):
             self.records_processed += 1
             return False
+        if isinstance(event, RecordSkipped):
+            self.records_skipped += 1
+            return False
         if isinstance(event, ProducerHeartbeat):
             self.records_enqueued = event.records_enqueued
             return False
@@ -92,26 +103,27 @@ class RunningTotals:
         return True
 
     def throughput_per_sec(self, now: float) -> float:
-        """Return processed-record throughput, falling back to ``0.0`` early."""
+        """Return finished-record throughput, falling back to ``0.0`` early."""
         elapsed = now - self.started_at
         if elapsed <= 0.0:
             return 0.0
-        return self.records_processed / elapsed
+        return self.records_done / elapsed
 
     def eta_seconds(self, total_expected: int | None, now: float) -> float | None:
         """Return remaining-seconds estimate, or ``None`` when unknown."""
-        if total_expected is None or total_expected <= self.records_processed:
+        if total_expected is None or total_expected <= self.records_done:
             return None
         rate = self.throughput_per_sec(now)
         if rate <= 0.0:
             return None
-        remaining = total_expected - self.records_processed
+        remaining = total_expected - self.records_done
         return remaining / rate
 
     def snapshot(self) -> TotalsSnapshot:
         """Return an immutable snapshot of the current totals."""
         return TotalsSnapshot(
             records_processed=self.records_processed,
+            records_skipped=self.records_skipped,
             records_written=self.records_written,
             records_enqueued=self.records_enqueued,
             duration_seconds=monotonic() - self.started_at,
@@ -128,6 +140,7 @@ class TotalsSnapshot(Struct, frozen=True, forbid_unknown_fields=True):
     """
 
     records_processed: int
+    records_skipped: int
     records_written: int
     records_enqueued: int
     duration_seconds: float
@@ -136,7 +149,11 @@ class TotalsSnapshot(Struct, frozen=True, forbid_unknown_fields=True):
 
 def _format_detail(totals: RunningTotals) -> str:
     """Render the domain-specific suffix appended to every progress line."""
-    return f"written={totals.records_written} enqueued={totals.records_enqueued}"
+    return (
+        f"written={totals.records_written} "
+        f"skipped={totals.records_skipped} "
+        f"enqueued={totals.records_enqueued}"
+    )
 
 
 def _format_progress_line(
@@ -154,7 +171,7 @@ def _format_progress_line(
     detail = _format_detail(totals)
     if expected_total is not None:
         snapshot = ProgressSnapshot(
-            done=totals.records_processed,
+            done=totals.records_done,
             total=expected_total,
             elapsed_seconds=now - totals.started_at,
         )
@@ -162,7 +179,7 @@ def _format_progress_line(
     elapsed = now - totals.started_at
     rate = totals.throughput_per_sec(now)
     return (
-        f"progress  {totals.records_processed:,} done  "
+        f"progress  {totals.records_done:,} done  "
         f"agg {rate:.1f} rec/s ({rate * _SECONDS_PER_MINUTE:.0f}/min)  "
         f"elapsed {_format_mmss(elapsed)}  {detail}"
     )
