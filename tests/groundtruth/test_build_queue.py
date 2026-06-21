@@ -617,6 +617,7 @@ def test_build_queue_drives_run_match_and_summarizes(
             active.write(_marc(control_id="id-2"), _match(0.3), _cce("uuid-1"))
         return RunReport(
             records_processed=2,
+            records_skipped=0,
             records_written=2,
             records_enqueued=2,
             duration_seconds=0.1,
@@ -670,6 +671,7 @@ def test_build_queue_threads_log_file_to_run_match(
         seen_log_file.append(log_file)
         return RunReport(
             records_processed=1,
+            records_skipped=0,
             records_written=0,
             records_enqueued=1,
             duration_seconds=0.0,
@@ -883,6 +885,7 @@ def test_build_queue_carries_vault_pair_through_rebuild(
             pass
         return RunReport(
             records_processed=len(chunk),
+            records_skipped=0,
             records_written=len(chunk),
             records_enqueued=len(chunk),
             duration_seconds=0.0,
@@ -964,6 +967,7 @@ def test_build_queue_excludes_vault_marcs_from_sample(
             pass
         return RunReport(
             records_processed=len(chunk),
+            records_skipped=0,
             records_written=0,
             records_enqueued=len(chunk),
             duration_seconds=0.0,
@@ -1023,6 +1027,7 @@ def test_build_queue_reports_vault_entries_missing_from_pool(
             pass
         return RunReport(
             records_processed=1,
+            records_skipped=0,
             records_written=0,
             records_enqueued=1,
             duration_seconds=0.0,
@@ -1078,6 +1083,7 @@ def test_build_queue_reports_vault_entry_missing_from_index(
             pass
         return RunReport(
             records_processed=0,
+            records_skipped=0,
             records_written=0,
             records_enqueued=0,
             duration_seconds=0.0,
@@ -1152,6 +1158,7 @@ def test_build_queue_threads_requeue_verdicts_to_resolver_and_factory(
         captured_factories.append(factory)
         return RunReport(
             records_processed=0,
+            records_skipped=0,
             records_written=0,
             records_enqueued=0,
             duration_seconds=0.0,
@@ -1214,6 +1221,7 @@ def test_build_queue_cleans_up_prepared_dir(tmp_path: Path, monkeypatch: MonkeyP
         seen.append(prepared_dir)
         return RunReport(
             records_processed=1,
+            records_skipped=0,
             records_written=0,
             records_enqueued=1,
             duration_seconds=0.0,

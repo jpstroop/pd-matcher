@@ -58,6 +58,7 @@ class RunReport(Struct, frozen=True, forbid_unknown_fields=True):
     """Summary of one :func:`run_match` invocation."""
 
     records_processed: int
+    records_skipped: int
     records_written: int
     records_enqueued: int
     duration_seconds: float
@@ -418,6 +419,7 @@ def run_match(
     _LOGGER.info(
         "match.pool.complete",
         records_processed=snapshot.records_processed,
+        records_skipped=snapshot.records_skipped,
         records_written=snapshot.records_written,
         records_enqueued=records_enqueued,
         duration_seconds=duration,
@@ -425,6 +427,7 @@ def run_match(
     )
     return RunReport(
         records_processed=snapshot.records_processed,
+        records_skipped=snapshot.records_skipped,
         records_written=snapshot.records_written,
         records_enqueued=records_enqueued,
         duration_seconds=duration,

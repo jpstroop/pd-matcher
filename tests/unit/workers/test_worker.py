@@ -6,19 +6,25 @@ from itertools import cycle
 from pathlib import Path
 
 from _pytest.capture import CaptureFixture
+from _pytest.monkeypatch import MonkeyPatch
 
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.logging_config import configure_logging
+from pd_matcher.match.combiners.base import Combiner
+from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.models import MarcRecord
 from pd_matcher.workers.events import RecordProcessed
+from pd_matcher.workers.events import RecordSkipped
 from pd_matcher.workers.events import decode_stats_event
+from pd_matcher.workers.messages import WorkerOutput
 from pd_matcher.workers.messages import decode_worker_output
 from pd_matcher.workers.producer import encode_batch
 from pd_matcher.workers.worker import _WORKER_LOG_EVERY_N
+from pd_matcher.workers.worker import _process_record
 from pd_matcher.workers.worker import _worker_rate
 from pd_matcher.workers.worker import run_worker_loop
 from pd_matcher.workers.worker import worker_main
@@ -72,7 +78,7 @@ def test_worker_loop_processes_one_batch_and_stops_on_poison_pill(
         None,
     ]
     with NyplIndexLookup(tiny_index_path) as lookup:
-        processed = run_worker_loop(
+        result = run_worker_loop(
             lookup=lookup,
             config=matching_config,
             idf=tiny_idf,
@@ -86,7 +92,8 @@ def test_worker_loop_processes_one_batch_and_stops_on_poison_pill(
             stats_put=stats.append,
             is_shutdown=lambda: False,
         )
-    assert processed == 1
+    assert result.processed == 1
+    assert result.skipped == 0
     assert len(outputs) == 1
     payload = decode_worker_output(outputs[0])
     assert payload.marc.control_id == "m-1"
@@ -110,7 +117,7 @@ def test_worker_loop_stops_when_shutdown_before_processing(
     outputs: list[bytes] = []
     stats: list[bytes] = []
     with NyplIndexLookup(tiny_index_path) as lookup:
-        processed = run_worker_loop(
+        result = run_worker_loop(
             lookup=lookup,
             config=matching_config,
             idf=tiny_idf,
@@ -124,7 +131,7 @@ def test_worker_loop_stops_when_shutdown_before_processing(
             stats_put=stats.append,
             is_shutdown=lambda: True,
         )
-    assert processed == 0
+    assert result.processed == 0
     assert outputs == []
 
 
@@ -146,7 +153,7 @@ def test_worker_loop_stops_between_records_when_shutdown_fires(
         return next(flag)
 
     with NyplIndexLookup(tiny_index_path) as lookup:
-        processed = run_worker_loop(
+        result = run_worker_loop(
             lookup=lookup,
             config=matching_config,
             idf=tiny_idf,
@@ -160,7 +167,7 @@ def test_worker_loop_stops_between_records_when_shutdown_fires(
             stats_put=stats.append,
             is_shutdown=is_shutdown,
         )
-    assert processed < 3
+    assert result.processed < 3
 
 
 def test_worker_main_opens_lookup_and_runs_loop(
@@ -174,7 +181,7 @@ def test_worker_main_opens_lookup_and_runs_loop(
     outputs: list[bytes] = []
     stats: list[bytes] = []
     blobs: list[bytes | None] = [encode_batch((_make_marc(),)), None]
-    processed = worker_main(
+    result = worker_main(
         index_path=tiny_index_path,
         matching_config=matching_config,
         pairing_config=pairing_config,
@@ -188,7 +195,7 @@ def test_worker_main_opens_lookup_and_runs_loop(
         stats_put=stats.append,
         is_shutdown=lambda: False,
     )
-    assert processed == 1
+    assert result.processed == 1
 
 
 def test_worker_main_with_unmatchable_record_emits_blank_match(
@@ -203,7 +210,7 @@ def test_worker_main_with_unmatchable_record_emits_blank_match(
     stats: list[bytes] = []
     marc = MarcRecord(control_id="orphan", title="nothing relevant", title_main="nothing relevant")
     blobs: list[bytes | None] = [encode_batch((marc,)), None]
-    processed = worker_main(
+    result = worker_main(
         index_path=tiny_index_path,
         matching_config=matching_config,
         pairing_config=pairing_config,
@@ -217,7 +224,7 @@ def test_worker_main_with_unmatchable_record_emits_blank_match(
         stats_put=stats.append,
         is_shutdown=lambda: False,
     )
-    assert processed == 1
+    assert result.processed == 1
     payload = decode_worker_output(outputs[0])
     assert payload.match is not None
     assert payload.match.best is None
@@ -461,7 +468,7 @@ def test_worker_main_threads_worker_id_and_verbosity(
     """``worker_main`` forwards ``worker_id``/``verbosity`` into the loop's logs."""
     configure_logging(level="INFO", json_output=False)
     blobs: list[bytes | None] = [encode_batch((_make_marc(),)), None]
-    processed = worker_main(
+    result = worker_main(
         index_path=tiny_index_path,
         matching_config=matching_config,
         pairing_config=pairing_config,
@@ -477,5 +484,124 @@ def test_worker_main_threads_worker_id_and_verbosity(
         worker_id=9,
         verbosity=1,
     )
-    assert processed == 1
+    assert result.processed == 1
     assert "worker=9" in capsys.readouterr().err
+
+
+def _process_record_raising_on_boom(
+    marc: MarcRecord,
+    *,
+    lookup: NyplIndexLookup,
+    config: MatchingConfig,
+    idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
+    calibrator: PlattCalibrator | None,
+    combiner: Combiner,
+    pairings: CompiledPairings,
+) -> WorkerOutput:
+    """Stand-in for ``_process_record`` that raises only on the ``boom`` record."""
+    if marc.control_id == "boom":
+        raise RuntimeError("synthetic record failure")
+    return _process_record(
+        marc,
+        lookup=lookup,
+        config=config,
+        idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
+        calibrator=calibrator,
+        combiner=combiner,
+        pairings=pairings,
+    )
+
+
+def test_worker_loop_skips_failing_record_and_continues(
+    tiny_index_path: Path,
+    tiny_idf: IdfTable,
+    tiny_author_idf: IdfTable,
+    tiny_publisher_idf: IdfTable,
+    matching_config: MatchingConfig,
+    compiled_pairings: CompiledPairings,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A record whose processing raises is skipped; later records still run."""
+    monkeypatch.setattr(
+        "pd_matcher.workers.worker._process_record", _process_record_raising_on_boom
+    )
+    good_before = _make_marc()
+    bad = MarcRecord(control_id="boom", title="kaboom", title_main="kaboom")
+    good_after = MarcRecord(
+        control_id="m-after", title="A study of widgets", title_main="A study of widgets"
+    )
+    outputs: list[bytes] = []
+    stats: list[bytes] = []
+    blobs: list[bytes | None] = [encode_batch((good_before, bad, good_after)), None]
+    with NyplIndexLookup(tiny_index_path) as lookup:
+        result = run_worker_loop(
+            lookup=lookup,
+            config=matching_config,
+            idf=tiny_idf,
+            author_idf=tiny_author_idf,
+            publisher_idf=tiny_publisher_idf,
+            calibrator=None,
+            learned_model_dir=None,
+            pairings=compiled_pairings,
+            input_get=_build_input_get(blobs),
+            output_put=outputs.append,
+            stats_put=stats.append,
+            is_shutdown=lambda: False,
+        )
+    assert result.processed == 2
+    assert result.skipped == 1
+    processed_ids = {decode_worker_output(blob).marc.control_id for blob in outputs}
+    assert processed_ids == {"m-1", "m-after"}
+    skip_events = [
+        event
+        for event in (decode_stats_event(blob) for blob in stats)
+        if isinstance(event, RecordSkipped)
+    ]
+    assert len(skip_events) == 1
+    assert skip_events[0].control_id == "boom"
+
+
+def test_worker_loop_logs_failing_record_with_worker_and_marc_id(
+    tiny_index_path: Path,
+    tiny_idf: IdfTable,
+    tiny_author_idf: IdfTable,
+    tiny_publisher_idf: IdfTable,
+    matching_config: MatchingConfig,
+    compiled_pairings: CompiledPairings,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    """A failing record is logged at error level with worker id, marc id, traceback."""
+    configure_logging(level="INFO", json_output=False)
+    monkeypatch.setattr(
+        "pd_matcher.workers.worker._process_record", _process_record_raising_on_boom
+    )
+    bad = MarcRecord(control_id="boom", title="kaboom", title_main="kaboom")
+    blobs: list[bytes | None] = [encode_batch((bad,)), None]
+    with NyplIndexLookup(tiny_index_path) as lookup:
+        result = run_worker_loop(
+            lookup=lookup,
+            config=matching_config,
+            idf=tiny_idf,
+            author_idf=tiny_author_idf,
+            publisher_idf=tiny_publisher_idf,
+            calibrator=None,
+            learned_model_dir=None,
+            pairings=compiled_pairings,
+            input_get=_build_input_get(blobs),
+            output_put=_sink(),
+            stats_put=_sink(),
+            is_shutdown=lambda: False,
+            worker_id=5,
+        )
+    assert result.processed == 0
+    assert result.skipped == 1
+    err = capsys.readouterr().err
+    assert "worker.record_failed" in err
+    assert "worker=5" in err
+    assert "marc=boom" in err
+    assert "synthetic record failure" in err

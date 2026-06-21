@@ -16,6 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from time import monotonic
 
+from msgspec import Struct
 from structlog import get_logger
 from structlog.contextvars import bind_contextvars
 from structlog.contextvars import unbind_contextvars
@@ -32,6 +33,7 @@ from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import match_record
 from pd_matcher.models import MarcRecord
 from pd_matcher.workers.events import RecordProcessed
+from pd_matcher.workers.events import RecordSkipped
 from pd_matcher.workers.events import encode_stats_event
 from pd_matcher.workers.messages import WorkerOutput
 from pd_matcher.workers.messages import encode_worker_output
@@ -40,6 +42,13 @@ from pd_matcher.workers.producer import decode_batch
 _LOGGER = get_logger(__name__)
 
 _WORKER_LOG_EVERY_N: int = 1000
+
+
+class WorkerResult(Struct, frozen=True, forbid_unknown_fields=True):
+    """Per-worker tally returned by :func:`run_worker_loop`."""
+
+    processed: int
+    skipped: int
 
 
 def _worker_rate(processed: int, started_at: float, now: float) -> float:
@@ -128,7 +137,7 @@ def run_worker_loop(
     worker_id: int = 0,
     verbosity: int = 0,
     clock: Callable[[], float] = monotonic,
-) -> int:
+) -> WorkerResult:
     """Drain the input queue, score records, and forward results.
 
     Args:
@@ -160,13 +169,18 @@ def run_worker_loop(
         clock: Monotonic clock; injected so per-worker rate is testable.
 
     Returns:
-        The number of records processed by this worker.
+        A :class:`WorkerResult` carrying the count of records this worker
+        processed and the count it skipped after their processing raised. A
+        record that raises is logged, counted as skipped, reported as ``done``
+        via a :class:`RecordSkipped` stats event, and the loop continues — one
+        bad record never kills the worker.
     """
     combiner = build_combiner(config, learned_model_dir=learned_model_dir)
     started_at = clock()
     if verbosity >= 1:
         _LOGGER.info("worker.start", worker=worker_id)
     processed = 0
+    skipped = 0
     while True:
         if is_shutdown():
             break
@@ -181,9 +195,10 @@ def run_worker_loop(
                         "worker.finish",
                         worker=worker_id,
                         processed=processed,
+                        skipped=skipped,
                         rate=round(_worker_rate(processed, started_at, clock()), 1),
                     )
-                return processed
+                return WorkerResult(processed=processed, skipped=skipped)
             bind_contextvars(marc_id=marc.control_id)
             try:
                 output = _process_record(
@@ -209,6 +224,14 @@ def run_worker_loop(
                         processed=processed,
                         rate=round(_worker_rate(processed, started_at, clock()), 1),
                     )
+            except Exception:
+                skipped += 1
+                _LOGGER.exception(
+                    "worker.record_failed",
+                    worker=worker_id,
+                    marc=marc.control_id,
+                )
+                stats_put(encode_stats_event(RecordSkipped(control_id=marc.control_id)))
             finally:
                 unbind_contextvars("marc_id")
     if verbosity >= 1:
@@ -216,9 +239,10 @@ def run_worker_loop(
             "worker.finish",
             worker=worker_id,
             processed=processed,
+            skipped=skipped,
             rate=round(_worker_rate(processed, started_at, clock()), 1),
         )
-    return processed
+    return WorkerResult(processed=processed, skipped=skipped)
 
 
 def worker_main(
@@ -237,14 +261,15 @@ def worker_main(
     is_shutdown: Callable[[], bool],
     worker_id: int = 0,
     verbosity: int = 0,
-) -> int:
+) -> WorkerResult:
     """Top-level worker entry point.
 
     Opens the LMDB lookup, compiles the pairing config once, and runs the
     consume loop until exhaustion or shutdown. ``worker_id`` and ``verbosity``
     flow straight through to :func:`run_worker_loop`'s per-worker logging.
     The learned combiner's artifact is loaded once per worker inside the loop
-    via ``learned_model_dir``. Returns the count of processed records.
+    via ``learned_model_dir``. Returns the :class:`WorkerResult` tally of
+    processed and skipped records.
     """
     pairings = compile_pairings(pairing_config)
     with NyplIndexLookup(index_path) as lookup:
@@ -267,6 +292,7 @@ def worker_main(
 
 
 __all__ = [
+    "WorkerResult",
     "run_worker_loop",
     "worker_main",
 ]

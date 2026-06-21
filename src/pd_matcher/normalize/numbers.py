@@ -346,7 +346,9 @@ def roman_to_arabic(roman: str) -> int | None:
 
     Returns:
         The integer value, or ``None`` if ``roman`` is empty or contains
-        characters outside ``ivxlcdm``.
+        characters outside ``ivxlcdm`` (including the case where
+        :meth:`str.lower` expands a character into combining marks, e.g. the
+        Turkish dotted capital ``"İ"``).
     """
     if not roman or not _ROMAN_PATTERN.match(roman):
         return None
@@ -354,7 +356,9 @@ def roman_to_arabic(roman: str) -> int | None:
     total = 0
     previous = 0
     for char in reversed(lowered):
-        value = _ROMAN_VALUES[char]
+        value = _ROMAN_VALUES.get(char)
+        if value is None:
+            return None
         if value < previous:
             total -= value
         else:

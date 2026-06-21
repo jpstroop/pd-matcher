@@ -2,6 +2,7 @@
 
 from hypothesis import given
 from hypothesis.strategies import integers
+from hypothesis.strategies import text
 
 from pd_matcher.normalize.numbers import normalize_numbers
 from pd_matcher.normalize.numbers import ordinal_word_to_int
@@ -20,6 +21,34 @@ def test_roman_to_arabic_rejects_empty_and_invalid() -> None:
     assert roman_to_arabic("") is None
     assert roman_to_arabic("abc") is None
     assert roman_to_arabic("xq") is None
+
+
+def test_roman_to_arabic_returns_none_for_case_expanding_unicode() -> None:
+    """The Turkish dotted capital lowercases into a combining mark, not a numeral."""
+    assert roman_to_arabic("İ") is None
+
+
+def test_roman_to_arabic_returns_none_for_multichar_case_expanding_token() -> None:
+    """A token whose lowering expands a char must reject, never raise KeyError."""
+    assert roman_to_arabic("İV") is None
+
+
+def test_roman_to_arabic_still_parses_normal_numerals() -> None:
+    assert roman_to_arabic("XIV") == 14
+    assert roman_to_arabic("mcm") == 1900
+    assert roman_to_arabic("MiX") == 1009
+
+
+def test_normalize_numbers_does_not_crash_on_case_expanding_token() -> None:
+    """The composite path (the production caller) tolerates the crashy token."""
+    assert normalize_numbers("İ widgets", "eng") == "İ widgets"
+
+
+@given(text(max_size=8))
+def test_roman_to_arabic_never_raises(value: str) -> None:
+    """Across arbitrary Unicode input the parser returns ``int | None``, never raises."""
+    result = roman_to_arabic(value)
+    assert result is None or isinstance(result, int)
 
 
 def _int_to_roman(value: int) -> str:

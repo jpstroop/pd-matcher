@@ -2,6 +2,7 @@
 
 from pd_matcher.workers.events import ProducerHeartbeat
 from pd_matcher.workers.events import RecordProcessed
+from pd_matcher.workers.events import RecordSkipped
 from pd_matcher.workers.events import ShutdownEvent
 from pd_matcher.workers.events import WriterHeartbeat
 from pd_matcher.workers.reporter import RunningTotals
@@ -12,6 +13,16 @@ def test_record_processed_updates_counters() -> None:
     totals.apply(RecordProcessed(confidence=0.9, candidates_considered=2))
     totals.apply(RecordProcessed(confidence=0.7, candidates_considered=3))
     assert totals.records_processed == 2
+
+
+def test_record_skipped_updates_skipped_and_done_counters() -> None:
+    totals = RunningTotals(started_at=0.0)
+    totals.apply(RecordProcessed(confidence=0.9, candidates_considered=2))
+    stop = totals.apply(RecordSkipped(control_id="boom"))
+    assert stop is False
+    assert totals.records_processed == 1
+    assert totals.records_skipped == 1
+    assert totals.records_done == 2
 
 
 def test_producer_heartbeat_overwrites_enqueued() -> None:
@@ -76,6 +87,15 @@ def test_eta_seconds_estimates_remaining_time() -> None:
 def test_snapshot_exposes_counters() -> None:
     totals = RunningTotals(started_at=0.0)
     totals.records_processed = 1
+    totals.records_skipped = 2
     snapshot = totals.snapshot()
     assert snapshot.records_processed == 1
+    assert snapshot.records_skipped == 2
     assert snapshot.stop_reason == "running"
+
+
+def test_throughput_counts_skipped_records_as_done() -> None:
+    totals = RunningTotals(started_at=0.0)
+    totals.records_processed = 100
+    totals.records_skipped = 100
+    assert totals.throughput_per_sec(now=10.0) == 20.0
