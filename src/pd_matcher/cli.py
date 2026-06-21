@@ -544,6 +544,13 @@ def match(
             help="Override the matching config's scorer (weighted_mean|learned) for this run.",
         ),
     ] = None,
+    matches_only: Annotated[
+        bool,
+        Option(
+            "--matches-only/--no-matches-only",
+            help="Write only genuine matched pairs to --out, skipping no-match records.",
+        ),
+    ] = False,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
@@ -551,12 +558,17 @@ def match(
 ) -> None:
     """Match MARC records against the NYPL index and write a JSONL linkage report.
 
+    By default every input record gets one ``--out`` row, with blank ``match_*``
+    fields when nothing scored above the floor. Pass ``--matches-only`` to emit
+    rows only for genuine matched pairs.
+
     Examples:
         pd-matcher match \\
             --marc data/sample.marcxml \\
             --index caches/cce.lmdb \\
             --out /tmp/results.jsonl \\
             --scorer learned \\
+            --matches-only \\
             --workers 4
     """
     resolved_log_file = _enable_log_file("match", log_file)
@@ -624,6 +636,7 @@ def match(
             calibrator=calibrator,
             learned_model_dir=learned_model_dir,
             workers=workers,
+            matches_only=matches_only,
             report_interval_seconds=5.0,
             verbosity=verbose,
             log_level=_LOG_SETTINGS.level,

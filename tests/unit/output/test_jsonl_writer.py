@@ -236,6 +236,59 @@ def test_jsonl_writer_skipped_evidence_returns_empty_score(tmp_path: Path) -> No
     assert records[0]["publisher_score"] == ""
 
 
+def test_jsonl_writer_write_returns_true_on_real_write(tmp_path: Path) -> None:
+    """A genuine matched pair returns ``True`` from ``write``."""
+    path = tmp_path / "out.jsonl"
+    with JsonlResultWriter(path) as writer:
+        assert writer.write(_marc(), _match(), _nypl()) is True
+
+
+def test_jsonl_writer_write_returns_true_for_no_match_when_full_report(tmp_path: Path) -> None:
+    """Without ``matches_only`` a no-match still writes a blank row and returns ``True``."""
+    path = tmp_path / "out.jsonl"
+    with JsonlResultWriter(path) as writer:
+        assert writer.write(_marc(), None) is True
+    assert len(_read_records(path)) == 1
+
+
+def test_jsonl_writer_matches_only_skips_no_match(tmp_path: Path) -> None:
+    """``matches_only`` skips no-match records, returns ``False``, and writes nothing."""
+    path = tmp_path / "out.jsonl"
+    with JsonlResultWriter(path, matches_only=True) as writer:
+        assert writer.write(_marc(), None) is False
+    assert _read_records(path) == []
+
+
+def test_jsonl_writer_matches_only_skips_when_indexed_record_missing(tmp_path: Path) -> None:
+    """``matches_only`` skips a verdict whose indexed record could not be resolved."""
+    path = tmp_path / "out.jsonl"
+    with JsonlResultWriter(path, matches_only=True) as writer:
+        assert writer.write(_marc(), _match(), None) is False
+    assert _read_records(path) == []
+
+
+def test_jsonl_writer_matches_only_writes_genuine_match(tmp_path: Path) -> None:
+    """``matches_only`` writes the row for a genuine matched pair and returns ``True``."""
+    path = tmp_path / "out.jsonl"
+    with JsonlResultWriter(path, matches_only=True) as writer:
+        assert writer.write(_marc(), _match(), _nypl()) is True
+    records = _read_records(path)
+    assert len(records) == 1
+    assert records[0]["match_source_id"] == "UUID-0001"
+
+
+def test_jsonl_writer_matches_only_emits_only_matched_rows(tmp_path: Path) -> None:
+    """Mixed input under ``matches_only`` yields only the matched-pair rows."""
+    path = tmp_path / "out.jsonl"
+    with JsonlResultWriter(path, matches_only=True) as writer:
+        assert writer.write(_marc(), None) is False
+        assert writer.write(_marc(), _match(), _nypl()) is True
+        assert writer.write(_marc(), _match(), None) is False
+    records = _read_records(path)
+    assert len(records) == 1
+    assert records[0]["match_source_id"] == "UUID-0001"
+
+
 def test_jsonl_writer_write_outside_context_raises(tmp_path: Path) -> None:
     writer = JsonlResultWriter(tmp_path / "out.jsonl")
     with raises(RuntimeError, match="not entered"):

@@ -327,11 +327,16 @@ class StratifyingResultWriter:
         marc: MarcRecord,
         match: MatchResult | None,
         matched_nypl: IndexedNyplRegRecord | None = None,
-    ) -> None:
-        """Band one matched record and persist or buffer it accordingly."""
+    ) -> bool:
+        """Band one matched record and persist or buffer it accordingly.
+
+        Returns:
+            ``True`` when the pair was inserted immediately, ``False`` when it
+            was skipped (no match) or buffered/capped for later finalization.
+        """
         db = self._require_db()
         if match is None or match.best is None or matched_nypl is None:
-            return
+            return False
         self._seen += 1
         language = _language_of(marc)
         score = match.best.combined.calibrated
@@ -350,10 +355,10 @@ class StratifyingResultWriter:
             self._below_buffer.setdefault(language, []).append(
                 _BufferedCandidate(language=language, score=score, pair=pair)
             )
-            return
+            return False
         key = (language, band)
         if self._kept.get(key, 0) >= self._budget.cap_for(language, band):
-            return
+            return False
         pair = _build_pair_insert(
             marc,
             matched_nypl,
@@ -368,6 +373,7 @@ class StratifyingResultWriter:
         self._kept[key] = self._kept.get(key, 0) + 1
         if self._seen % _FILL_LOG_INTERVAL == 0:
             self._log_fill()
+        return True
 
     def _finalize_below_sample(self, db: ReviewDb) -> None:
         """Draw and persist the per-language below-0.7 reservoir."""

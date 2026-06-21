@@ -90,8 +90,13 @@ class ResultWriter(Protocol):
         marc: MarcRecord,
         match: MatchResult | None,
         matched_nypl: IndexedNyplRegRecord | None = None,
-    ) -> None:
-        """Emit one JSONL record for the supplied triple."""
+    ) -> bool:
+        """Emit one JSONL record for the supplied triple.
+
+        Returns:
+            ``True`` when a row was written, ``False`` when the record was
+            skipped (e.g. a no-match record under ``matches_only``).
+        """
         ...
 
 
@@ -215,11 +220,18 @@ def _build_row(
 class JsonlResultWriter:
     """:class:`ResultWriter` that emits the verified-linkage records as JSONL."""
 
-    __slots__ = ("_fp", "_path")
+    __slots__ = ("_fp", "_matches_only", "_path")
 
-    def __init__(self, path: Path) -> None:
-        """Capture ``path``; the file is opened on context-manager entry."""
+    def __init__(self, path: Path, *, matches_only: bool = False) -> None:
+        """Capture ``path``; the file is opened on context-manager entry.
+
+        Args:
+            path: Destination JSONL path.
+            matches_only: When ``True``, no-match records are skipped instead
+                of emitted as blank-``match_*`` linkage rows.
+        """
         self._path = path
+        self._matches_only = matches_only
         self._fp: IO[bytes] | None = None
 
     def __enter__(self) -> Self:
@@ -245,7 +257,7 @@ class JsonlResultWriter:
         marc: MarcRecord,
         match: MatchResult | None,
         matched_nypl: IndexedNyplRegRecord | None = None,
-    ) -> None:
+    ) -> bool:
         """Emit one JSONL record for the supplied triple.
 
         Args:
@@ -255,13 +267,20 @@ class JsonlResultWriter:
                 ``match.best``. When omitted the record's ``match_*`` fields
                 are blank even if ``match.best`` is set, because the writer
                 cannot resolve the indexed record on its own.
+
+        Returns:
+            ``True`` when a row was written; ``False`` when the record was a
+            no-match and ``matches_only`` is enabled, so nothing was emitted.
         """
         if self._fp is None:
             raise RuntimeError("JsonlResultWriter not entered; use as a context manager")
+        if self._matches_only and (match is None or match.best is None or matched_nypl is None):
+            return False
         row = _build_row(marc, match, matched_nypl)
         self._fp.write(json_encode(row))
         self._fp.write(_NEWLINE)
         self._fp.flush()
+        return True
 
 
 __all__ = [
