@@ -65,12 +65,12 @@ def run_writer_loop(
         if blob is None:
             break
         payload = decode_worker_output(blob)
-        writer.write(
+        if writer.write(
             payload.marc,
             payload.match,
             payload.matched_nypl,
-        )
-        written += 1
+        ):
+            written += 1
         now = clock()
         if now - last_heartbeat >= heartbeat_interval_seconds:
             stats_put(encode_stats_event(WriterHeartbeat(records_written=written)))

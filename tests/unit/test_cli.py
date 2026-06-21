@@ -187,6 +187,7 @@ def test_match_help_lists_options() -> None:
         "--year-window",
         "--min-score",
         "--scorer",
+        "--matches-only",
     ):
         assert flag in result.stdout
 
@@ -758,6 +759,81 @@ def test_match_reports_interrupted(
     )
     assert result.exit_code == 130
     assert "interrupted" in result.output
+
+
+def test_match_matches_only_flag_forwards_to_run_match(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``--matches-only`` reaches ``run_match`` as ``matches_only=True``."""
+    index_path = _build_index(tmp_path)
+    captured: dict[str, object] = {}
+
+    from pd_matcher.workers.pool import RunReport
+
+    def _fake_run_match(**kwargs: object) -> RunReport:
+        captured.update(kwargs)
+        return RunReport(
+            records_processed=1,
+            records_written=1,
+            records_enqueued=1,
+            duration_seconds=0.01,
+            interrupted=False,
+        )
+
+    monkeypatch.setattr("pd_matcher.cli.run_match", _fake_run_match)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.jsonl"),
+            "--matches-only",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["matches_only"] is True
+
+
+def test_match_defaults_to_full_report_without_flag(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Omitting the flag forwards ``matches_only=False`` (full-report default)."""
+    index_path = _build_index(tmp_path)
+    captured: dict[str, object] = {}
+
+    from pd_matcher.workers.pool import RunReport
+
+    def _fake_run_match(**kwargs: object) -> RunReport:
+        captured.update(kwargs)
+        return RunReport(
+            records_processed=1,
+            records_written=1,
+            records_enqueued=1,
+            duration_seconds=0.01,
+            interrupted=False,
+        )
+
+    monkeypatch.setattr("pd_matcher.cli.run_match", _fake_run_match)
+    result = _runner.invoke(
+        app,
+        [
+            "match",
+            "--marc",
+            str(_FIXTURES / "tiny.marcxml"),
+            "--index",
+            str(index_path),
+            "--out",
+            str(tmp_path / "out.jsonl"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["matches_only"] is False
 
 
 def test_match_surfaces_oserror_from_run_match(

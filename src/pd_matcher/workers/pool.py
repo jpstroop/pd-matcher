@@ -15,6 +15,7 @@ sticking to ``spawn`` and we gain identical behaviour on macOS and Linux.
 
 from collections.abc import Callable
 from collections.abc import Iterator
+from functools import partial
 from multiprocessing import get_context
 from multiprocessing.context import SpawnContext
 from multiprocessing.context import SpawnProcess
@@ -99,9 +100,14 @@ def _default_workers() -> int:
     return max(1, cpus - 1)
 
 
-def _build_jsonl_writer(path: Path) -> ResultWriter:
-    """Construct the default JSONL writer."""
-    return JsonlResultWriter(path)
+def _build_jsonl_writer(path: Path, *, matches_only: bool = False) -> ResultWriter:
+    """Construct the default JSONL writer.
+
+    Args:
+        path: Destination JSONL path.
+        matches_only: When ``True``, the writer skips no-match records.
+    """
+    return JsonlResultWriter(path, matches_only=matches_only)
 
 
 def _spawn_workers(
@@ -271,7 +277,8 @@ def run_match(
     workers: int | None = None,
     batch_size: int = _DEFAULT_BATCH_SIZE,
     queue_maxsize: int | None = None,
-    writer_factory: WriterFactory = _build_jsonl_writer,
+    writer_factory: WriterFactory | None = None,
+    matches_only: bool = False,
     report_interval_seconds: float = _DEFAULT_REPORT_INTERVAL_SECONDS,
     verbosity: int = 0,
     log_level: str = "INFO",
@@ -309,8 +316,12 @@ def run_match(
         workers: Number of worker processes. ``None`` uses ``cpu_count - 1``.
         batch_size: MARC records per IPC batch.
         queue_maxsize: Bound on the input queue. ``None`` derives ``workers * 4``.
-        writer_factory: Factory producing the per-record JSONL writer. Defaults
-            to :class:`JsonlResultWriter`.
+        writer_factory: Factory producing the per-record JSONL writer. ``None``
+            (the default) uses :class:`JsonlResultWriter` honoring
+            ``matches_only``; an explicit factory bypasses ``matches_only``.
+        matches_only: When ``True``, the default writer skips no-match records
+            and emits rows only for genuine matched pairs. Ignored when an
+            explicit ``writer_factory`` is supplied.
         report_interval_seconds: Reporter cadence.
         verbosity: ``0`` aggregate-only; ``1`` adds per-worker heartbeats;
             ``2`` adds per-record hit lines. Forwarded to each worker.
@@ -324,6 +335,11 @@ def run_match(
         A :class:`RunReport` describing the run.
     """
     records = _resolve_source(marc_path, prepared_dir)
+    resolved_factory: WriterFactory = (
+        partial(_build_jsonl_writer, matches_only=matches_only)
+        if writer_factory is None
+        else writer_factory
+    )
     worker_count = workers if workers is not None else _default_workers()
     if worker_count < 1:
         raise ValueError(f"workers must be >= 1 (got {worker_count!r})")
@@ -366,7 +382,7 @@ def run_match(
             name="pd_matcher.writer",
             kwargs={
                 "output_path": output_path,
-                "writer_factory": writer_factory,
+                "writer_factory": resolved_factory,
                 "output_queue": output_queue,
                 "stats_queue": stats_queue,
                 "shutdown_event": coord.event,

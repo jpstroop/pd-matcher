@@ -44,6 +44,13 @@ def test_default_workers_returns_positive_count() -> None:
 def test_build_jsonl_writer_returns_jsonl_writer(tmp_path: Path) -> None:
     writer = _build_jsonl_writer(tmp_path / "x.jsonl")
     assert isinstance(writer, JsonlResultWriter)
+    assert writer._matches_only is False
+
+
+def test_build_jsonl_writer_honors_matches_only(tmp_path: Path) -> None:
+    writer = _build_jsonl_writer(tmp_path / "x.jsonl", matches_only=True)
+    assert isinstance(writer, JsonlResultWriter)
+    assert writer._matches_only is True
 
 
 def test_shutdown_predicate_tracks_event() -> None:
@@ -201,6 +208,98 @@ def test_run_match_returns_run_report(
     assert report.records_written == report.records_processed
     assert report.interrupted is False
     assert output_path.exists()
+
+
+def _build_tiny_index(tmp_path: Path) -> tuple[Path, IdfTable, IdfTable, IdfTable]:
+    """Build a tiny LMDB index and its IDF tables from the shared fixtures."""
+    from pd_matcher.index.builder import build_index
+
+    reg_dir = tmp_path / "reg"
+    ren_dir = tmp_path / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "tiny_reg.xml").write_bytes((_FIXTURES / "tiny_reg.xml").read_bytes())
+    (ren_dir / "tiny_ren.tsv").write_bytes((_FIXTURES / "tiny_ren.tsv").read_bytes())
+    index_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=index_path)
+    with NyplIndexLookup(index_path) as lookup:
+        idf = build_idf_table(lookup)
+        author_idf = build_author_idf_table(lookup)
+        publisher_idf = build_publisher_idf_table(lookup)
+    return index_path, idf, author_idf, publisher_idf
+
+
+def _tiny_match_config() -> MatchingConfig:
+    return MatchingConfig(
+        title_weight=0.50,
+        author_weight=0.20,
+        publisher_weight=0.10,
+        edition_weight=0.05,
+        lccn_weight=0.10,
+        isbn_weight=0.05,
+        extent_weight=0.0,
+        volume_weight=0.0,
+        year_window=2,
+        min_combined_score=30.0,
+        scorer="weighted_mean",
+    )
+
+
+def test_run_match_matches_only_emits_no_blank_rows(
+    pairing_config: PairingConfig,
+    tmp_path: Path,
+) -> None:
+    """``matches_only`` keeps only genuine pairs; every emitted row is a match."""
+    index_path, idf, author_idf, publisher_idf = _build_tiny_index(tmp_path)
+    output_path = tmp_path / "results.jsonl"
+    report = run_match(
+        marc_path=_FIXTURES / "tiny.marcxml",
+        index_path=index_path,
+        output_path=output_path,
+        matching_config=_tiny_match_config(),
+        pairing_config=pairing_config,
+        idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
+        workers=1,
+        batch_size=2,
+        queue_maxsize=4,
+        matches_only=True,
+        report_interval_seconds=0.05,
+    )
+    rows = [
+        json_decode(line, type=dict[str, str])
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    assert report.records_written == len(rows)
+    assert all(row["match_source_id"] != "" for row in rows)
+
+
+def test_run_match_uses_explicit_writer_factory(
+    pairing_config: PairingConfig,
+    tmp_path: Path,
+) -> None:
+    """An explicit ``writer_factory`` bypasses the default ``matches_only`` factory."""
+    index_path, idf, author_idf, publisher_idf = _build_tiny_index(tmp_path)
+    output_path = tmp_path / "results.jsonl"
+    report = run_match(
+        marc_path=_FIXTURES / "tiny.marcxml",
+        index_path=index_path,
+        output_path=output_path,
+        matching_config=_tiny_match_config(),
+        pairing_config=pairing_config,
+        idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
+        workers=1,
+        batch_size=2,
+        queue_maxsize=4,
+        writer_factory=JsonlResultWriter,
+        matches_only=True,
+        report_interval_seconds=0.05,
+    )
+    assert report.records_written == report.records_processed
 
 
 def test_resolve_source_requires_exactly_one_input(tmp_path: Path) -> None:
