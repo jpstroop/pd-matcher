@@ -17,6 +17,7 @@ from typer import Option
 from typer import Typer
 from typer import echo
 
+from pd_groundtruth.acquire import _DEFAULT_MIN_FREE_SPACE_MB
 from pd_groundtruth.acquire import acquire
 from pd_groundtruth.acquire import default_min_year
 from pd_groundtruth.active_learning import ActiveLearningSummary
@@ -24,6 +25,7 @@ from pd_groundtruth.active_learning import run_active_learning
 from pd_groundtruth.active_select import DEFAULT_LANGUAGE_WEIGHTS
 from pd_groundtruth.build_corpus import build_corpus
 from pd_groundtruth.build_queue import build_queue
+from pd_groundtruth.disk_guard import InsufficientDiskSpaceError
 from pd_groundtruth.dump_vault_marcs import dump_vault_marcs
 from pd_groundtruth.enrich_vault import run_enrich
 from pd_groundtruth.filter import filter_marcxml
@@ -137,6 +139,16 @@ def acquire_command(
     max_dumps: Annotated[
         int | None, Option("--max-dumps", help="Cap the number of dumps processed.")
     ] = None,
+    min_free_space_mb: Annotated[
+        int,
+        Option(
+            "--min-free-space-mb",
+            help=(
+                "Abort safely if the temp-download or output filesystem drops below this "
+                "many MB free, checked before and during each download. 0 disables the guard."
+            ),
+        ),
+    ] = _DEFAULT_MIN_FREE_SPACE_MB,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
@@ -151,6 +163,7 @@ def acquire_command(
         min_year=resolved_min_year,
         manifest_url=manifest_url,
         max_dumps=max_dumps,
+        min_free_space_mb=min_free_space_mb,
     )
     kept = " ".join(f"{language}={count}" for language, count in report.kept_by_language.items())
     echo(
@@ -269,6 +282,17 @@ def build_corpus_command(
     max_dumps: Annotated[
         int | None, Option("--max-dumps", help="Cap the number of dumps processed.")
     ] = None,
+    min_free_space_mb: Annotated[
+        int,
+        Option(
+            "--min-free-space-mb",
+            help=(
+                "Abort safely if the temp-download or output filesystem drops below this "
+                "many MB free, checked before and during each download. The partial corpus "
+                "is finalized as a valid <collection>. 0 disables the guard."
+            ),
+        ),
+    ] = _DEFAULT_MIN_FREE_SPACE_MB,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
@@ -285,16 +309,30 @@ def build_corpus_command(
     production corpus extractor, not the capped training-set sampler. Each dump
     is downloaded to a temp file, scanned, and deleted before the next one, so
     the raw catalog never accumulates on disk.
+
+    If free disk space drops below ``--min-free-space-mb`` the run aborts safely:
+    the partial corpus is finalized as a valid ``<collection>`` and the command
+    exits non-zero.
     """
     _configure_logging("build-corpus", log_file)
     resolved_min_year = default_min_year() if min_year is None else min_year
-    report = build_corpus(
-        output_path=output_path,
-        min_year=resolved_min_year,
-        languages=_parse_languages(languages),
-        manifest_url=manifest_url,
-        max_dumps=max_dumps,
-    )
+    try:
+        report = build_corpus(
+            output_path=output_path,
+            min_year=resolved_min_year,
+            languages=_parse_languages(languages),
+            manifest_url=manifest_url,
+            max_dumps=max_dumps,
+            min_free_space_mb=min_free_space_mb,
+        )
+    except InsufficientDiskSpaceError as error:
+        echo(
+            f"aborted: {error} "
+            f"(wrote {error.records_written} records across {error.dumps_written} dumps "
+            f"to {output_path}; threshold was {min_free_space_mb} MB)",
+            err=True,
+        )
+        raise Exit(code=1) from error
     breakdown = " ".join(
         f"{reason}={count}" for reason, count in sorted(report.dropped_by_reason.items())
     )

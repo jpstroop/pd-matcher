@@ -25,7 +25,10 @@ from pathlib import Path
 
 from msgspec import Struct
 
+from pd_groundtruth.acquire import _DEFAULT_MIN_FREE_SPACE_MB
 from pd_groundtruth.acquire import stream_dump_records
+from pd_groundtruth.disk_guard import DiskSpaceGuard
+from pd_groundtruth.disk_guard import InsufficientDiskSpaceError
 from pd_groundtruth.filter import _drop_reason
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.manifest import DumpEntry
@@ -52,6 +55,7 @@ def build_corpus(
     languages: frozenset[str] | None = None,
     manifest_url: str = DEFAULT_MANIFEST_URL,
     max_dumps: int | None = None,
+    min_free_space_mb: int = _DEFAULT_MIN_FREE_SPACE_MB,
 ) -> CorpusReport:
     """Stream every manifest dump and write all in-scope records to one file.
 
@@ -70,10 +74,18 @@ def build_corpus(
         manifest_url: Absolute URL of the dump manifest JSON.
         max_dumps: Optional cap on the number of dumps processed (for testing or
             partial runs).
+        min_free_space_mb: Minimum free space, in MB, required on both the temp
+            download directory and the output directory before each download
+            begins and periodically during it. ``0`` disables the guard.
 
     Returns:
         A :class:`CorpusReport` with the dumps processed, records scanned, kept
         (in-scope), and dropped counts plus a per-reason breakdown.
+
+    Raises:
+        InsufficientDiskSpaceError: If a guarded filesystem runs below the
+            free-space floor; the partial corpus is finalized as a valid
+            ``<collection>`` before the error propagates.
     """
     entries = fetch_manifest(manifest_url)
     return _build_corpus_entries(
@@ -82,6 +94,7 @@ def build_corpus(
         min_year=min_year,
         languages=languages,
         max_dumps=max_dumps,
+        guard=DiskSpaceGuard.from_megabytes(min_free_space_mb),
     )
 
 
@@ -92,6 +105,7 @@ def _build_corpus_entries(
     min_year: int,
     languages: frozenset[str] | None,
     max_dumps: int | None,
+    guard: DiskSpaceGuard,
 ) -> CorpusReport:
     """Run corpus extraction over an already-resolved set of dump entries."""
     dropped_by_reason: Counter[str] = Counter()
@@ -99,29 +113,40 @@ def _build_corpus_entries(
     records_scanned = 0
     kept = 0
     with MarcxmlCollectionWriter(output_path) as writer:
-        for entry in entries:
-            if max_dumps is not None and dumps_processed >= max_dumps:
-                break
-            dump_scanned = 0
-            dump_kept = 0
-            for record in stream_dump_records(entry):
-                dump_scanned += 1
-                reason = _drop_reason(record, min_year, languages)
-                if reason is None:
-                    writer.write(record)
-                    dump_kept += 1
-                else:
-                    dropped_by_reason[reason] += 1
-                record.clear()
-            dumps_processed += 1
-            records_scanned += dump_scanned
-            kept += dump_kept
-            _LOGGER.info(
-                "dump done: scanned=%d kept=%d running_kept=%d",
-                dump_scanned,
-                dump_kept,
-                kept,
+        try:
+            for entry in entries:
+                if max_dumps is not None and dumps_processed >= max_dumps:
+                    break
+                dump_scanned = 0
+                dump_kept = 0
+                for record in stream_dump_records(entry, guard=guard, output_path=output_path):
+                    dump_scanned += 1
+                    reason = _drop_reason(record, min_year, languages)
+                    if reason is None:
+                        writer.write(record)
+                        dump_kept += 1
+                    else:
+                        dropped_by_reason[reason] += 1
+                    record.clear()
+                dumps_processed += 1
+                records_scanned += dump_scanned
+                kept += dump_kept
+                _LOGGER.info(
+                    "dump done: scanned=%d kept=%d running_kept=%d",
+                    dump_scanned,
+                    dump_kept,
+                    kept,
+                )
+        except InsufficientDiskSpaceError as error:
+            error.records_written = writer.records_written
+            error.dumps_written = dumps_processed
+            _LOGGER.error(
+                "disk space exhausted after %d dumps / %d records; finalizing partial corpus at %s",
+                dumps_processed,
+                writer.records_written,
+                output_path,
             )
+            raise
         kept = writer.records_written
     dropped = records_scanned - kept
     _LOGGER.info(

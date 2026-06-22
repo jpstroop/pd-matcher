@@ -14,6 +14,7 @@ from pd_groundtruth.build_corpus import CorpusReport
 from pd_groundtruth.build_queue import BuildSummary
 from pd_groundtruth.cli import _configure_logging
 from pd_groundtruth.cli import app
+from pd_groundtruth.disk_guard import InsufficientDiskSpaceError
 from pd_groundtruth.filter import FilterReport
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.review_db import VERDICT_MATCH
@@ -76,6 +77,7 @@ def test_acquire_command_passes_arguments_through(tmp_path: Path) -> None:
         min_year=1931,
         manifest_url="https://example.test/m.json",
         max_dumps=1,
+        min_free_space_mb=2048,
     )
     assert "eng=4" in result.stdout
     assert "stopped_reason=max_dumps" in result.stdout
@@ -90,6 +92,7 @@ def test_acquire_command_defaults(tmp_path: Path) -> None:
     assert kwargs["per_decade_cap"] == 20000
     assert kwargs["min_year"] == date.today().year - 95
     assert kwargs["max_dumps"] is None
+    assert kwargs["min_free_space_mb"] == 2048
 
 
 def test_build_queue_command_defaults(tmp_path: Path) -> None:
@@ -635,6 +638,7 @@ def test_build_corpus_command_passes_arguments_through(tmp_path: Path) -> None:
         languages=frozenset({"eng", "fre"}),
         manifest_url="https://example.test/m.json",
         max_dumps=3,
+        min_free_space_mb=2048,
     )
     assert "dumps_processed=2 records_scanned=100 kept=60 dropped=40" in result.stdout
     assert "not_a_book=30" in result.stdout
@@ -660,6 +664,7 @@ def test_build_corpus_command_defaults_to_moving_wall_and_all_languages(tmp_path
     assert kwargs["languages"] is None
     assert kwargs["max_dumps"] is None
     assert kwargs["manifest_url"] == DEFAULT_MANIFEST_URL
+    assert kwargs["min_free_space_mb"] == 2048
 
 
 def test_build_corpus_command_rejects_empty_languages(tmp_path: Path) -> None:
@@ -679,3 +684,65 @@ def test_build_corpus_command_rejects_empty_languages(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     mock_corpus.assert_not_called()
+
+
+def test_build_corpus_command_threads_min_free_space(tmp_path: Path) -> None:
+    with patch("pd_groundtruth.cli.build_corpus", return_value=_corpus_report()) as mock_corpus:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-corpus",
+                "--output",
+                str(tmp_path / "corpus.marcxml"),
+                "--min-free-space-mb",
+                "512",
+                "--log-file",
+                str(tmp_path / "corpus.log"),
+            ],
+        )
+
+    assert result.exit_code == 0
+    _, kwargs = mock_corpus.call_args
+    assert kwargs["min_free_space_mb"] == 512
+
+
+def test_acquire_command_threads_min_free_space(tmp_path: Path) -> None:
+    with patch("pd_groundtruth.cli.acquire", return_value=_report()) as mock_acquire:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "acquire",
+                "--out-dir",
+                str(tmp_path / "out"),
+                "--min-free-space-mb",
+                "256",
+            ],
+        )
+
+    assert result.exit_code == 0
+    _, kwargs = mock_acquire.call_args
+    assert kwargs["min_free_space_mb"] == 256
+
+
+def test_build_corpus_command_exits_nonzero_on_disk_space_error(tmp_path: Path) -> None:
+    error = InsufficientDiskSpaceError("insufficient disk space at /tmp: 1.00 MB free")
+    error.records_written = 42
+    error.dumps_written = 3
+    with patch("pd_groundtruth.cli.build_corpus", side_effect=error):
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-corpus",
+                "--output",
+                str(tmp_path / "corpus.marcxml"),
+                "--min-free-space-mb",
+                "2048",
+                "--log-file",
+                str(tmp_path / "corpus.log"),
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert "wrote 42 records across 3 dumps" in result.stderr
+    assert "threshold was 2048 MB" in result.stderr
+    assert "insufficient disk space" in result.stderr

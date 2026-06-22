@@ -88,6 +88,12 @@ pdm run pd-groundtruth acquire --out-dir data/candidates
 
 Both produce files under `caches/` and `data/candidates/` that are gitignored — they're derived, regenerable, and large.
 
+`acquire` and `build-corpus` both stream large multi-dump downloads to disk. They abort safely (rather than filling the filesystem) if free space on either the temp-download directory or the output directory drops below `--min-free-space-mb` (default `2048`), checked before and during each download; pass `--min-free-space-mb 0` to disable the guard. When `build-corpus` aborts this way it still finalizes a valid partial `<collection>` and exits non-zero:
+
+```bash
+pdm run pd-groundtruth build-corpus --output data/corpus.marcxml --min-free-space-mb 4096
+```
+
 ---
 
 ## Daily flow A — operate the matcher
