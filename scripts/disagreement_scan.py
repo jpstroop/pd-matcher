@@ -116,6 +116,19 @@ _RANDOM_STATE: Final[int] = 20260617
 _N_SPLITS: Final[int] = 5
 _BOUNDARY: Final[float] = 0.5
 
+# A genuine model-vs-model disagreement requires BOTH matchers to be confidently
+# committed to OPPOSITE verdicts; a single moving weighted threshold does not
+# clean the bucket (disagreement is conserved across thresholds), so membership
+# is a per-matcher confidence-zone test instead. The learned model's confidence
+# zone is symmetric about its calibrated boundary: confident-match at
+# ``>= 0.5 + margin``, confident-no at ``<= 0.5 - margin``. The weighted matcher's
+# confident-match point is the equal-precision threshold (already computed);
+# weighted confident-no is the separate ``_WEIGHTED_CONF_NO`` cutoff. Pairs on
+# opposite sides where EITHER matcher sits in its uncertain middle are not genuine
+# disagreements and fall through.
+_LEARNED_CONF_MARGIN: Final[float] = 0.15
+_WEIGHTED_CONF_NO: Final[float] = 0.55
+
 _VOLUME_SCORER: Final[str] = "volume.compat"
 _INCOMPATIBLE: Final[float] = 0.0
 
@@ -216,6 +229,9 @@ class ScanResult:
     unresolved: int = 0
     agree: int = 0
     limit: int | None = None
+    weighted_threshold: float = _BOUNDARY
+    target_precision: float = 0.0
+    weighted_precision: float = 0.0
 
     def surfaced_for(self, bucket: str) -> int:
         """Return the surfaced count for ``bucket`` (``0`` when none yet)."""
@@ -242,39 +258,290 @@ def _is_volume_incompatible(evidence: tuple[Evidence, ...]) -> bool:
     return False
 
 
-def _bucket_for(pair: ScoredPair) -> str | None:
+def _precision_at(scores: list[float], labels: list[bool], threshold: float) -> float | None:
+    """Return precision among pairs scoring ``>= threshold``, or ``None`` if none qualify.
+
+    Precision is the fraction of true matches among the pairs predicted match at
+    ``threshold``. ``None`` signals that no pair qualifies (an empty prediction
+    set), which the callers treat as a non-candidate threshold.
+    """
+    qualified = 0
+    true_positive = 0
+    for score, label in zip(scores, labels, strict=True):
+        if score >= threshold:
+            qualified += 1
+            if label:
+                true_positive += 1
+    if qualified == 0:
+        return None
+    return true_positive / qualified
+
+
+def _equal_precision_threshold(
+    weighted_scores: list[float], learned_scores: list[float], labels: list[bool]
+) -> float:
+    """Return the most-inclusive weighted cutoff at least as precise as learned@0.5.
+
+    The learned model's calibrated boundary is :data:`_BOUNDARY`; its precision
+    there (``target_precision``) is the trust bar. Candidate weighted thresholds
+    are the sorted distinct weighted scores ascending; for each, weighted
+    precision is the fraction of true matches among pairs scoring ``>=`` it. The
+    LOWEST threshold whose weighted precision reaches ``target_precision`` is
+    returned — the most-inclusive weighted cutoff still at least as trustworthy
+    as learned@0.5 — which excludes the weighted matcher's mushy low-precision
+    band instead of flooding ``model-vs-model`` with it.
+
+    Degenerate cases: single-class labels return :data:`_BOUNDARY`; empty input
+    or no candidate reaching ``target_precision`` returns the most-conservative
+    cutoff (the highest distinct weighted score) with a ``_progress`` warning.
+    """
+    n_positive = sum(1 for label in labels if label)
+    if n_positive == 0 or n_positive == len(labels):
+        return _BOUNDARY
+    target_precision = _precision_at(learned_scores, labels, _BOUNDARY)
+    if target_precision is None:
+        _progress(
+            "equal-precision: no learned pair scores >= 0.5; "
+            "falling back to most-conservative weighted cutoff"
+        )
+        return max(weighted_scores)
+    for threshold in sorted(set(weighted_scores)):
+        precision = _precision_at(weighted_scores, labels, threshold)
+        if precision is None:
+            continue
+        if precision >= target_precision:
+            return threshold
+    _progress(
+        f"equal-precision: no weighted threshold reaches learned precision "
+        f"{target_precision:.4f}; falling back to most-conservative weighted cutoff"
+    )
+    return max(weighted_scores)
+
+
+def _model_vs_model_count(
+    weighted_scores: list[float], learned_scores: list[float], threshold: float
+) -> int:
+    """Return pairs where learned@0.5 and weighted@``threshold`` land on opposite sides."""
+    count = 0
+    for weighted, learned in zip(weighted_scores, learned_scores, strict=True):
+        if (learned >= _BOUNDARY) != (weighted >= threshold):
+            count += 1
+    return count
+
+
+def _print_threshold_diagnostics(
+    weighted_scores: list[float],
+    learned_scores: list[float],
+    labels: list[bool],
+    chosen_threshold: float,
+) -> None:
+    """Print weighted precision and model-vs-model count across reference thresholds.
+
+    A stdout-only diagnostic (never written to the DB): one row per reference
+    threshold (0.50…0.70) plus the chosen equal-precision cutoff, each showing
+    weighted precision and the resulting model-vs-model count, so the monotonic
+    behavior and the sensibility of the chosen cutoff are visible at a glance.
+    """
+    reference: list[float] = [0.50, 0.55, 0.60, 0.65, 0.70]
+    thresholds: list[float] = sorted({*reference, round(chosen_threshold, 6)})
+    print()
+    print("=== weighted-threshold diagnostics (stdout only) ===")
+    print(f"{'threshold':>10} {'wtd_precision':>14} {'model-vs-model':>15}  note")
+    print("-" * 58)
+    for threshold in thresholds:
+        precision = _precision_at(weighted_scores, labels, threshold)
+        precision_text = "n/a" if precision is None else f"{precision:.4f}"
+        mvm = _model_vs_model_count(weighted_scores, learned_scores, threshold)
+        note = "<- chosen" if abs(threshold - chosen_threshold) < 1e-9 else ""
+        print(f"{threshold:>10.4f} {precision_text:>14} {mvm:>15}  {note}")
+
+
+def _is_genuine_model_vs_model(
+    pair: ScoredPair,
+    weighted_threshold: float,
+    learned_conf_margin: float,
+    weighted_conf_no: float,
+) -> bool:
+    """Return whether both matchers confidently committed to OPPOSITE verdicts.
+
+    A genuine disagreement requires each matcher to be in its confident zone on
+    opposite sides: learned confident-match (``>= 0.5 + margin``) with weighted
+    confident-no (``<= weighted_conf_no``), or learned confident-no
+    (``<= 0.5 - margin``) with weighted confident-match (``>= weighted_threshold``,
+    the equal-precision point). Pairs that land on opposite sides of the plain
+    boundaries but where EITHER matcher sits in its uncertain middle (learned in
+    ``(0.5 - margin, 0.5 + margin)`` or weighted in ``(weighted_conf_no,
+    weighted_threshold)``) are NOT genuine and return ``False``.
+    """
+    learned_conf_match = pair.learned >= _BOUNDARY + learned_conf_margin
+    learned_conf_no = pair.learned <= _BOUNDARY - learned_conf_margin
+    weighted_conf_match = pair.weighted >= weighted_threshold
+    weighted_conf_no = pair.weighted <= weighted_conf_no
+    return (learned_conf_match and weighted_conf_no) or (
+        learned_conf_no and weighted_conf_match
+    )
+
+
+def _genuine_mvm_count(
+    weighted_scores: list[float],
+    learned_scores: list[float],
+    weighted_threshold: float,
+    learned_conf_margin: float,
+    weighted_conf_no: float,
+) -> int:
+    """Return the count of GENUINE model-vs-model pairs at the given confidence zones.
+
+    A genuine pair has both matchers confidently committed to opposite verdicts:
+    learned confident-match (``>= 0.5 + margin``) with weighted confident-no
+    (``<= weighted_conf_no``), or learned confident-no (``<= 0.5 - margin``) with
+    weighted confident-match (``>= weighted_threshold``). This standalone counter
+    runs the same membership test as :func:`_is_genuine_model_vs_model` over raw
+    score lists for the stdout sensitivity grid (no bucketing, no priority).
+    """
+    count = 0
+    for weighted, learned in zip(weighted_scores, learned_scores, strict=True):
+        learned_conf_match = learned >= _BOUNDARY + learned_conf_margin
+        learned_conf_no = learned <= _BOUNDARY - learned_conf_margin
+        weighted_conf_match = weighted >= weighted_threshold
+        weighted_conf_no_zone = weighted <= weighted_conf_no
+        if (learned_conf_match and weighted_conf_no_zone) or (
+            learned_conf_no and weighted_conf_match
+        ):
+            count += 1
+    return count
+
+
+def _genuine_mvm_direction_split(
+    weighted_scores: list[float],
+    learned_scores: list[float],
+    weighted_threshold: float,
+    learned_conf_margin: float,
+    weighted_conf_no: float,
+) -> tuple[int, int]:
+    """Return ``(learned_match_weighted_no, learned_no_weighted_match)`` counts.
+
+    The first element counts genuine pairs where learned says confident-match but
+    weighted says confident-no (a weighted recall miss); the second counts the
+    reverse, learned confident-no with weighted confident-match (weighted
+    over-accept, e.g. whole/part false-accepts).
+    """
+    learned_match_weighted_no = 0
+    learned_no_weighted_match = 0
+    for weighted, learned in zip(weighted_scores, learned_scores, strict=True):
+        learned_conf_match = learned >= _BOUNDARY + learned_conf_margin
+        learned_conf_no = learned <= _BOUNDARY - learned_conf_margin
+        weighted_conf_match = weighted >= weighted_threshold
+        weighted_conf_no_zone = weighted <= weighted_conf_no
+        if learned_conf_match and weighted_conf_no_zone:
+            learned_match_weighted_no += 1
+        elif learned_conf_no and weighted_conf_match:
+            learned_no_weighted_match += 1
+    return learned_match_weighted_no, learned_no_weighted_match
+
+
+def _print_genuine_mvm_diagnostics(
+    weighted_scores: list[float],
+    learned_scores: list[float],
+    weighted_threshold: float,
+    learned_conf_margin: float,
+    weighted_conf_no: float,
+) -> None:
+    """Print the genuine model-vs-model sensitivity grid and the chosen-defaults split.
+
+    A stdout-only diagnostic (never written to the DB). The grid sweeps the
+    learned confidence margin over {0.10, 0.15, 0.20} and the weighted
+    confident-no cutoff over {0.50, 0.55, 0.60}, holding weighted confident-match
+    fixed at the computed equal-precision ``weighted_threshold``, so the
+    sensitivity of the genuine count to the confidence zones is visible. Below the
+    grid, for the chosen defaults, the direction split (weighted recall miss vs
+    weighted over-accept) is printed.
+    """
+    margins: list[float] = [0.10, 0.15, 0.20]
+    conf_nos: list[float] = [0.50, 0.55, 0.60]
+    print()
+    print("=== genuine model-vs-model sensitivity (stdout only) ===")
+    print(f"weighted confident-match fixed at equal-precision={weighted_threshold:.4f}")
+    header = f"{'margin':>8} " + " ".join(f"wconf_no={c:.2f}" for c in conf_nos)
+    print(header)
+    print("-" * len(header))
+    for margin in margins:
+        counts = [
+            _genuine_mvm_count(
+                weighted_scores, learned_scores, weighted_threshold, margin, conf_no
+            )
+            for conf_no in conf_nos
+        ]
+        cells = [f"{count:>12}" for count in counts]
+        print(f"{margin:>8.2f} " + " ".join(cells))
+    learned_match_weighted_no, learned_no_weighted_match = _genuine_mvm_direction_split(
+        weighted_scores,
+        learned_scores,
+        weighted_threshold,
+        learned_conf_margin,
+        weighted_conf_no,
+    )
+    total = learned_match_weighted_no + learned_no_weighted_match
+    print()
+    print(
+        f"direction split @ defaults (margin={learned_conf_margin:.2f}, "
+        f"wconf_no={weighted_conf_no:.2f}, wconf_match={weighted_threshold:.4f}):"
+    )
+    print(
+        f"  learned=match & weighted=no (weighted recall miss):       "
+        f"{learned_match_weighted_no}"
+    )
+    print(
+        f"  learned=no & weighted=match (weighted over-accept):       "
+        f"{learned_no_weighted_match}"
+    )
+    print(f"  total genuine model-vs-model:                             {total}")
+
+
+def _bucket_for(
+    pair: ScoredPair,
+    weighted_threshold: float,
+    learned_conf_margin: float,
+    weighted_conf_no: float,
+) -> str | None:
     """Classify one scored pair into its most-specific disagreement bucket.
 
-    Boundary is :data:`_BOUNDARY`. ``label-error?`` (both models agree with each
-    other but contradict the human) outranks ``model-vs-model`` (models on
-    opposite sides of the boundary), which outranks ``whole/part`` (a fired,
-    incompatible ``volume.compat``). A pair in none of the three returns
-    ``None`` and is not surfaced.
+    The learned model uses its calibrated-probability boundary :data:`_BOUNDARY`;
+    the weighted matcher uses its empirical equal-precision ``weighted_threshold``.
+    ``label-error?`` (both models agree with each other but contradict the human,
+    measured against the plain boundaries) outranks ``model-vs-model`` (a GENUINE
+    disagreement: both matchers confidently committed to opposite verdicts per
+    :func:`_is_genuine_model_vs_model`), which outranks ``whole/part`` (a fired,
+    incompatible ``volume.compat``). A pair in none of the three — including a
+    pair on opposite sides where a matcher is in its uncertain middle and the
+    volume is compatible — returns ``None`` and is not surfaced.
     """
     learned_match = pair.learned >= _BOUNDARY
-    weighted_match = pair.weighted >= _BOUNDARY
+    weighted_match = pair.weighted >= weighted_threshold
     human_match = pair.entry.verdict == _VERDICT_MATCH
     if learned_match == weighted_match and learned_match != human_match:
         return _BUCKET_LABEL_ERROR
-    if learned_match != weighted_match:
+    if _is_genuine_model_vs_model(
+        pair, weighted_threshold, learned_conf_margin, weighted_conf_no
+    ):
         return _BUCKET_MODEL_VS_MODEL
     if _is_volume_incompatible(pair.evidence):
         return _BUCKET_WHOLE_PART
     return None
 
 
-def _label_error_starkness(pair: ScoredPair) -> float:
+def _label_error_starkness(pair: ScoredPair, weighted_threshold: float) -> float:
     """Return how confidently both models contradict the human verdict.
 
-    For a ``label-error?`` pair both models are on the same (wrong) side of the
-    boundary. Starkness is the max distance from the boundary of the two model
-    scores: the wrong side is high when both models say "match" (human said no),
-    low when both say "no match" (human said match).
+    For a ``label-error?`` pair both models are on the same (wrong) side of their
+    respective boundaries (learned at :data:`_BOUNDARY`, weighted at
+    ``weighted_threshold``). Starkness is the max distance from the boundary of
+    the two model scores: the wrong side is high when both models say "match"
+    (human said no), low when both say "no match" (human said match).
     """
     human_match = pair.entry.verdict == _VERDICT_MATCH
     if human_match:
-        return max(_BOUNDARY - pair.learned, _BOUNDARY - pair.weighted)
-    return max(pair.learned - _BOUNDARY, pair.weighted - _BOUNDARY)
+        return max(_BOUNDARY - pair.learned, weighted_threshold - pair.weighted)
+    return max(pair.learned - _BOUNDARY, pair.weighted - weighted_threshold)
 
 
 def _model_gap(pair: ScoredPair) -> float:
@@ -427,21 +694,32 @@ def _assign_oof_learned(pairs: list[ScoredPair]) -> list[ScoredPair]:
     ]
 
 
-def _ordered_surfaced(pairs: list[ScoredPair]) -> dict[str, list[ScoredPair]]:
+def _ordered_surfaced(
+    pairs: list[ScoredPair],
+    weighted_threshold: float,
+    learned_conf_margin: float,
+    weighted_conf_no: float,
+) -> dict[str, list[ScoredPair]]:
     """Group surfaced pairs by bucket and sort each group by disagreement starkness.
 
     ``label-error?`` is sorted by the max model confidence on the wrong side
     (most-confident contradiction first); ``model-vs-model`` by ``|learned -
     weighted|`` descending; ``whole/part`` by learned score descending (the most
     match-leaning incompatible-volume pairs first). Agreeing pairs are dropped.
+    The weighted matcher's operating point is ``weighted_threshold``; the genuine
+    model-vs-model membership uses ``learned_conf_margin`` and ``weighted_conf_no``.
     """
     grouped: dict[str, list[ScoredPair]] = {bucket: [] for bucket in _BUCKET_ORDER}
     for pair in pairs:
-        bucket = _bucket_for(pair)
+        bucket = _bucket_for(
+            pair, weighted_threshold, learned_conf_margin, weighted_conf_no
+        )
         if bucket is None:
             continue
         grouped[bucket].append(pair)
-    grouped[_BUCKET_LABEL_ERROR].sort(key=_label_error_starkness, reverse=True)
+    grouped[_BUCKET_LABEL_ERROR].sort(
+        key=lambda p: _label_error_starkness(p, weighted_threshold), reverse=True
+    )
     grouped[_BUCKET_MODEL_VS_MODEL].sort(key=_model_gap, reverse=True)
     grouped[_BUCKET_WHOLE_PART].sort(key=lambda p: p.learned, reverse=True)
     return grouped
@@ -453,6 +731,7 @@ def _write_outputs(
     text_path: Path,
     base_url: str,
     result: ScanResult,
+    weighted_threshold: float,
 ) -> None:
     """Insert surfaced pairs into the review DB and write the flat link file.
 
@@ -480,7 +759,8 @@ def _write_outputs(
                     evidence_sources=pair.evidence_sources,
                     audit_note=(
                         f"you={pair.entry.verdict} · learned={pair.learned:.2f} · "
-                        f"weighted={pair.weighted:.2f} · [{bucket}]"
+                        f"weighted={pair.weighted:.2f} · [{bucket}] · "
+                        f"wthr={weighted_threshold:.2f}"
                     ),
                 )
                 pair_id = db.insert_pair(pair_insert)
@@ -525,9 +805,39 @@ def run_scan(
         result.unresolved = unresolved
         _progress(f"scored {len(pairs)} pairs (weighted); running OOF learned")
         scored = _assign_oof_learned(pairs)
-        grouped = _ordered_surfaced(scored)
+        weighted_scores = [p.weighted for p in scored]
+        learned_scores = [p.learned for p in scored]
+        labels = [p.entry.verdict == _VERDICT_MATCH for p in scored]
+        weighted_threshold = _equal_precision_threshold(
+            weighted_scores, learned_scores, labels
+        )
+        target_precision = _precision_at(learned_scores, labels, _BOUNDARY) or 0.0
+        weighted_precision = (
+            _precision_at(weighted_scores, labels, weighted_threshold) or 0.0
+        )
+        result.weighted_threshold = weighted_threshold
+        result.target_precision = target_precision
+        result.weighted_precision = weighted_precision
+        _progress(
+            f"weighted equal-precision threshold={weighted_threshold:.4f} "
+            f"(wtd_precision={weighted_precision:.4f} >= learned@{_BOUNDARY} "
+            f"precision={target_precision:.4f})"
+        )
+        _print_threshold_diagnostics(
+            weighted_scores, learned_scores, labels, weighted_threshold
+        )
+        _print_genuine_mvm_diagnostics(
+            weighted_scores,
+            learned_scores,
+            weighted_threshold,
+            _LEARNED_CONF_MARGIN,
+            _WEIGHTED_CONF_NO,
+        )
+        grouped = _ordered_surfaced(
+            scored, weighted_threshold, _LEARNED_CONF_MARGIN, _WEIGHTED_CONF_NO
+        )
         result.agree = len(scored) - sum(len(grouped[b]) for b in _BUCKET_ORDER)
-        _write_outputs(grouped, out_path, text_path, base_url, result)
+        _write_outputs(grouped, out_path, text_path, base_url, result, weighted_threshold)
     return result
 
 
@@ -546,6 +856,15 @@ def _print_summary(result: ScanResult, out_path: Path, text_path: Path, base_url
     print(f"unresolved (MARC/CCE gone): {result.unresolved}")
     print(f"agree (not surfaced):       {result.agree}")
     print(f"surfaced total:             {result.total_surfaced()}")
+    print()
+    print(f"learned match threshold (calibrated): {_BOUNDARY:.2f}")
+    print(f"learned precision @ {_BOUNDARY:.2f} (target):   {result.target_precision:.4f}")
+    print(
+        f"weighted match threshold (equal-precision): {result.weighted_threshold:.4f}"
+    )
+    print(
+        f"weighted precision @ that threshold:        {result.weighted_precision:.4f}"
+    )
     print()
     print(f"{'bucket':<16} {'surfaced':>9}")
     print("-" * 26)
