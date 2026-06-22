@@ -25,6 +25,7 @@ from pd_groundtruth.active_select import DEFAULT_LANGUAGE_WEIGHTS
 from pd_groundtruth.build_queue import build_queue
 from pd_groundtruth.dump_vault_marcs import dump_vault_marcs
 from pd_groundtruth.enrich_vault import run_enrich
+from pd_groundtruth.filter import filter_marcxml
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
@@ -157,6 +158,84 @@ def acquire_command(
         f"kept_by_language=[{kept}] "
         f"shards_written={report.shards_written} "
         f"stopped_reason={report.stopped_reason}"
+    )
+
+
+def _parse_languages(value: str | None) -> frozenset[str] | None:
+    """Parse a comma-separated ``--languages`` value into a code set.
+
+    ``None`` keeps every record that passes eligibility (any supported
+    language). A value such as ``"eng,fre"`` restricts output to those 008
+    codes. Whitespace around each code is stripped.
+
+    Raises:
+        BadParameter: When the value is present but contains no non-empty code.
+    """
+    if value is None:
+        return None
+    codes = frozenset(code.strip() for code in value.split(",") if code.strip())
+    if not codes:
+        raise BadParameter("--languages must list at least one language code")
+    return codes
+
+
+@app.command(name="filter")
+def filter_command(
+    input_path: Annotated[
+        Path,
+        Option("--input", help="Plain MARCXML file to filter (the format `match --marc` reads)."),
+    ],
+    output_path: Annotated[
+        Path,
+        Option("--output", help="Destination MARCXML <collection> of the eligible records."),
+    ],
+    min_year: Annotated[
+        int | None,
+        Option(
+            "--min-year",
+            help="Lower bound for publication year (the moving wall, today.year - 95).",
+        ),
+    ] = None,
+    languages: Annotated[
+        str | None,
+        Option(
+            "--languages",
+            help=(
+                "Comma-separated 008 codes to keep (e.g. 'eng,fre'). "
+                "Default keeps every eligible record (eng, fre, ger, spa, ita)."
+            ),
+        ),
+    ] = None,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Write only the production-eligible records of a MARCXML file, uncapped.
+
+    Applies the same eligibility logic as ``acquire`` (monograph, not an
+    electronic resource, publication year within the moving wall .. 1977, a
+    supported language, a title) to every ``<record>`` in ``--input`` and writes
+    the survivors to a single MARCXML ``<collection>`` at ``--output`` that
+    ``pd-matcher match --marc`` can consume. Unlike ``acquire`` there is no
+    per-bucket cap. By default every eligible record is kept regardless of which
+    supported language it is in; pass ``--languages`` to narrow the output to a
+    subset.
+    """
+    _configure_logging("filter", log_file)
+    resolved_min_year = default_min_year() if min_year is None else min_year
+    report = filter_marcxml(
+        input_path=input_path,
+        output_path=output_path,
+        min_year=resolved_min_year,
+        languages=_parse_languages(languages),
+    )
+    breakdown = " ".join(
+        f"{reason}={count}" for reason, count in sorted(report.dropped_by_reason.items())
+    )
+    echo(
+        f"scanned={report.scanned} kept={report.kept} dropped={report.dropped} "
+        f"dropped_by_reason=[{breakdown}]"
     )
 
 
