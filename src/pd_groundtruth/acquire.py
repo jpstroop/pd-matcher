@@ -17,6 +17,7 @@ from logging import getLogger
 from pathlib import Path
 from tarfile import open as tar_open
 from tempfile import NamedTemporaryFile
+from tempfile import gettempdir
 
 from lxml.etree import QName
 from lxml.etree import _Element
@@ -24,6 +25,9 @@ from lxml.etree import iterparse
 from msgspec import Struct
 from requests import get
 
+from pd_groundtruth.disk_guard import DiskSpaceGuard
+from pd_groundtruth.disk_guard import InsufficientDiskSpaceError
+from pd_groundtruth.disk_guard import human_bytes
 from pd_groundtruth.filters import _CCE_MAX_YEAR
 from pd_groundtruth.filters import is_eligible
 from pd_groundtruth.filters import language_of
@@ -37,6 +41,9 @@ _LOGGER = getLogger(__name__)
 
 _DOWNLOAD_CHUNK_BYTES = 1 << 20
 _REQUEST_TIMEOUT_SECONDS = 300
+_FREE_SPACE_CHECK_INTERVAL_BYTES = 1 << 26
+_DEFAULT_MIN_FREE_SPACE_MB = 2048
+_DISABLED_GUARD = DiskSpaceGuard(min_free_bytes=0)
 
 _TARGET_LANGUAGES = ("eng", "fre", "ger", "spa", "ita")
 _MOVING_WALL_AGE = 95
@@ -81,6 +88,7 @@ def acquire(
     min_year: int,
     manifest_url: str = DEFAULT_MANIFEST_URL,
     max_dumps: int | None = None,
+    min_free_space_mb: int = _DEFAULT_MIN_FREE_SPACE_MB,
 ) -> AcquireReport:
     """Stream Princeton dumps and write eligible records as per-language shards.
 
@@ -93,6 +101,9 @@ def acquire(
             wall). Also fixes the set of decade buckets (``min_year``..1977).
         manifest_url: Absolute URL of the dump manifest JSON.
         max_dumps: Optional cap on the number of dumps processed.
+        min_free_space_mb: Minimum free space, in MB, required on both the temp
+            download directory and ``out_dir`` before each download begins and
+            periodically during it. ``0`` disables the guard.
 
     Returns:
         A report of dumps processed, records scanned, records kept per
@@ -106,6 +117,7 @@ def acquire(
         per_decade_cap=per_decade_cap,
         min_year=min_year,
         max_dumps=max_dumps,
+        guard=DiskSpaceGuard.from_megabytes(min_free_space_mb),
     )
 
 
@@ -116,6 +128,7 @@ def _acquire_entries(
     per_decade_cap: int,
     min_year: int,
     max_dumps: int | None,
+    guard: DiskSpaceGuard,
 ) -> AcquireReport:
     """Run acquisition over an already-resolved set of dump entries."""
     decades = _decade_buckets(min_year)
@@ -143,6 +156,8 @@ def _acquire_entries(
                 kept=kept,
                 per_decade_cap=per_decade_cap,
                 min_year=min_year,
+                guard=guard,
+                output_path=out_dir,
             )
             dumps_processed += 1
             records_scanned += scanned
@@ -238,10 +253,12 @@ def _process_dump(
     kept: dict[str, dict[int, int]],
     per_decade_cap: int,
     min_year: int,
+    guard: DiskSpaceGuard,
+    output_path: Path,
 ) -> int:
     """Download, verify, and scan a single dump, returning the records scanned."""
     scanned = 0
-    for record in stream_dump_records(entry):
+    for record in stream_dump_records(entry, guard=guard, output_path=output_path):
         scanned += 1
         if is_eligible(record, min_year):
             language = language_of(record)
@@ -257,7 +274,12 @@ def _process_dump(
     return scanned
 
 
-def stream_dump_records(entry: DumpEntry) -> Iterator[_Element]:
+def stream_dump_records(
+    entry: DumpEntry,
+    *,
+    guard: DiskSpaceGuard = _DISABLED_GUARD,
+    output_path: Path | None = None,
+) -> Iterator[_Element]:
     """Download and verify one dump, yielding its ``<record>`` elements.
 
     The dump is streamed to a temporary ``.tar.gz`` whose md5 is verified
@@ -270,36 +292,64 @@ def stream_dump_records(entry: DumpEntry) -> Iterator[_Element]:
 
     Args:
         entry: The manifest dump entry to download and stream.
+        guard: Free-disk-space guard asserted before the download (pre-flight)
+            and periodically during it; the default is disabled.
+        output_path: When given, this path's filesystem is checked for free
+            space alongside the temp download directory.
 
     Yields:
         Each ``<record>`` element of the dump's single MARCXML member.
 
     Raises:
         Md5MismatchError: If the computed md5 differs from ``entry.md5``.
+        InsufficientDiskSpaceError: If a guarded filesystem runs below the
+            configured free-space floor before or during the download.
     """
-    temp_path = _download_and_verify(entry)
+    temp_path = _download_and_verify(entry, guard=guard, output_path=output_path)
     try:
         yield from _iter_records(temp_path)
     finally:
         temp_path.unlink(missing_ok=True)
 
 
-def _download_and_verify(entry: DumpEntry) -> Path:
+def _download_and_verify(
+    entry: DumpEntry,
+    *,
+    guard: DiskSpaceGuard = _DISABLED_GUARD,
+    output_path: Path | None = None,
+) -> Path:
     """Stream a dump to a temp file, verifying its md5 against the manifest.
+
+    Before opening the temp file the guard is asserted against both the temp
+    directory and ``output_path`` (pre-flight). During the write loop the temp
+    directory is re-checked roughly every 64 MB; on a shortfall the partial temp
+    file is deleted before the error propagates.
 
     Raises:
         Md5MismatchError: If the computed md5 differs from ``entry.md5``.
+        InsufficientDiskSpaceError: If a guarded filesystem runs below the
+            configured free-space floor before or during the download.
     """
+    temp_dir = Path(gettempdir())
+    check_paths = [temp_dir] if output_path is None else [temp_dir, output_path]
+    guard.ensure(*check_paths)
+    if guard.enabled:
+        _LOGGER.info("free space before %s: %s", entry.url, human_bytes(guard.free_bytes(temp_dir)))
     _LOGGER.info("downloading dump: %s", entry.url)
     digest = md5()
     response = get(entry.url, stream=True, timeout=_REQUEST_TIMEOUT_SECONDS)
     response.raise_for_status()
     with NamedTemporaryFile(suffix=".tar.gz", delete=False) as temp:
         temp_path = Path(temp.name)
+        bytes_since_check = 0
         for chunk in response.iter_content(chunk_size=_DOWNLOAD_CHUNK_BYTES):
             if chunk:  # pragma: no branch  # responses mock never yields empty keepalive chunks
                 digest.update(chunk)
                 temp.write(chunk)
+                bytes_since_check += len(chunk)
+                if bytes_since_check >= _FREE_SPACE_CHECK_INTERVAL_BYTES:
+                    bytes_since_check = 0
+                    _check_mid_download(guard, temp_dir, temp_path)
     computed = digest.hexdigest()
     if computed != entry.md5:
         temp_path.unlink(missing_ok=True)
@@ -307,6 +357,15 @@ def _download_and_verify(entry: DumpEntry) -> Path:
             f"md5 mismatch for {entry.url}: expected {entry.md5}, got {computed}"
         )
     return temp_path
+
+
+def _check_mid_download(guard: DiskSpaceGuard, temp_dir: Path, temp_path: Path) -> None:
+    """Re-assert free space mid-download, deleting the partial file on shortfall."""
+    try:
+        guard.ensure(temp_dir)
+    except InsufficientDiskSpaceError:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def _iter_records(archive_path: Path) -> Iterator[_Element]:
