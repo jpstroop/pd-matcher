@@ -1,9 +1,11 @@
-"""Lossless MARCXML shard writer.
+"""Lossless MARCXML writers.
 
-Survivor records are written verbatim into ``<collection>`` shard files, each
-capped at a configurable record count. Records are serialized exactly as they
+Survivor records are written verbatim into ``<collection>`` files — either a
+single streaming file (:class:`MarcxmlCollectionWriter`) or a series of capped
+shards (:class:`MarcxmlShardWriter`). Records are serialized exactly as they
 arrived (namespaces, subfields, indicators preserved) because the whole point
-of this corpus is faithful round-tripping through the later review phase.
+of this corpus is faithful round-tripping through the later matching and review
+phases.
 """
 
 from logging import getLogger
@@ -23,6 +25,78 @@ _COLLECTION_CLOSE = b"</collection>\n"
 
 _DEFAULT_SHARD_SIZE = 5000
 _SHARD_NAME_TEMPLATE = "candidates_{index:05d}.xml"
+
+
+class MarcxmlCollectionWriter:
+    """Stream ``<record>`` elements into one well-formed MARCXML collection.
+
+    The output is a single ``<collection xmlns="...slim">`` file in the format
+    ``pd-matcher match --marc`` consumes. Records are appended as they arrive,
+    so an arbitrarily large corpus can be written without ever buffering the
+    whole document in memory. The parent directory is created on open.
+    """
+
+    __slots__ = ("_handle", "_path", "_records_written")
+
+    def __init__(self, path: Path) -> None:
+        """Open ``path`` for writing and emit the collection header.
+
+        Args:
+            path: Destination MARCXML file; the parent directory is created.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._path = path
+        self._records_written = 0
+        handle = path.open("wb")
+        handle.write(_XML_DECLARATION)
+        handle.write(_COLLECTION_OPEN)
+        self._handle: BinaryIO | None = handle
+
+    @property
+    def records_written(self) -> int:
+        """Number of records appended to the collection so far."""
+        return self._records_written
+
+    def write(self, record: _Element) -> None:
+        """Append one record to the collection, serialized verbatim.
+
+        Args:
+            record: A MARCXML ``<record>`` element.
+        """
+        handle = self._require_handle()
+        handle.write(tostring(record, encoding="UTF-8", xml_declaration=False))
+        handle.write(b"\n")
+        self._records_written += 1
+
+    def close(self) -> None:
+        """Write the closing tag and close the file handle, if still open."""
+        if self._handle is None:
+            return
+        handle = self._handle
+        handle.write(_COLLECTION_CLOSE)
+        handle.close()
+        self._handle = None
+        _LOGGER.info("wrote %d records to %s", self._records_written, self._path)
+
+    def __enter__(self) -> MarcxmlCollectionWriter:
+        """Enter the context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Finalize the collection on context exit."""
+        self.close()
+
+    def _require_handle(self) -> BinaryIO:
+        """Return the open handle, raising if the collection is closed."""
+        handle = self._handle
+        if handle is None:
+            raise RuntimeError("collection writer is closed")
+        return handle
 
 
 class MarcxmlShardWriter:

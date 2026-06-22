@@ -240,23 +240,46 @@ def _process_dump(
     min_year: int,
 ) -> int:
     """Download, verify, and scan a single dump, returning the records scanned."""
+    scanned = 0
+    for record in stream_dump_records(entry):
+        scanned += 1
+        if is_eligible(record, min_year):
+            language = language_of(record)
+            year = year_of(record)
+            if (  # pragma: no branch  # is_eligible already validates these
+                language is not None and language in kept and year is not None
+            ):
+                decade = _decade_of(year)
+                if kept[language][decade] < per_decade_cap:
+                    writers[language].write(record)
+                    kept[language][decade] += 1
+        record.clear()
+    return scanned
+
+
+def stream_dump_records(entry: DumpEntry) -> Iterator[_Element]:
+    """Download and verify one dump, yielding its ``<record>`` elements.
+
+    The dump is streamed to a temporary ``.tar.gz`` whose md5 is verified
+    against ``entry`` (raising :class:`Md5MismatchError` on a mismatch), its
+    single MARCXML member is parsed incrementally, and the temp download is
+    deleted as soon as iteration finishes or the consumer stops early. The
+    raw catalog therefore never accumulates on disk: at most one dump's
+    compressed archive is resident at a time, and nothing is extracted. The
+    consumer is responsible for clearing each yielded element after use.
+
+    Args:
+        entry: The manifest dump entry to download and stream.
+
+    Yields:
+        Each ``<record>`` element of the dump's single MARCXML member.
+
+    Raises:
+        Md5MismatchError: If the computed md5 differs from ``entry.md5``.
+    """
     temp_path = _download_and_verify(entry)
     try:
-        scanned = 0
-        for record in _iter_records(temp_path):
-            scanned += 1
-            if is_eligible(record, min_year):
-                language = language_of(record)
-                year = year_of(record)
-                if (  # pragma: no branch  # is_eligible already validates these
-                    language is not None and language in kept and year is not None
-                ):
-                    decade = _decade_of(year)
-                    if kept[language][decade] < per_decade_cap:
-                        writers[language].write(record)
-                        kept[language][decade] += 1
-            record.clear()
-        return scanned
+        yield from _iter_records(temp_path)
     finally:
         temp_path.unlink(missing_ok=True)
 

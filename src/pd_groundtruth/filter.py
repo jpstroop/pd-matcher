@@ -26,19 +26,14 @@ from pathlib import Path
 from lxml.etree import QName
 from lxml.etree import _Element
 from lxml.etree import iterparse
-from lxml.etree import tostring
 from msgspec import Struct
 
 from pd_groundtruth.filters import Ineligibility
 from pd_groundtruth.filters import classify
 from pd_groundtruth.filters import language_of
+from pd_groundtruth.writer import MarcxmlCollectionWriter
 
 _LOGGER = getLogger(__name__)
-
-_MARC_NS = "http://www.loc.gov/MARC21/slim"
-_XML_DECLARATION = b'<?xml version="1.0" encoding="UTF-8"?>\n'
-_COLLECTION_OPEN = f'<collection xmlns="{_MARC_NS}">\n'.encode()
-_COLLECTION_CLOSE = b"</collection>\n"
 
 _LANGUAGE_NOT_REQUESTED = "language_not_requested"
 """Report key for records that are eligible but excluded by ``--languages``.
@@ -90,21 +85,16 @@ def filter_marcxml(
     dropped_by_reason: Counter[str] = Counter()
     scanned = 0
     kept = 0
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("wb") as handle:
-        handle.write(_XML_DECLARATION)
-        handle.write(_COLLECTION_OPEN)
+    with MarcxmlCollectionWriter(output_path) as writer:
         for record in _iter_records(input_path):
             scanned += 1
             reason = _drop_reason(record, min_year, languages)
             if reason is None:
-                handle.write(tostring(record, encoding="UTF-8", xml_declaration=False))
-                handle.write(b"\n")
+                writer.write(record)
                 kept += 1
             else:
                 dropped_by_reason[reason] += 1
             _release(record)
-        handle.write(_COLLECTION_CLOSE)
     dropped = scanned - kept
     _LOGGER.info(
         "filter complete: scanned=%d kept=%d dropped=%d -> %s",
