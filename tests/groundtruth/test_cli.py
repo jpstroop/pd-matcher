@@ -13,6 +13,7 @@ from pd_groundtruth.acquire import AcquireReport
 from pd_groundtruth.build_queue import BuildSummary
 from pd_groundtruth.cli import _configure_logging
 from pd_groundtruth.cli import app
+from pd_groundtruth.filter import FilterReport
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
@@ -510,3 +511,85 @@ def test_build_queue_command_rejects_invalid_requeue_value(tmp_path: Path) -> No
     assert result.exit_code != 0
     assert "invalid" in result.stderr
     mock_build.assert_not_called()
+
+
+def _filter_report() -> FilterReport:
+    return FilterReport(
+        scanned=10,
+        kept=6,
+        dropped=4,
+        dropped_by_reason={"not_a_book": 3, "year_out_of_range": 1},
+    )
+
+
+def test_filter_command_passes_arguments_through(tmp_path: Path) -> None:
+    with patch("pd_groundtruth.cli.filter_marcxml", return_value=_filter_report()) as mock_filter:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "filter",
+                "--input",
+                str(tmp_path / "in.marcxml"),
+                "--output",
+                str(tmp_path / "out.marcxml"),
+                "--min-year",
+                "1931",
+                "--languages",
+                "eng, fre",
+                "--log-file",
+                str(tmp_path / "filter.log"),
+            ],
+        )
+
+    assert result.exit_code == 0
+    mock_filter.assert_called_once_with(
+        input_path=tmp_path / "in.marcxml",
+        output_path=tmp_path / "out.marcxml",
+        min_year=1931,
+        languages=frozenset({"eng", "fre"}),
+    )
+    assert "scanned=10 kept=6 dropped=4" in result.stdout
+    assert "not_a_book=3" in result.stdout
+    assert "year_out_of_range=1" in result.stdout
+
+
+def test_filter_command_defaults_to_moving_wall_and_all_languages(tmp_path: Path) -> None:
+    with patch("pd_groundtruth.cli.filter_marcxml", return_value=_filter_report()) as mock_filter:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "filter",
+                "--input",
+                str(tmp_path / "in.marcxml"),
+                "--output",
+                str(tmp_path / "out.marcxml"),
+                "--log-file",
+                str(tmp_path / "filter.log"),
+            ],
+        )
+
+    assert result.exit_code == 0
+    _, kwargs = mock_filter.call_args
+    assert kwargs["min_year"] == date.today().year - 95
+    assert kwargs["languages"] is None
+
+
+def test_filter_command_rejects_empty_languages(tmp_path: Path) -> None:
+    with patch("pd_groundtruth.cli.filter_marcxml", return_value=_filter_report()) as mock_filter:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "filter",
+                "--input",
+                str(tmp_path / "in.marcxml"),
+                "--output",
+                str(tmp_path / "out.marcxml"),
+                "--languages",
+                " , ",
+                "--log-file",
+                str(tmp_path / "filter.log"),
+            ],
+        )
+
+    assert result.exit_code != 0
+    mock_filter.assert_not_called()
