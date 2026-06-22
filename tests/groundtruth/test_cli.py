@@ -10,10 +10,12 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from pd_groundtruth.acquire import AcquireReport
+from pd_groundtruth.build_corpus import CorpusReport
 from pd_groundtruth.build_queue import BuildSummary
 from pd_groundtruth.cli import _configure_logging
 from pd_groundtruth.cli import app
 from pd_groundtruth.filter import FilterReport
+from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
@@ -593,3 +595,87 @@ def test_filter_command_rejects_empty_languages(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     mock_filter.assert_not_called()
+
+
+def _corpus_report() -> CorpusReport:
+    return CorpusReport(
+        dumps_processed=2,
+        records_scanned=100,
+        kept=60,
+        dropped=40,
+        dropped_by_reason={"not_a_book": 30, "year_out_of_range": 10},
+    )
+
+
+def test_build_corpus_command_passes_arguments_through(tmp_path: Path) -> None:
+    with patch("pd_groundtruth.cli.build_corpus", return_value=_corpus_report()) as mock_corpus:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-corpus",
+                "--output",
+                str(tmp_path / "corpus.marcxml"),
+                "--min-year",
+                "1931",
+                "--languages",
+                "eng, fre",
+                "--manifest-url",
+                "https://example.test/m.json",
+                "--max-dumps",
+                "3",
+                "--log-file",
+                str(tmp_path / "corpus.log"),
+            ],
+        )
+
+    assert result.exit_code == 0
+    mock_corpus.assert_called_once_with(
+        output_path=tmp_path / "corpus.marcxml",
+        min_year=1931,
+        languages=frozenset({"eng", "fre"}),
+        manifest_url="https://example.test/m.json",
+        max_dumps=3,
+    )
+    assert "dumps_processed=2 records_scanned=100 kept=60 dropped=40" in result.stdout
+    assert "not_a_book=30" in result.stdout
+    assert "year_out_of_range=10" in result.stdout
+
+
+def test_build_corpus_command_defaults_to_moving_wall_and_all_languages(tmp_path: Path) -> None:
+    with patch("pd_groundtruth.cli.build_corpus", return_value=_corpus_report()) as mock_corpus:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-corpus",
+                "--output",
+                str(tmp_path / "corpus.marcxml"),
+                "--log-file",
+                str(tmp_path / "corpus.log"),
+            ],
+        )
+
+    assert result.exit_code == 0
+    _, kwargs = mock_corpus.call_args
+    assert kwargs["min_year"] == date.today().year - 95
+    assert kwargs["languages"] is None
+    assert kwargs["max_dumps"] is None
+    assert kwargs["manifest_url"] == DEFAULT_MANIFEST_URL
+
+
+def test_build_corpus_command_rejects_empty_languages(tmp_path: Path) -> None:
+    with patch("pd_groundtruth.cli.build_corpus", return_value=_corpus_report()) as mock_corpus:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-corpus",
+                "--output",
+                str(tmp_path / "corpus.marcxml"),
+                "--languages",
+                " , ",
+                "--log-file",
+                str(tmp_path / "corpus.log"),
+            ],
+        )
+
+    assert result.exit_code != 0
+    mock_corpus.assert_not_called()

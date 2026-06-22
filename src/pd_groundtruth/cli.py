@@ -22,6 +22,7 @@ from pd_groundtruth.acquire import default_min_year
 from pd_groundtruth.active_learning import ActiveLearningSummary
 from pd_groundtruth.active_learning import run_active_learning
 from pd_groundtruth.active_select import DEFAULT_LANGUAGE_WEIGHTS
+from pd_groundtruth.build_corpus import build_corpus
 from pd_groundtruth.build_queue import build_queue
 from pd_groundtruth.dump_vault_marcs import dump_vault_marcs
 from pd_groundtruth.enrich_vault import run_enrich
@@ -236,6 +237,70 @@ def filter_command(
     echo(
         f"scanned={report.scanned} kept={report.kept} dropped={report.dropped} "
         f"dropped_by_reason=[{breakdown}]"
+    )
+
+
+@app.command(name="build-corpus")
+def build_corpus_command(
+    output_path: Annotated[
+        Path,
+        Option("--output", help="Destination MARCXML <collection> of the in-scope corpus."),
+    ],
+    min_year: Annotated[
+        int | None,
+        Option(
+            "--min-year",
+            help="Lower bound for publication year (the moving wall, today.year - 95).",
+        ),
+    ] = None,
+    languages: Annotated[
+        str | None,
+        Option(
+            "--languages",
+            help=(
+                "Comma-separated 008 codes to keep (e.g. 'eng,fre'). "
+                "Default keeps every eligible record (eng, fre, ger, spa, ita)."
+            ),
+        ),
+    ] = None,
+    manifest_url: Annotated[
+        str, Option("--manifest-url", help="Dump manifest JSON URL.")
+    ] = DEFAULT_MANIFEST_URL,
+    max_dumps: Annotated[
+        int | None, Option("--max-dumps", help="Cap the number of dumps processed.")
+    ] = None,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Stream the whole catalog and write the full in-scope matching corpus.
+
+    Downloads every dump in the manifest, applies the same eligibility logic as
+    ``acquire`` / ``filter`` (monograph, not an electronic resource, publication
+    year within the moving wall .. 1977, a supported language, a title) to every
+    ``<record>``, and writes the survivors to a single MARCXML ``<collection>``
+    at ``--output`` that ``pd-matcher match --marc`` can consume. Unlike
+    ``acquire`` there is no per-(language, decade) cap: this is the uncapped
+    production corpus extractor, not the capped training-set sampler. Each dump
+    is downloaded to a temp file, scanned, and deleted before the next one, so
+    the raw catalog never accumulates on disk.
+    """
+    _configure_logging("build-corpus", log_file)
+    resolved_min_year = default_min_year() if min_year is None else min_year
+    report = build_corpus(
+        output_path=output_path,
+        min_year=resolved_min_year,
+        languages=_parse_languages(languages),
+        manifest_url=manifest_url,
+        max_dumps=max_dumps,
+    )
+    breakdown = " ".join(
+        f"{reason}={count}" for reason, count in sorted(report.dropped_by_reason.items())
+    )
+    echo(
+        f"dumps_processed={report.dumps_processed} records_scanned={report.records_scanned} "
+        f"kept={report.kept} dropped={report.dropped} dropped_by_reason=[{breakdown}]"
     )
 
 
