@@ -109,7 +109,7 @@ The exact process topology for one `run_match` invocation:
 
 - **Main**: orchestrates everything, hosts the producer (streams MARC), hosts the reporter thread (aggregates stats).
 - **N worker processes** (spawn): each opens LMDB read-only, loads the IDF table (plus the Platt calibrator if `caches/calibrator.msgpack` exists, and the LightGBM model when `--scorer learned`), then consumes batches of MARC records from the input queue.
-- **1 writer process** (spawn): drains the output queue, writes CSV.
+- **1 writer process** (spawn): drains the output queue, writes JSONL (one match record per line).
 
 Two `multiprocessing.Queue` instances thread the work:
 - input queue (`maxsize = workers * 4`) — backpressure when workers fall behind
@@ -117,7 +117,7 @@ Two `multiprocessing.Queue` instances thread the work:
 
 A third queue (stats, unbounded, lightweight) carries `RecordProcessed`, `WriterHeartbeat`, etc. events to the reporter thread. msgspec.msgpack is the cross-process codec — schema-compiled, no pickle.
 
-Graceful shutdown is a single `multiprocessing.Event` checked between batches. SIGINT in main flips the event; producer stops feeding, workers drain their current batch and exit, writer flushes and closes the CSV, reporter prints final stats. A second SIGINT short-circuits the cleanup with a hard exit.
+Graceful shutdown is a single `multiprocessing.Event` checked between batches. SIGINT in main flips the event; producer stops feeding, workers drain their current batch and exit, writer flushes and closes the JSONL output, reporter prints final stats. A second SIGINT short-circuits the cleanup with a hard exit.
 
 ### ftfy for parse-time encoding hygiene
 
@@ -256,7 +256,7 @@ By default the weighted-mean combiner runs **uncalibrated**: `calibrated = raw /
 calibrated = 1 / (1 + exp(-(a × raw + b)))
 ```
 
-The artifact is **not** built during index or match — nothing in the engine fits it automatically. It is fit out-of-band by `scripts/fit_calibrator.py`, which scores the resolved labeled-vault pairs with the production combiner and partitions the raw scores into positives (`verdict=match`) and negatives (`verdict=no_match`), then fits `a` and `b` by Newton iteration. See `docs/findings/fit_calibrator_2026-06-07.md` for the most recent fit and its outcome. The published `combined_score` in the CSV is `calibrated × 100`.
+The artifact is **not** built during index or match — nothing in the engine fits it automatically. It is fit out-of-band by `scripts/fit_calibrator.py`, which scores the resolved labeled-vault pairs with the production combiner and partitions the raw scores into positives (`verdict=match`) and negatives (`verdict=no_match`), then fits `a` and `b` by Newton iteration. See `docs/findings/fit_calibrator_2026-06-07.md` for the most recent fit and its outcome. The published `combined_score` in the JSONL output is `calibrated × 100` (the 0–100 scale `--min-score` compares against).
 
 ### What happens to the match
 
@@ -342,7 +342,7 @@ P(is_match | raw) = 1 / (1 + exp(-(a × raw + b)))
 
 The training data is the **labeled vault**, not any precomputed registration↔renewal join: `scripts/fit_calibrator.py` resolves each non-`unsure` vault entry to its (MARC, CCE) pair, scores it with the production combiner, and partitions the resulting raw scores into positives (`verdict=match`) and negatives (`verdict=no_match`). A Newton iteration then solves for the `a` and `b` that maximize the log-likelihood of those labels. With enough well-separated training data the output is well-calibrated: P=0.75 means 75% of pairs predicted at 0.75 are actually matches.
 
-A side benefit, when a calibrator is in place: thresholds become meaningful. `--min-score 0.70` means "only show me matches with at least 70% probability of being correct" — not "only show me raw scores above 70 vibe points."
+A side benefit, when a calibrator is in place: thresholds become meaningful. `--min-score` is on the 0–100 calibrated scale, so `--min-score 70` means "only show me matches with at least 70% probability of being correct" — not "only show me raw scores above 70 vibe points."
 
 In practice the most recent fit was **not** landed. The vault's negatives skew high (the labeler tends to surface borderline cases), so the sigmoid suppressed the mid-band and cost recall; see `docs/findings/fit_calibrator_2026-06-07.md` for the full numbers and the decision to keep running with the linear pass-through. The findings doc is the source of any concrete count or coefficient — they drift, so we don't pin them here.
 
@@ -384,7 +384,7 @@ No layer of the pipeline holds the full MARC file, the full CCE corpus, or the f
 - CCE parsing the same.
 - Year-bucket lookups return iterators.
 - The output queue is bounded by writer throughput, not result count.
-- The CSV writer is `csv.DictWriter`-based; flushes per row.
+- The JSONL writer streams one record per line and flushes per row.
 
 A 100M-row MARC file is a runtime question, not a memory question.
 
@@ -437,6 +437,6 @@ If a future contributor reads this file and asks "why msgspec?", the answer is h
 
 - **Learned scorer (#4)** — *done.* The LightGBM combiner is built, validated on held-out pair-level separation (it beats the weighted mean), and selectable via `--scorer learned`; see [LEARNED_MATCHER.md](LEARNED_MATCHER.md). The weighted mean remains the zero-dependency default; promoting the learned combiner to the default is a possible future change.
 - **Baselined regression eval (Phase 8)**: built — see §5, "Regression baseline + local gate". The gate is local-only for now; wiring it into CI is deferred until the code is published.
-- **HTML report viewer (Phase 7 follow-up)**: a tiny static-site generator over the CSV that lets a human auditor click into individual matches and see the per-scorer Evidence with its sub-features. Mocked up; not yet built.
+- **HTML report viewer (Phase 7 follow-up)**: a tiny static-site generator over the JSONL output that lets a human auditor click into individual matches and see the per-scorer Evidence with its sub-features. Mocked up; not yet built.
 - **Country-of-origin signals for consumers**: country-of-origin and the URAA's country-specific Berne / WTO accession dates matter to a consumer applying copyright reasoning to the linkage, but the matcher does not compute them. Surfacing the relevant MARC fields (e.g. place/country of publication) more explicitly in the output could make that downstream reasoning easier; not currently done.
 - **MARC field richness**: the parser currently extracts ~15 MARC fields. Adding 6xx (subject), 5xx (notes) could improve title disambiguation in the IDF-weighted Jaccard, at the cost of more noisy tokens.

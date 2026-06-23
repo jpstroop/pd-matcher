@@ -10,7 +10,7 @@ Two distinct modes live in this repo, and most confusion comes from blurring the
 
 1. **Build & review a training set** — *the browser-UI workflow.* You sample candidate `(MARC, CCE)` pairs, judge each one in a local review UI, and accumulate a verified vault. That vault is the ground truth that trains and measures the matchers, and it is the bulk of day-to-day work here. Commands: `pd-matcher index build` plus the `pd-groundtruth` family (`acquire`, `build-queue`, `review`).
 
-2. **Match a catalog to produce pairs** — *the matcher as a tool.* You run the matcher over MARC records to emit a `(MARC record, CCE registration)` linkage table — the actual "which of my books appear in these copyright records" use. Command: `pd-matcher match` (→ a CSV).
+2. **Match a catalog to produce pairs** — *the matcher as a tool.* You run the matcher over MARC records to emit a `(MARC record, CCE registration)` linkage table — the actual "which of my books appear in these copyright records" use. Command: `pd-matcher match` (→ a JSONL file).
 
 Both modes share one engine — the CCE index plus the per-field scorers — and differ only in what they emit: mode 1 builds a labeling queue and grows the vault; mode 2 writes a linkage table. The matcher that powers mode 2 is exactly what mode 1's vault trains and validates. The diagram below traces **mode 1**; mode 2 is a single `pd-matcher match` run (see *Daily flow A*).
 
@@ -82,16 +82,42 @@ pdm run pd-matcher index build \
   --ren-dir data/nypl-ren/data \
   --out caches/cce.lmdb
 
-# 3. Acquire and filter a MARC pool from Princeton (~1 hour first run).
-pdm run pd-groundtruth acquire --out-dir data/candidates
+# 3. Acquire a capped training-set MARC pool from Princeton (~1 hour first run).
+#    The default --manifest-url is currently stale (see the disk-guard note
+#    below), so pass a live Princeton full-dump manifest URL.
+pdm run pd-groundtruth acquire \
+  --out-dir data/candidates \
+  --manifest-url https://bibdata.princeton.edu/dumps/<live-dump>.json
 ```
 
 Both produce files under `caches/` and `data/candidates/` that are gitignored — they're derived, regenerable, and large.
 
-`acquire` and `build-corpus` both stream large multi-dump downloads to disk. They abort safely (rather than filling the filesystem) if free space on either the temp-download directory or the output directory drops below `--min-free-space-mb` (default `2048`), checked before and during each download; pass `--min-free-space-mb 0` to disable the guard. When `build-corpus` aborts this way it still finalizes a valid partial `<collection>` and exits non-zero:
+`acquire` is the **capped training-set sampler**: it keeps at most `--per-decade-cap` records per (language, decade) bucket and writes per-language MARCXML shards under `data/candidates/<lang>/`, the pool the labeling loop samples from. It is *not* the whole-catalog extractor. Two sibling `pd-groundtruth` commands produce the full, uncapped in-scope corpus that production matching runs over:
+
+- **`build-corpus`** — streams every dump in the manifest, keeps every in-scope (monograph, not an electronic resource, publication year within the moving wall .. 1977, supported language, has a title) record, and writes one MARCXML `<collection>` at `--output`. This is the whole-catalog extractor for `pd-matcher match` — never match the raw fixture or the capped pool.
+- **`filter`** — the same uncapped in-scope extraction applied to a single local MARCXML file (`--input` → `--output`), for when you already have a dump on disk.
 
 ```bash
-pdm run pd-groundtruth build-corpus --output data/corpus.marcxml --min-free-space-mb 4096
+# Whole-catalog in-scope corpus (uncapped):
+pdm run pd-groundtruth build-corpus \
+  --output data/corpus.marcxml \
+  --manifest-url https://bibdata.princeton.edu/dumps/<live-dump>.json
+
+# Or filter a local MARCXML file to its in-scope records:
+pdm run pd-groundtruth filter \
+  --input data/some-dump.marcxml \
+  --output data/in-scope.marcxml
+```
+
+> **The default `--manifest-url` is stale.** The hardcoded default (`https://bibdata.princeton.edu/dumps/16368.json`) now returns a 404 page rather than a manifest, so `acquire` and `build-corpus` must be given a live Princeton full-dump manifest via `--manifest-url` until [issue #100](https://github.com/jpstroop/pd-matcher/issues/100) lands a current default.
+
+`acquire` and `build-corpus` both stream large multi-dump downloads to disk. They abort safely (rather than filling the filesystem) if free space on either the temp-download directory or the output directory drops below `--min-free-space-mb` (default `2048` MB, i.e. 2 GB; the guard is on by default), checked before and during each download; pass `--min-free-space-mb 0` to disable it. On a shortfall they finalize the valid partial output (`build-corpus`'s partial `<collection>`, `acquire`'s partial per-language shards) and exit non-zero:
+
+```bash
+pdm run pd-groundtruth build-corpus \
+  --output data/corpus.marcxml \
+  --manifest-url https://bibdata.princeton.edu/dumps/<live-dump>.json \
+  --min-free-space-mb 4096
 ```
 
 ---
@@ -101,7 +127,7 @@ pdm run pd-groundtruth build-corpus --output data/corpus.marcxml --min-free-spac
 There are two ways to run the engine, one per mode (see *Two things this tool does* above):
 
 - **`build-queue` (mode 1)** — match a sampled, stratified slice of the pool and write it to a SQLite labeling queue for the review UI.
-- **`pd-matcher match` (mode 2)** — match MARC records and write a `(MARC, CCE)` linkage **CSV**. This is the production matcher.
+- **`pd-matcher match` (mode 2)** — match MARC records and write a `(MARC, CCE)` linkage **JSONL** file (one record per line). This is the production matcher. Run it over the in-scope corpus from `build-corpus` (or `filter`), never the raw fixture or the capped pool.
 
 ```bash
 # Produce labeled candidates for review, refreshing the queue from the pool.
@@ -111,10 +137,16 @@ pdm run pd-groundtruth build-queue --rebuild
 pdm run pd-matcher match \
   --prepared data/prepared \
   --index caches/cce.lmdb \
-  --out /tmp/matches.csv
+  --out /tmp/matches.jsonl
 ```
 
 (`pd-matcher match` takes either `--marc <single XML file>` or `--prepared <chunk dir produced by pd-matcher prepare-marc>`. Run `pdm run pd-matcher prepare-marc --help` for the chunking workflow.)
+
+A few `match` knobs worth knowing:
+
+- `--scorer weighted_mean|learned` overrides the combiner for the run. The default is `weighted_mean` (zero-dependency); `learned` selects the LightGBM combiner and needs the trained artifact plus the `ml` extra (see [LEARNED_MATCHER.md](LEARNED_MATCHER.md)).
+- `--matches-only` writes only genuinely matched pairs. By default every input record gets one output row, with blank `match_*` fields when nothing scored above the floor.
+- `--min-score` is on the **0–100 calibrated scale** (e.g. `--min-score 90` keeps only pairs scoring ≥ 90), overriding the config's `min_combined_score` (default `50`).
 
 `build-queue` does the matching AND stratifies by language and confidence band, so you don't burn label effort on easy high-confidence pairs. Run `pdm run pd-groundtruth build-queue --help` for flags.
 
@@ -181,7 +213,7 @@ pdm run gates    # fmt + lint + typecheck + ~1000 unit tests at 100% coverage
 pdm run webui    # the FastAPI integration suite (separate marker)
 ```
 
-Gates failing is never acceptable — see the standing rules in the repo's coding standards. If a test becomes irrelevant, surface that and discuss; don't ignore it.
+Gates failing is never acceptable: every commit must land with fmt, lint, typecheck, and the full test suite at 100% coverage all green. If a test becomes irrelevant, surface it for discussion and remove or rewrite it deliberately — never ignore, skip, or work around a failing test.
 
 ### When to rebuild caches
 

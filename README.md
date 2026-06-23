@@ -1,29 +1,27 @@
 # pd-matcher
 
-**A pipeline for building a verified MARC ↔ U.S. copyright-record linkage dataset, so we can train an ML matcher to do this at scale.**
+A pipeline of tools for matching library catalog (MARC) records to U.S. copyright registration and renewal data — the Library of Congress's Catalog of Copyright Entries, encoded by NYPL — to help discover public domain works.
 
 ---
 
 ## Why this exists
 
-To know whether a book published in the United States between 1923 and 1977 is in the public domain, you need to know whether the work was registered with the U.S. Copyright Office and whether that registration was renewed. The Copyright Office published those records in the **Catalog of Copyright Entries (CCE)** — about 2.2M registrations and 444k renewals across that window. The New York Public Library transcribed the CCE volumes into structured XML and TSV; that's the data we use.
+pd-matcher matches library catalog (MARC) records to copyright registration and renewal data from the Library of Congress, as encoded by the New York Public Library — the **Catalog of Copyright Entries (CCE)**.
 
-Library catalogs use a different format: **MARC** (MAchine-Readable Cataloging). A MARC record describes a holding — a book, a recording, a score — and is what most libraries publish about their collections. Princeton publishes its full catalog as a MARCXML dump.
+The CCE and a MARC data describe the same underlying works but were never designed to join: standard numbers are rare on the CCE side, and titles, authors, publishers, and years drift between the two through OCR garbles, abbreviation conventions, and transcription errors. With no reliable shared identifiers, matching them is fuzzy work.
 
-These two corpora describe the same underlying works but were never designed to link to each other. ISBNs barely existed during the CCE period. LCCNs appear in many MARC records but not the CCE side. Titles, authors, publishers, and years drift between sources (transcription errors, abbreviation conventions, OCR garbles, edition variants). Matching them is fuzzy work.
-
-**The long-term goal**: a learned matcher — a gradient-boosted model (LightGBM) trained on verified pairs — that outperforms hand-tuned scoring weights and can do this matching across many institutions' catalogs, not just Princeton's. Building it requires a labeled training set of confirmed (match / no_match / unsure) pairs across the full score range. **This project produces both: the labeled training set and the learned matcher that consumes it.** That learned combiner is now built and validated — it beats the weighted-mean baseline on held-out pair-level separation (see [docs/LEARNED_MATCHER.md](docs/LEARNED_MATCHER.md)). The weighted-mean combiner remains the zero-dependency default that bootstraps labeling: it surfaces candidates for human verification, and every verdict grows the vault the learned matcher trains on.
+This tool attempts to do that matching at scale. It links each in-scope MARC record to its CCE registration and any renewal, and outputs a **MARC ↔ CCE linkage with the registration and renewal facts attached along with any other standard and OCLC number it can find, plus a confidence score**. It is a **linkage producer, not a public-domain determiner**: it surfaces the linkage and the facts, and a human or downstream consumer applies the copyright reasoning. Every published row should be human-verified.
 
 ## What this project is
 
-A two-CLI pipeline:
+Producing the linkage at scale needs a matcher good enough to trust on fuzzy pairs, and that matcher needs a human-verified ground-truth set to learn from and be measured against. The matcher and the ground-truth vault are the **means** to the linkage, not ends in themselves. They live in a two-CLI pipeline:
 
-- **`pd-matcher`** — proposes candidate `(MARC record, CCE registration, optional CCE renewal)` triples with per-field scores and a confidence. The **default** combiner is a weighted mean over per-field scorers (no extra dependencies; optionally Platt-calibrated). A **LightGBM learned combiner** is also built and selectable with `--scorer learned`: train it with `pd-matcher train-scorer` (needs the optional `ml` extra), and it emits a calibrated match probability directly. It outperforms the weighted mean on held-out separation — see [docs/LEARNED_MATCHER.md](docs/LEARNED_MATCHER.md).
-- **`pd-groundtruth`** — turns those proposals into a labeled corpus. It samples candidates across the score range, serves a local labeling UI, and persists every human verdict to `data/training/label_vault.jsonl` — the vault, source of truth.
+- **`pd-matcher`** — the matching engine. It proposes candidate `(MARC record, CCE registration, optional CCE renewal)` triples with per-field scores and a confidence. The **default** combiner is a weighted mean over per-field scorers (no extra dependencies; optionally Platt-calibrated). A **LightGBM learned combiner** is also built and selectable with `--scorer learned`: train it with `pd-matcher train-scorer` (needs the optional `ml` extra), and it emits a calibrated match probability directly. It outperforms the weighted mean on held-out separation — see [docs/LEARNED_MATCHER.md](docs/LEARNED_MATCHER.md).
+- **`pd-groundtruth`** — the labeling subsystem. It turns proposals into a labeled corpus: it samples candidates across the score range, serves a local review UI, and persists every human verdict to `data/training/label_vault.jsonl` — the vault, source of truth.
 
-The matcher's role is **candidate surfacing**, not direct publishing. Every published row is human-verified. The matcher's mistakes only matter for labeling throughput, not output quality.
+The matcher's role is **candidate surfacing**, not direct publishing. Every published row is human-verified, so the matcher's mistakes only cost labeling throughput, not output quality. You point the pipeline at a MARC dump from your own institution; the matcher fits at any catalog that publishes MARCXML.
 
-The published data lives in a separate repo, [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage), pinned here as the `data/training/` submodule. It holds exactly two files:
+The published training data lives in a separate repo, [`jpstroop/cce-marc-linkage`](https://github.com/jpstroop/cce-marc-linkage), pinned here as the `data/training/` submodule. It holds exactly two files:
 - `label_vault.jsonl` — the vault itself: every adjudicated verdict (match / no_match / unsure) with the labeler's notes. The labeling UI writes here, so it is always current. This is the source of truth *and* the training labels for the learned matcher.
 - `marc.xml` — MARCXML of every MARC the vault references (regenerated by `dump-vault-marcs`), so the pairs can be re-scored without the full candidate pool.
 
@@ -33,7 +31,7 @@ This project does not decide public-domain status. Consumers apply whatever copy
 
 ## Status
 
-Pre-1.0. Single institution today (Princeton MARC against the NYPL-transcribed CCE). Top-1 linkage precision/recall against the labeled vault is high (~99%), but that metric is in-sample and saturated; the operative measure now is pair-level **separation** — whether a score threshold can auto-decide a pair without a human. On a (deliberately hard) held-out sample the learned combiner reaches ROC-AUC ≈ 0.95 against the weighted mean's ≈ 0.94. The labeled vault (~2,000 verified pairs) is the bottleneck on training-set size and triage thresholds. The labeling subsystem is single-user and local; multi-user labeling behind OAuth is tracked at [GitHub #34](https://github.com/jpstroop/pd-matcher/issues/34).
+Pre-1.0. The pipeline runs end to end against the NYPL-transcribed CCE; it is developed and tested against one library's MARC dump so far, but nothing about it is institution-specific. Top-1 linkage precision/recall against the labeled vault is high (~99%), but that metric is in-sample and saturated; the operative measure now is pair-level **separation** — whether a score threshold can auto-decide a pair without a human. On a (deliberately hard) held-out sample the learned combiner reaches ROC-AUC ≈ 0.95 against the weighted mean's ≈ 0.94. The labeled vault (~2,000 verified pairs) is the bottleneck on training-set size and triage thresholds. The labeling subsystem is single-user and local; multi-user labeling behind OAuth is tracked at [GitHub #34](https://github.com/jpstroop/pd-matcher/issues/34).
 
 ## Install
 
@@ -47,6 +45,38 @@ pdm run pre-commit install
 ```
 
 Data comes in via git submodules. The labeled **training bundle** (the vault + the MARC it references) under `data/training/` is pulled normally — `--recurse-submodules` gets it. The NYPL-transcribed CCE reference corpus under `data/nypl-reg/` and `data/nypl-ren/` (~1.5 GB) is **lazy**: `--recurse-submodules` does **not** pull it, so a casual clone stays small. You fetch it on demand only when you need to build the CCE index — see [docs/USER_GUIDE.md](docs/USER_GUIDE.md#setup-once-per-machine) for the command. If you forgot `--recurse-submodules`, `git submodule update --init` pulls `data/training` (but still not the lazy NYPL submodules).
+
+### Optional: the learned matcher (`ml` extra)
+
+The LightGBM combiner (`--scorer learned`, `pd-matcher train-scorer`) is an optional extra; plain `pdm install` skips it. The wheel is precompiled, but it needs an **OpenMP runtime** present when LightGBM is imported.
+
+**macOS** — install the OpenMP runtime, then the extra:
+
+```bash
+brew install libomp
+pdm install -G ml
+```
+
+On Apple Silicon, if `import lightgbm` still can't find libomp, point it at Homebrew's copy:
+
+```bash
+export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib:$DYLD_LIBRARY_PATH"
+```
+
+**Linux** — OpenMP (`libgomp`) usually ships with the gcc runtime; install it only if it's missing:
+
+```bash
+sudo apt-get install -y libgomp1   # Debian/Ubuntu (RHEL/Fedora: sudo dnf install libgomp)
+pdm install -G ml
+```
+
+Verify the extra loads:
+
+```bash
+pdm run python -c "import lightgbm; print(lightgbm.__version__)"
+```
+
+(`pdm install -G all` pulls the `acquire` and `review` extras alongside `ml`.)
 
 ## Where to go next
 

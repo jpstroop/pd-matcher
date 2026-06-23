@@ -20,7 +20,7 @@ Plain-language definitions of the statistics, matching, and software terms used 
 
 **Harmonic mean.** An average that leans toward the smaller of the inputs. For `P = 1.0` and `R = 0.5`, the ordinary (arithmetic) mean is 0.75 but the harmonic mean is ~0.67 — it refuses to let a great precision paper over mediocre recall. That's why it's the right average for F1.
 
-**Confusion matrix.** A table cross-tabulating predicted vs. actual categories, so you can see *where* errors land, not just how many. The eval produces one over copyright-status categories (e.g. how often a "renewed / in copyright" was predicted as "not renewed / public domain").
+**Confusion matrix.** A table cross-tabulating predicted vs. actual categories, so you can see *where* errors land, not just how many. For a match/no-match decision it is the 2×2 of true/false positives and negatives. (This project is a linkage producer, not a copyright-status classifier — the eval reports precision/recall/F1 and the threshold sweep over the match decision, not a copyright-status breakdown.)
 
 **ROC curve (Receiver Operating Characteristic).** A plot of true-positive rate (recall) against false-positive rate as you sweep the decision threshold from very tight to very loose. A perfect classifier hugs the top-left corner; a random one tracks the diagonal. The shape shows how well the model *separates* matches from non-matches across all thresholds, independent of where you'd actually set the cut.
 
