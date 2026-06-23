@@ -145,7 +145,9 @@ def acquire_command(
             "--min-free-space-mb",
             help=(
                 "Abort safely if the temp-download or output filesystem drops below this "
-                "many MB free, checked before and during each download. 0 disables the guard."
+                "many MB free, checked before and during each download. The partial "
+                "per-language shards are finalized as valid <collection> files. "
+                "0 disables the guard."
             ),
         ),
     ] = _DEFAULT_MIN_FREE_SPACE_MB,
@@ -154,17 +156,31 @@ def acquire_command(
         Option("--log-file", help="Override the auto-generated log file path."),
     ] = None,
 ) -> None:
-    """Stream dumps and write eligible records as per-language MARCXML shards."""
+    """Stream dumps and write eligible records as per-language MARCXML shards.
+
+    If free disk space drops below ``--min-free-space-mb`` the run aborts safely:
+    the partial per-language shards are finalized as valid ``<collection>`` files
+    and the command exits non-zero.
+    """
     _configure_logging("acquire", log_file)
     resolved_min_year = default_min_year() if min_year is None else min_year
-    report = acquire(
-        out_dir=out_dir,
-        per_decade_cap=per_decade_cap,
-        min_year=resolved_min_year,
-        manifest_url=manifest_url,
-        max_dumps=max_dumps,
-        min_free_space_mb=min_free_space_mb,
-    )
+    try:
+        report = acquire(
+            out_dir=out_dir,
+            per_decade_cap=per_decade_cap,
+            min_year=resolved_min_year,
+            manifest_url=manifest_url,
+            max_dumps=max_dumps,
+            min_free_space_mb=min_free_space_mb,
+        )
+    except InsufficientDiskSpaceError as error:
+        echo(
+            f"aborted: {error} "
+            f"(wrote {error.records_written} records across {error.dumps_written} dumps "
+            f"to {out_dir}; threshold was {min_free_space_mb} MB)",
+            err=True,
+        )
+        raise Exit(code=1) from error
     kept = " ".join(f"{language}={count}" for language, count in report.kept_by_language.items())
     echo(
         f"dumps_processed={report.dumps_processed} "
