@@ -12,11 +12,96 @@ Two distinct modes live in this repo, and most confusion comes from blurring the
 
 2. **Match a catalog to produce pairs** — *the matcher as a tool.* You run the matcher over MARC records to emit a `(MARC record, CCE registration)` linkage table — the actual "which of my books appear in these copyright records" use. Command: `pd-matcher match` (→ a JSONL file).
 
-Both modes share one engine — the CCE index plus the per-field scorers — and differ only in what they emit: mode 1 builds a labeling queue and grows the vault; mode 2 writes a linkage table. The matcher that powers mode 2 is exactly what mode 1's vault trains and validates. The diagram below traces **mode 1**; mode 2 is a single `pd-matcher match` run (see *Daily flow A*).
+Both modes share one engine — the CCE index plus the per-field scorers — and differ only in what they emit: mode 1 builds a labeling queue and grows the vault; mode 2 writes a linkage table. The matcher that powers mode 2 is exactly what mode 1's vault trains and validates. The diagram below traces **mode 1**; mode 2 is a single `pd-matcher match` run.
+
+> **Just want to match your own catalog?** If you have a MARCXML export and want the linkage table — "which of my books appear in the copyright records" — you only need **mode 2**, and you can skip the entire training/labeling apparatus (`acquire`, `build-queue`, `review`, the vault). Jump straight to [Match your own catalog](#match-your-own-catalog-bring-your-own-marcxml) below. The mode-1 loop, *Daily flow B (label)*, and *Daily flow C (measure)* are for people growing and validating the shared training set; a matching-only user does not need them.
 
 ---
 
-## The mode-1 loop in 60 seconds
+## Match your own catalog (bring your own MARCXML)
+
+This is the most common external use: you have a MARC export from your own ILS and want to know which titles map to U.S. copyright registration & renewal records (the CCE). The result is a linkage table — every row is a *candidate* `(MARC record, CCE registration)` pair for a human to verify. The matcher **produces linkages; it does not decide copyright status.** A determination (registered, renewed, unclaimed, public domain) is reasoning *you* apply on top of the linkage, with the CCE evidence in hand.
+
+Nothing here is institution-specific. The CCE side is the same for everyone; the only input that's yours is your MARCXML file. Three steps:
+
+### 1. Build the CCE index (once)
+
+The copyright-records side of the match is identical for every catalog, so you build it once and reuse it. It comes from the NYPL-transcribed CCE, which ships as **lazy** git submodules (~1.5 GB) that a plain clone skips — fetch them first, then build the LMDB index:
+
+```bash
+# Fetch the lazy NYPL CCE submodules (skipped by --recurse-submodules).
+git submodule update --init --checkout data/nypl-reg data/nypl-ren
+
+# Build the CCE LMDB index (~37 seconds). Registration XML + renewal TSV in,
+# one queryable index out.
+pdm run pd-matcher index build \
+  --reg-dir data/nypl-reg/xml \
+  --ren-dir data/nypl-ren/data \
+  --out caches/cce.lmdb
+```
+
+You only repeat this when the NYPL submodules update or the parser changes (see [When to rebuild caches](#when-to-rebuild-caches)).
+
+### 2. Filter your MARCXML to in-scope records
+
+`pd-groundtruth filter` takes a **local MARCXML file** and writes out only the records this matcher can do anything with — no download, no cap, no Princeton or any other institution involved:
+
+```bash
+pdm run pd-groundtruth filter \
+  --input your-catalog.marcxml \
+  --output in-scope.marcxml
+```
+
+A record is **in scope** when it is all of:
+
+- a **monograph** in book format (leader byte 6 = `a`, byte 7 = `m`);
+- **not an electronic resource** (no 007 electronic indicator, no online-resource carrier/extent, no "[electronic resource]" GMD);
+- in a **supported language** — `eng`, `fre`, `ger`, `spa`, or `ita` (008 positions 35–37);
+- published **within the moving wall through 1977** — from `today.year − 95` (the wall advances every January) up to and including 1977, the last year of CCE registrations under the 1909 Act;
+- **not a government publication** (008 position 28); and
+- **carrying a title** (245 subfield `a`).
+
+Everything outside that window has no CCE registration to link to, so filtering first spares the matcher the large out-of-scope majority. (You *can* hand a raw file straight to `match --marc` — it accepts any MARCXML — but on a full catalog export, filtering first is much faster.) Pass `--languages eng,fre` to narrow further; the default keeps all five.
+
+### 3. Match against the CCE index
+
+```bash
+pdm run pd-matcher match \
+  --marc in-scope.marcxml \
+  --index caches/cce.lmdb \
+  --out matches.jsonl
+```
+
+Output is **JSONL** — one record per line. By default every input record gets a row, with blank `match_*` fields when nothing scored above the floor. Useful knobs:
+
+- `--matches-only` — write rows only for genuinely matched pairs, skipping the no-match records.
+- `--min-score N` — keep only pairs scoring ≥ `N` on the **0–100 calibrated scale** (overrides the config's `min_combined_score`, default `50`). `--min-score 90` is a strict triage cut.
+- `--scorer weighted_mean|learned` — choose the combiner. The default `weighted_mean` is zero-dependency and works out of the box; `learned` is the LightGBM combiner, which needs the optional `ml` extra and a trained artifact (see [LEARNED_MATCHER.md](LEARNED_MATCHER.md)).
+- `--workers N` — worker processes (default `cpu_count − 1`).
+
+For a very large export, prepare it into re-runnable chunks first and match the chunk directory instead of the single file:
+
+```bash
+pdm run pd-matcher prepare-marc \
+  --marc in-scope.marcxml \
+  --out caches/prepared
+
+pdm run pd-matcher match \
+  --prepared caches/prepared \
+  --index caches/cce.lmdb \
+  --out matches.jsonl
+```
+
+Run `pdm run pd-matcher prepare-marc --help` for the chunking flags.
+
+Each row in `matches.jsonl` is a candidate, not a verdict. Verifying which candidates are true links — and what each true link implies for copyright status — is the human step this tool exists to make possible. The labeling UI (*Daily flow B*) is one way to do that verification systematically, but it is not required to use the matcher.
+
+---
+
+## The mode-1 (labeling) loop in 60 seconds
+
+*This section and the two "Daily flow" sections after the setup are the **labeling** workflow — growing and validating the shared training set. If you came here only to match your own catalog, you do not need any of it; see [Match your own catalog](#match-your-own-catalog-bring-your-own-marcxml) above.*
+
 
 ```
 NYPL CCE submodules                        Princeton MARC dump
@@ -69,7 +154,7 @@ pdm run pre-commit install
 
 That's it for code. The data comes in as git submodules. The labeled training bundle (vault + `marc.xml`) under `data/training/` is pulled normally by `--recurse-submodules`. The NYPL-transcribed CCE under `data/nypl-reg/` and `data/nypl-ren/` is **lazy** (~1.5 GB) — `--recurse-submodules` skips it, and so does a plain `git submodule update --init`. You fetch it on demand right before the first CCE index build (below). If you forgot `--recurse-submodules` entirely, `git submodule update --init` pulls `data/training`.
 
-Two data caches need to be built before the matcher can do anything useful. Order matters:
+**The CCE index is required for everything** — both matching your own catalog and the labeling loop. Build it once (this is step 1 of [Match your own catalog](#match-your-own-catalog-bring-your-own-marcxml), repeated here for the setup checklist):
 
 ```bash
 # 1. Fetch the lazy NYPL CCE submodules (skipped by --recurse-submodules; needed
@@ -81,21 +166,25 @@ pdm run pd-matcher index build \
   --reg-dir data/nypl-reg/xml \
   --ren-dir data/nypl-ren/data \
   --out caches/cce.lmdb
+```
 
-# 3. Acquire a capped training-set MARC pool from Princeton (~1 hour first run).
-#    The default --manifest-url is currently stale (see the disk-guard note
-#    below), so pass a live Princeton full-dump manifest URL.
+That index plus your own MARCXML is all you need to match — see [Match your own catalog](#match-your-own-catalog-bring-your-own-marcxml). **The rest of this Setup section is for the labeling loop only**; a matching-only user can stop here.
+
+The labeling loop additionally needs a MARC pool to sample training pairs from. `acquire` downloads one (~1 hour first run); its default `--manifest-url` is currently stale (see the disk-guard note below), so pass a live full-dump manifest URL:
+
+```bash
+# Acquire a capped training-set MARC pool (labeling loop only).
 pdm run pd-groundtruth acquire \
   --out-dir data/candidates \
   --manifest-url https://bibdata.princeton.edu/dumps/<live-dump>.json
 ```
 
-Both produce files under `caches/` and `data/candidates/` that are gitignored — they're derived, regenerable, and large.
+Everything built here lands under `caches/` and `data/candidates/`, which are gitignored — derived, regenerable, and large.
 
 `acquire` is the **capped training-set sampler**: it keeps at most `--per-decade-cap` records per (language, decade) bucket and writes per-language MARCXML shards under `data/candidates/<lang>/`, the pool the labeling loop samples from. It is *not* the whole-catalog extractor. Two sibling `pd-groundtruth` commands produce the full, uncapped in-scope corpus that production matching runs over:
 
 - **`build-corpus`** — streams every dump in the manifest, keeps every in-scope (monograph, not an electronic resource, publication year within the moving wall .. 1977, supported language, has a title) record, and writes one MARCXML `<collection>` at `--output`. This is the whole-catalog extractor for `pd-matcher match` — never match the raw fixture or the capped pool.
-- **`filter`** — the same uncapped in-scope extraction applied to a single local MARCXML file (`--input` → `--output`), for when you already have a dump on disk.
+- **`filter`** — the same uncapped in-scope extraction applied to a single local MARCXML file (`--input` → `--output`), for when you already have a file on disk. This is the on-ramp for the [Match your own catalog](#match-your-own-catalog-bring-your-own-marcxml) flow; it needs no manifest and no download.
 
 ```bash
 # Whole-catalog in-scope corpus (uncapped):
@@ -109,7 +198,7 @@ pdm run pd-groundtruth filter \
   --output data/in-scope.marcxml
 ```
 
-> **The default `--manifest-url` is stale.** The hardcoded default (`https://bibdata.princeton.edu/dumps/16368.json`) now returns a 404 page rather than a manifest, so `acquire` and `build-corpus` must be given a live Princeton full-dump manifest via `--manifest-url` until [issue #100](https://github.com/jpstroop/pd-matcher/issues/100) lands a current default.
+> **The default `--manifest-url` is stale.** The hardcoded default (`https://bibdata.princeton.edu/dumps/16368.json`) now returns a 404 page rather than a manifest, so `acquire` and `build-corpus` must be given a live full-dump manifest URL (a Princeton-bibdata-style dump-manifest endpoint) via `--manifest-url` until [issue #100](https://github.com/jpstroop/pd-matcher/issues/100) lands a current default.
 
 `acquire` and `build-corpus` both stream large multi-dump downloads to disk. They abort safely (rather than filling the filesystem) if free space on either the temp-download directory or the output directory drops below `--min-free-space-mb` (default `2048` MB, i.e. 2 GB; the guard is on by default), checked before and during each download; pass `--min-free-space-mb 0` to disable it. On a shortfall they finalize the valid partial output (`build-corpus`'s partial `<collection>`, `acquire`'s partial per-language shards) and exit non-zero:
 
