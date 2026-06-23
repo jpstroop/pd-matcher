@@ -1,5 +1,6 @@
 """Unit tests for the streaming acquisition orchestration (network mocked)."""
 
+from collections import namedtuple
 from hashlib import md5
 from io import BytesIO
 from pathlib import Path
@@ -9,16 +10,21 @@ from tarfile import open as tar_open
 
 from lxml.etree import parse
 from msgspec.json import encode
+from pytest import MonkeyPatch
 from pytest import raises
 from responses import GET
 from responses import RequestsMock
 
 from pd_groundtruth.acquire import Md5MismatchError
 from pd_groundtruth.acquire import acquire
+from pd_groundtruth.disk_guard import InsufficientDiskSpaceError
 
 _MARC_NS = "http://www.loc.gov/MARC21/slim"
 _MANIFEST_URL = "https://example.test/dumps/1.json"
 _MIN_YEAR = 1931
+_MB = 1 << 20
+
+_Usage = namedtuple("_Usage", ("total", "used", "free"))
 
 
 def _eligible(language: str, year: int, label: str) -> str:
@@ -345,3 +351,48 @@ def test_dumps_exhausted_across_two_dumps(tmp_path: Path) -> None:
     assert report.dumps_processed == 2
     assert report.kept_by_language["eng"] == 4
     assert report.stopped_reason == "dumps_exhausted"
+
+
+def test_preflight_abort_finalizes_valid_partial_shards(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    archive_a = _make_targz(_collection(_eligible_records("eng", 1950, 3)))
+    archive_b = _make_targz(_collection(_eligible_records("fre", 1960, 3)))
+    url_a = "https://example.test/dumps/a.tar.gz"
+    url_b = "https://example.test/dumps/b.tar.gz"
+    out_dir = tmp_path / "out"
+
+    free_values = iter([10 * 1024 * _MB, 10 * 1024 * _MB, 1 * _MB, 1 * _MB])
+
+    def _usage(_path: object) -> _Usage:
+        free = next(free_values)
+        return _Usage(total=free * 2, used=free, free=free)
+
+    monkeypatch.setattr("pd_groundtruth.disk_guard.disk_usage", _usage)
+
+    with RequestsMock() as mock:
+        mock.assert_all_requests_are_fired = False
+        mock.add(
+            GET,
+            _MANIFEST_URL,
+            body=_manifest_payload(
+                [(url_a, md5(archive_a).hexdigest()), (url_b, md5(archive_b).hexdigest())]
+            ),
+        )
+        mock.add(GET, url_a, body=archive_a)
+        mock.add(GET, url_b, body=archive_b)
+        with raises(InsufficientDiskSpaceError) as excinfo:
+            acquire(
+                out_dir=out_dir,
+                per_decade_cap=100,
+                min_year=_MIN_YEAR,
+                manifest_url=_MANIFEST_URL,
+                min_free_space_mb=2048,
+            )
+
+    assert excinfo.value.records_written == 3
+    assert excinfo.value.dumps_written == 1
+    eng_shard = out_dir / "eng" / "candidates_00001.xml"
+    root = parse(str(eng_shard)).getroot()
+    assert root.tag == f"{{{_MARC_NS}}}collection"
+    assert len(root) == 3

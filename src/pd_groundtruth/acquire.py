@@ -109,6 +109,12 @@ def acquire(
         A report of dumps processed, records scanned, records kept per
         (language, decade) and per language, total shards written, and why the
         run stopped.
+
+    Raises:
+        InsufficientDiskSpaceError: If a guarded filesystem runs below the
+            free-space floor; the partial per-language shards are finalized as
+            valid ``<collection>`` files before the error propagates, and the
+            error carries the records and dumps written so far.
     """
     entries = fetch_manifest(manifest_url)
     return _acquire_entries(
@@ -171,6 +177,17 @@ def _acquire_entries(
             if _all_full(kept, per_decade_cap):
                 stopped_reason = "quotas_reached"
                 break
+    except InsufficientDiskSpaceError as error:
+        kept_so_far = sum(count for buckets in kept.values() for count in buckets.values())
+        error.records_written = kept_so_far
+        error.dumps_written = dumps_processed
+        _LOGGER.error(
+            "disk space exhausted after %d dumps / %d records; finalizing partial shards in %s",
+            dumps_processed,
+            kept_so_far,
+            out_dir,
+        )
+        raise
     finally:
         shards_written = 0
         for writer in writers.values():

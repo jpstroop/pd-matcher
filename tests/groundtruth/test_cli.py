@@ -746,3 +746,29 @@ def test_build_corpus_command_exits_nonzero_on_disk_space_error(tmp_path: Path) 
     assert "wrote 42 records across 3 dumps" in result.stderr
     assert "threshold was 2048 MB" in result.stderr
     assert "insufficient disk space" in result.stderr
+
+
+def test_acquire_command_exits_nonzero_on_disk_space_error(tmp_path: Path) -> None:
+    error = InsufficientDiskSpaceError("insufficient disk space at /tmp: 1.00 MB free")
+    error.records_written = 17
+    error.dumps_written = 2
+    out_dir = tmp_path / "out"
+    with patch("pd_groundtruth.cli.acquire", side_effect=error):
+        result = _RUNNER.invoke(
+            app,
+            [
+                "acquire",
+                "--out-dir",
+                str(out_dir),
+                "--min-free-space-mb",
+                "2048",
+                "--log-file",
+                str(tmp_path / "acquire.log"),
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert "wrote 17 records across 2 dumps" in result.stderr
+    assert f"to {out_dir}" in result.stderr
+    assert "threshold was 2048 MB" in result.stderr
+    assert "insufficient disk space" in result.stderr
