@@ -38,6 +38,7 @@ from pd_matcher.workers.events import encode_stats_event
 from pd_matcher.workers.messages import WorkerOutput
 from pd_matcher.workers.messages import encode_worker_output
 from pd_matcher.workers.producer import decode_batch
+from pd_matcher.workers.thread_limits import limit_worker_threads
 
 _LOGGER = get_logger(__name__)
 
@@ -181,59 +182,60 @@ def run_worker_loop(
         _LOGGER.info("worker.start", worker=worker_id)
     processed = 0
     skipped = 0
-    while True:
-        if is_shutdown():
-            break
-        blob = input_get()
-        if blob is None:
-            break
-        batch = decode_batch(blob)
-        for marc in batch:
+    with limit_worker_threads():
+        while True:
             if is_shutdown():
-                if verbosity >= 1:
-                    _LOGGER.info(
-                        "worker.finish",
-                        worker=worker_id,
-                        processed=processed,
-                        skipped=skipped,
-                        rate=round(_worker_rate(processed, started_at, clock()), 1),
+                break
+            blob = input_get()
+            if blob is None:
+                break
+            batch = decode_batch(blob)
+            for marc in batch:
+                if is_shutdown():
+                    if verbosity >= 1:
+                        _LOGGER.info(
+                            "worker.finish",
+                            worker=worker_id,
+                            processed=processed,
+                            skipped=skipped,
+                            rate=round(_worker_rate(processed, started_at, clock()), 1),
+                        )
+                    return WorkerResult(processed=processed, skipped=skipped)
+                bind_contextvars(marc_id=marc.control_id)
+                try:
+                    output = _process_record(
+                        marc,
+                        lookup=lookup,
+                        config=config,
+                        idf=idf,
+                        author_idf=author_idf,
+                        publisher_idf=publisher_idf,
+                        calibrator=calibrator,
+                        combiner=combiner,
+                        pairings=pairings,
                     )
-                return WorkerResult(processed=processed, skipped=skipped)
-            bind_contextvars(marc_id=marc.control_id)
-            try:
-                output = _process_record(
-                    marc,
-                    lookup=lookup,
-                    config=config,
-                    idf=idf,
-                    author_idf=author_idf,
-                    publisher_idf=publisher_idf,
-                    calibrator=calibrator,
-                    combiner=combiner,
-                    pairings=pairings,
-                )
-                output_put(encode_worker_output(output))
-                stats_put(_stats_event_for(output))
-                processed += 1
-                if verbosity >= 2:
-                    _log_hit(worker_id, output)
-                if verbosity >= 1 and processed % _WORKER_LOG_EVERY_N == 0:
-                    _LOGGER.info(
-                        "worker.progress",
+                    output_put(encode_worker_output(output))
+                    stats_put(_stats_event_for(output))
+                    processed += 1
+                    if verbosity >= 2:
+                        _log_hit(worker_id, output)
+                    if verbosity >= 1 and processed % _WORKER_LOG_EVERY_N == 0:
+                        _LOGGER.info(
+                            "worker.progress",
+                            worker=worker_id,
+                            processed=processed,
+                            rate=round(_worker_rate(processed, started_at, clock()), 1),
+                        )
+                except Exception:
+                    skipped += 1
+                    _LOGGER.exception(
+                        "worker.record_failed",
                         worker=worker_id,
-                        processed=processed,
-                        rate=round(_worker_rate(processed, started_at, clock()), 1),
+                        marc=marc.control_id,
                     )
-            except Exception:
-                skipped += 1
-                _LOGGER.exception(
-                    "worker.record_failed",
-                    worker=worker_id,
-                    marc=marc.control_id,
-                )
-                stats_put(encode_stats_event(RecordSkipped(control_id=marc.control_id)))
-            finally:
-                unbind_contextvars("marc_id")
+                    stats_put(encode_stats_event(RecordSkipped(control_id=marc.control_id)))
+                finally:
+                    unbind_contextvars("marc_id")
     if verbosity >= 1:
         _LOGGER.info(
             "worker.finish",

@@ -63,6 +63,48 @@ def _sink() -> Callable[[bytes], None]:
     return put
 
 
+def test_worker_loop_runs_under_thread_limit_guard(
+    tiny_index_path: Path,
+    tiny_idf: IdfTable,
+    tiny_author_idf: IdfTable,
+    tiny_publisher_idf: IdfTable,
+    matching_config: MatchingConfig,
+    compiled_pairings: CompiledPairings,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """The consume loop is wrapped in the runtime thread-limit guard (#101)."""
+    from collections.abc import Iterator
+    from contextlib import contextmanager
+
+    entered: list[bool] = []
+
+    @contextmanager
+    def spy() -> Iterator[None]:
+        entered.append(True)
+        yield
+
+    monkeypatch.setattr("pd_matcher.workers.worker.limit_worker_threads", spy)
+    outputs: list[bytes] = []
+    stats: list[bytes] = []
+    blobs: list[bytes | None] = [encode_batch((_make_marc(),)), None]
+    with NyplIndexLookup(tiny_index_path) as lookup:
+        run_worker_loop(
+            lookup=lookup,
+            config=matching_config,
+            idf=tiny_idf,
+            author_idf=tiny_author_idf,
+            publisher_idf=tiny_publisher_idf,
+            calibrator=None,
+            learned_model_dir=None,
+            pairings=compiled_pairings,
+            input_get=_build_input_get(blobs),
+            output_put=outputs.append,
+            stats_put=stats.append,
+            is_shutdown=lambda: False,
+        )
+    assert entered == [True]
+
+
 def test_worker_loop_processes_one_batch_and_stops_on_poison_pill(
     tiny_index_path: Path,
     tiny_idf: IdfTable,
