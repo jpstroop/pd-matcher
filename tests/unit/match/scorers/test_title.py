@@ -206,6 +206,45 @@ def test_score_title_same_script_does_not_fire_mismatch(
     assert "script_mismatch" not in feature_map
 
 
+def test_score_title_precomputed_script_is_byte_identical(
+    scorer_context: ScorerContext,
+) -> None:
+    """Passing the precomputed CCE script yields Evidence identical to deriving it."""
+    derived = score_title("A study of widgets", "A study of widgets", scorer_context)
+    precomputed = score_title(
+        "A study of widgets",
+        "A study of widgets",
+        scorer_context,
+        nypl_title_script="LATIN",
+    )
+    assert precomputed == derived
+
+
+def test_score_title_precomputed_script_fires_mismatch(
+    scorer_context: ScorerContext,
+) -> None:
+    """The precomputed CCE script drives the mismatch guard without re-derivation."""
+    ev = score_title(
+        "Voyna i mir",
+        "Война и мир",
+        scorer_context,
+        nypl_title_script="CYRILLIC",
+    )
+    assert ev.skipped is False
+    assert ev.score == 0.0
+    assert ("script_mismatch", 1.0) in ev.features
+
+
+def test_score_title_precomputed_none_falls_back_to_derivation(
+    scorer_context: ScorerContext,
+) -> None:
+    """An absent precomputed script reproduces the self-derived mismatch zero."""
+    ev = score_title("Voyna i mir", "Война и мир", scorer_context, nypl_title_script=None)
+    assert ev.skipped is False
+    assert ev.score == 0.0
+    assert ("script_mismatch", 1.0) in ev.features
+
+
 def test_align_tokens_exact_only_reduces_to_intersection() -> None:
     """With no near-misses the alignment is the plain set intersection."""
     matched, unique_marc, unique_nypl = _align_tokens({"a", "b"}, {"b", "c"})

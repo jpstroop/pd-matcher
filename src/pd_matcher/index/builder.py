@@ -422,7 +422,7 @@ def build_index(
     reg_dir: Path,
     ren_dir: Path,
     out_path: Path,
-    schema_version: int = 5,
+    schema_version: int = 6,
     force: bool = False,
 ) -> BuildReport:
     """Materialise the LMDB index from the two CCE source directories.

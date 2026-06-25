@@ -14,6 +14,8 @@ from datetime import date
 
 from msgspec import Struct
 
+from pd_matcher.normalize.script import dominant_script
+
 
 class MarcRecord(Struct, frozen=True, forbid_unknown_fields=True):
     """One MARC bibliographic record extracted from a MARCXML source."""
@@ -150,6 +152,19 @@ class IndexedNyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     """Mirrors :attr:`NyplRenRecord.claimants` as transcribed on the renewal."""
     renewal_new_matter: str | None = None
     """Mirrors :attr:`NyplRenRecord.new_matter` as transcribed on the renewal."""
+    title_script: str | None = None
+    """The dominant Unicode script of :attr:`title`, precomputed at index
+    build via :func:`pd_matcher.normalize.script.dominant_script`.
+
+    The title scorer's script-mismatch guard is a pure function of the raw
+    title string and is independent of the matching MARC record's language,
+    so it is resolved once here instead of re-derived for every candidate at
+    match time (it was the dominant ``unicodedata.name`` cost in the per-
+    candidate hot path). ``None`` mirrors :func:`dominant_script` returning
+    ``None`` for an empty / scriptless / digit-only title. Legacy indices
+    written before this field default to ``None``; the scorer falls back to
+    computing the script in that case, so the precompute is a pure speedup
+    with identical scores."""
 
 
 def index_reg(
@@ -204,6 +219,7 @@ def index_reg(
         renewal_title=renewal.title if renewal is not None else None,
         renewal_claimants=renewal.claimants if renewal is not None else None,
         renewal_new_matter=renewal.new_matter if renewal is not None else None,
+        title_script=dominant_script(record.title),
     )
 
 

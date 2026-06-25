@@ -154,10 +154,31 @@ def _with_multiplier(evidence: Evidence, multiplier: float) -> Evidence:
 
 
 _GROUP_SCORERS: dict[str, _GroupScorer] = {
-    "title": score_title,
     "author": score_author,
     "publisher": score_publisher,
 }
+
+
+def _finalize_group(
+    pairings: tuple[CompiledPairing, ...],
+    evidences: tuple[Evidence, ...],
+    winning: list[Evidence],
+    losing: list[Evidence],
+    winning_sources: list[tuple[str, str]],
+) -> None:
+    """Keep the best Evidence for one scorer group and record its source.
+
+    The combiner keys on exactly one Evidence per scorer tag, so the best
+    Evidence (the highest-scoring pairing) is appended to ``winning`` and the
+    rest to ``losing`` for audit. The winning pairing's ``(marc_name,
+    cce_name)`` is appended to ``winning_sources`` so callers can surface which
+    composed-field pair produced the kept Evidence (vital for diagnosing
+    cross-pairings that score non-zero against fuzzy noise).
+    """
+    best_index, best, losers = _select_best(evidences)
+    winning.append(best)
+    losing.extend(losers)
+    winning_sources.append((pairings[best_index].marc_name, pairings[best_index].cce_name))
 
 
 def _score_group(
@@ -169,15 +190,7 @@ def _score_group(
     losing: list[Evidence],
     winning_sources: list[tuple[str, str]],
 ) -> None:
-    """Score every pairing in one group and append best/losers to the lists.
-
-    The combiner keys on exactly one Evidence per scorer tag, so the best
-    Evidence (the highest-scoring pairing) is appended to ``winning`` and
-    the rest to ``losing`` for audit. The winning pairing's
-    ``(marc_name, cce_name)`` is appended to ``winning_sources`` so callers
-    can surface which composed-field pair produced the kept Evidence (vital
-    for diagnosing cross-pairings that score non-zero against fuzzy noise).
-    """
+    """Score every pairing in one author/publisher group and keep the best."""
     if not pairings:
         return
     scorer = _GROUP_SCORERS[pairings[0].group]
@@ -185,10 +198,41 @@ def _score_group(
         scorer(pairing.marc_accessor(marc), pairing.cce_accessor(candidate), ctx)
         for pairing in pairings
     )
-    best_index, best, losers = _select_best(evidences)
-    winning.append(best)
-    losing.extend(losers)
-    winning_sources.append((pairings[best_index].marc_name, pairings[best_index].cce_name))
+    _finalize_group(pairings, evidences, winning, losing, winning_sources)
+
+
+def _score_title_group(
+    pairings: tuple[CompiledPairing, ...],
+    marc: MarcRecord,
+    candidate: IndexedNyplRegRecord,
+    ctx: ScorerContext,
+    winning: list[Evidence],
+    losing: list[Evidence],
+    winning_sources: list[tuple[str, str]],
+) -> None:
+    """Score the title group, feeding the candidate's precomputed title script.
+
+    Like :func:`_score_group` but specialised for the title scorer: when a
+    pairing's CCE comparand is the candidate's canonical title, its precomputed
+    :attr:`~pd_matcher.models.IndexedNyplRegRecord.title_script` is threaded
+    into :func:`score_title` so the script-mismatch guard does not re-derive the
+    dominant script per candidate. For any other CCE comparand (e.g. the renewal
+    title) the script is left for the scorer to derive, so the score is
+    byte-identical to the unspecialised path.
+    """
+    if not pairings:
+        return
+    evidences = tuple(
+        score_title(
+            pairing.marc_accessor(marc),
+            cce_value,
+            ctx,
+            nypl_title_script=(candidate.title_script if cce_value == candidate.title else None),
+        )
+        for pairing in pairings
+        for cce_value in (pairing.cce_accessor(candidate),)
+    )
+    _finalize_group(pairings, evidences, winning, losing, winning_sources)
 
 
 def _score_candidate(
@@ -209,7 +253,7 @@ def _score_candidate(
     sources.append(_FIXED_SOURCE)
 
     title_index = len(winning)
-    _score_group(pairings.title, marc, candidate, ctx, winning, losing, sources)
+    _score_title_group(pairings.title, marc, candidate, ctx, winning, losing, sources)
     author_index = len(winning)
     _score_group(pairings.author, marc, candidate, ctx, winning, losing, sources)
     if author_index < len(winning) and is_translation_signal(candidate):
