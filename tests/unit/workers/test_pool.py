@@ -3,9 +3,11 @@
 from multiprocessing import Event
 from multiprocessing import get_context
 from multiprocessing.queues import Queue as MpQueue
+from os import environ
 from pathlib import Path
 
 from msgspec.json import decode as json_decode
+from pytest import MonkeyPatch
 from pytest import raises
 
 from pd_matcher.config.schemas import MatchingConfig
@@ -208,6 +210,54 @@ def test_run_match_returns_run_report(
     assert report.records_written == report.records_processed
     assert report.interrupted is False
     assert output_path.exists()
+
+
+def test_run_match_pins_numeric_threads_before_spawning(
+    pairing_config: PairingConfig,
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """The match pool pins numeric-lib threads in the parent env (issue #101).
+
+    Oversubscription only bites when the worker pool runs, so the env cap must
+    be applied inside :func:`run_match`. Single-process commands never call it.
+    """
+    from pd_matcher.workers.thread_limits import pin_numeric_threads_in_env
+
+    for name in (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    calls: list[bool] = []
+
+    def spy() -> None:
+        calls.append(True)
+        pin_numeric_threads_in_env()
+
+    monkeypatch.setattr("pd_matcher.workers.pool.pin_numeric_threads_in_env", spy)
+    index_path, idf, author_idf, publisher_idf = _build_tiny_index(tmp_path)
+    run_match(
+        marc_path=_FIXTURES / "tiny.marcxml",
+        index_path=index_path,
+        output_path=tmp_path / "results.jsonl",
+        matching_config=_tiny_match_config(),
+        pairing_config=pairing_config,
+        idf=idf,
+        author_idf=author_idf,
+        publisher_idf=publisher_idf,
+        workers=1,
+        batch_size=2,
+        queue_maxsize=4,
+        report_interval_seconds=0.05,
+    )
+    assert calls == [True]
+    assert environ["OMP_NUM_THREADS"] == "1"
+    assert environ["MKL_NUM_THREADS"] == "1"
+    assert environ["OPENBLAS_NUM_THREADS"] == "1"
+    assert environ["NUMEXPR_NUM_THREADS"] == "1"
 
 
 def _build_tiny_index(tmp_path: Path) -> tuple[Path, IdfTable, IdfTable, IdfTable]:

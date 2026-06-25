@@ -44,6 +44,7 @@ from pd_matcher.workers.events import encode_stats_event
 from pd_matcher.workers.producer import run_producer
 from pd_matcher.workers.reporter import Reporter
 from pd_matcher.workers.shutdown import ShutdownCoordinator
+from pd_matcher.workers.thread_limits import pin_numeric_threads_in_env
 from pd_matcher.workers.worker import worker_main
 from pd_matcher.workers.writer import WriterFactory
 from pd_matcher.workers.writer import writer_main
@@ -345,6 +346,7 @@ def run_match(
     if worker_count < 1:
         raise ValueError(f"workers must be >= 1 (got {worker_count!r})")
     input_capacity = queue_maxsize if queue_maxsize is not None else worker_count * 4
+    pin_numeric_threads_in_env()
     ctx = get_context("spawn")
     input_queue: MpQueue[bytes | None] = ctx.Queue(maxsize=input_capacity)
     output_queue: MpQueue[bytes | None] = ctx.Queue()
