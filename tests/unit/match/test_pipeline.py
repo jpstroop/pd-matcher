@@ -17,8 +17,10 @@ from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import _apply_title_isolation_multiplier
 from pd_matcher.match.pipeline import _build_context
+from pd_matcher.match.pipeline import _score_title_group
 from pd_matcher.match.pipeline import _with_multiplier
 from pd_matcher.match.pipeline import match_record
+from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
@@ -392,6 +394,29 @@ def test_match_record_handles_groups_with_no_pairings(tmp_path: Path) -> None:
     assert result.best.nypl_uuid == "UUID-0001"
     assert not any(ev.scorer == "name.author" for ev in result.best.evidence)
     assert not any(ev.scorer == "name.publisher" for ev in result.best.evidence)
+
+
+def test_score_title_group_no_pairings_is_a_noop(tmp_path: Path) -> None:
+    """An empty title group appends nothing to the accumulators."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        idf = _idf(lookup)
+        config = _config()
+        marc = MarcRecord(
+            control_id="m",
+            title="A study of widgets",
+            title_main="A study of widgets",
+            publication_year=1940,
+        )
+        ctx = _build_context(marc, idf, idf, idf, config)
+        candidate = IndexedNyplRegRecord(uuid="x", title="A study of widgets", was_renewed=False)
+    winning: list[Evidence] = []
+    losing: list[Evidence] = []
+    sources: list[tuple[str, str]] = []
+    _score_title_group((), marc, candidate, ctx, winning, losing, sources)
+    assert winning == []
+    assert losing == []
+    assert sources == []
 
 
 def test_match_record_captures_winning_source_for_each_evidence(

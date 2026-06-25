@@ -50,7 +50,6 @@ from rapidfuzz.fuzz import token_set_ratio
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.scorers.context import ScorerContext
-from pd_matcher.normalize.numbers import normalize_numbers
 from pd_matcher.normalize.publishers import normalize_publisher
 from pd_matcher.normalize.text import tokenize
 
@@ -62,14 +61,17 @@ _ALIAS_HIT_FLOOR: float = 95.0
 _SINGLE_TOKEN_IDF_FLOOR: float = 0.6
 
 
-def _prepare(value: str, language: str, stopwords: frozenset[str]) -> tuple[str, str]:
+def _prepare(value: str, ctx: ScorerContext, stopwords: frozenset[str]) -> tuple[str, str]:
     """Return ``(joined, original_normalized)`` for fuzzy comparison.
 
     The first element has stopwords removed and is fed to rapidfuzz; the
     second element preserves the normalized form so that callers can record
-    its length as a feature.
+    its length as a feature. Number-normalization is routed through
+    :meth:`ScorerContext.normalize_numbers` so a MARC field re-scored against
+    every candidate is normalized once per record; the result is byte-identical
+    to calling :func:`pd_matcher.normalize.numbers.normalize_numbers` directly.
     """
-    normalized = normalize_numbers(value, language)
+    normalized = ctx.normalize_numbers(value)
     tokens = tokenize(normalized)
     kept = [token for token in tokens if token not in stopwords]
     joined = " ".join(kept)
@@ -154,8 +156,8 @@ def _evidence(
             decisive=False,
             features=(),
         )
-    marc_prepared, marc_normalized = _prepare(marc_value, ctx.language, stopwords)
-    nypl_prepared, nypl_normalized = _prepare(nypl_value, ctx.language, stopwords)
+    marc_prepared, marc_normalized = _prepare(marc_value, ctx, stopwords)
+    nypl_prepared, nypl_normalized = _prepare(nypl_value, ctx, stopwords)
     if not marc_prepared or not nypl_prepared:
         return Evidence(
             scorer=scorer_name,

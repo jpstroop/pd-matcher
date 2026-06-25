@@ -179,6 +179,24 @@ def test_index_reg_projects_renewal_fields_when_renewal_supplied() -> None:
     assert indexed.renewal_new_matter == "updated chapter 7"
 
 
+def test_index_reg_precomputes_title_script() -> None:
+    """``index_reg`` stamps the dominant script of the registration title."""
+    assert (
+        index_reg(NyplRegRecord(uuid="U", title="History of Rome"), was_renewed=False).title_script
+        == "LATIN"
+    )
+    assert (
+        index_reg(NyplRegRecord(uuid="U", title="בראשית"), was_renewed=False).title_script
+        == "HEBREW"
+    )
+
+
+def test_index_reg_title_script_none_for_scriptless_title() -> None:
+    """A digit-only title yields no dominant script."""
+    indexed = index_reg(NyplRegRecord(uuid="U", title="1234"), was_renewed=False)
+    assert indexed.title_script is None
+
+
 def test_index_reg_renewal_fields_default_to_none_when_renewal_absent() -> None:
     parsed = NyplRegRecord(uuid="UUID-1", title="t")
     indexed = index_reg(parsed, was_renewed=True)

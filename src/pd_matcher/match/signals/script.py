@@ -27,8 +27,28 @@ def is_script_mismatch(marc_text: str, cce_text: str) -> bool:
         the two scripts differ; ``False`` when either side has no
         detectable script or when both sides share the same script.
     """
-    marc_script = dominant_script(marc_text)
-    cce_script = dominant_script(cce_text)
+    return scripts_mismatch(dominant_script(marc_text), dominant_script(cce_text))
+
+
+def scripts_mismatch(marc_script: str | None, cce_script: str | None) -> bool:
+    """Return ``True`` when two already-resolved dominant scripts differ.
+
+    The byte-identical core of :func:`is_script_mismatch` over precomputed
+    :func:`pd_matcher.normalize.script.dominant_script` outputs. The hot
+    matching loop resolves each side's script once (the MARC side per record
+    on the :class:`~pd_matcher.match.scorers.context.ScorerContext`, the CCE
+    side per record at index build on
+    :attr:`~pd_matcher.models.IndexedNyplRegRecord.title_script`) and calls
+    this instead of re-deriving the script for every candidate.
+
+    Args:
+        marc_script: The MARC title's dominant script, or ``None``.
+        cce_script: The CCE title's dominant script, or ``None``.
+
+    Returns:
+        ``True`` when both scripts are present and differ; ``False`` when
+        either is ``None`` or they are equal.
+    """
     if marc_script is None or cce_script is None:
         return False
     return marc_script != cce_script
@@ -36,4 +56,5 @@ def is_script_mismatch(marc_text: str, cce_text: str) -> bool:
 
 __all__ = [
     "is_script_mismatch",
+    "scripts_mismatch",
 ]

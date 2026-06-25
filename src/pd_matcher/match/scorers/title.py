@@ -70,8 +70,9 @@ from rapidfuzz.fuzz import ratio
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.scorers.context import ScorerContext
-from pd_matcher.match.signals.script import is_script_mismatch
+from pd_matcher.match.signals.script import scripts_mismatch
 from pd_matcher.normalize.numbers import normalize_numbers
+from pd_matcher.normalize.script import dominant_script
 from pd_matcher.normalize.text import tokenize
 
 _MAX_SCORE: float = 100.0
@@ -167,6 +168,17 @@ def _shared_weight(marc_token: str, nypl_token: str, idf: IdfTable) -> float:
     return (idf.score(marc_token) + idf.score(nypl_token)) / 2.0
 
 
+def _tokenize_filter_stem(
+    normalized: str,
+    title_stopwords: frozenset[str],
+    stemmer: Callable[[str], str],
+) -> tuple[str, ...]:
+    """Tokenize, drop title stopwords, and stem an already-number-normalized string."""
+    tokens = tokenize(normalized)
+    filtered = [token for token in tokens if token not in title_stopwords]
+    return tuple(stemmer(token) for token in filtered)
+
+
 def _prepare_tokens(
     value: str,
     language: str,
@@ -174,10 +186,7 @@ def _prepare_tokens(
     stemmer: Callable[[str], str],
 ) -> tuple[str, ...]:
     """Normalize numbers, tokenize, drop title stopwords, and stem ``value``."""
-    normalized = normalize_numbers(value, language)
-    tokens = tokenize(normalized)
-    filtered = [token for token in tokens if token not in title_stopwords]
-    return tuple(stemmer(token) for token in filtered)
+    return _tokenize_filter_stem(normalize_numbers(value, language), title_stopwords, stemmer)
 
 
 def _coverage(
@@ -213,8 +222,13 @@ def _coverage(
 
 
 def _prepare(value: str, ctx: ScorerContext) -> tuple[str, ...]:
-    """Tokenize, drop stopwords, and stem ``value`` for the context language."""
-    return _prepare_tokens(value, ctx.language, ctx.stopwords.title, ctx.stemmer)
+    """Tokenize, drop stopwords, and stem ``value`` for the context language.
+
+    Number-normalization is routed through :meth:`ScorerContext.normalize_numbers`
+    so a MARC field re-scored against every candidate is normalized once per
+    record; the result is byte-identical to :func:`_prepare_tokens`.
+    """
+    return _tokenize_filter_stem(ctx.normalize_numbers(value), ctx.stopwords.title, ctx.stemmer)
 
 
 def prepare_cross_field_stems(
@@ -286,13 +300,28 @@ def _script_mismatch_zero() -> Evidence:
     )
 
 
-def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerContext) -> Evidence:
+def score_title(
+    marc_title: str | None,
+    nypl_title: str | None,
+    ctx: ScorerContext,
+    *,
+    nypl_title_script: str | None = None,
+) -> Evidence:
     """Return :class:`Evidence` for one (marc_title, nypl_title) pairing.
 
     Args:
         marc_title: MARC 245 ``$a$b`` value or ``None``.
         nypl_title: NYPL registration title or ``None``.
         ctx: Per-record :class:`ScorerContext`.
+        nypl_title_script: The CCE title's dominant script, precomputed at
+            index build on
+            :attr:`~pd_matcher.models.IndexedNyplRegRecord.title_script` and
+            threaded in by the pipeline when ``nypl_title`` is the candidate's
+            canonical title. ``None`` means "not supplied"; the scorer then
+            derives the script itself, so the result is byte-identical whether
+            or not the precomputed value is passed. (A genuinely scriptless
+            CCE title also yields ``None`` from the derivation, so the
+            recomputed and absent cases collapse to the same behavior.)
 
     Returns:
         An :class:`Evidence` whose ``score`` lies in ``[0, 100]``. The
@@ -303,7 +332,8 @@ def score_title(marc_title: str | None, nypl_title: str | None, ctx: ScorerConte
     """
     if not marc_title or not nypl_title:
         return _skipped()
-    if is_script_mismatch(marc_title, nypl_title):
+    cce_script = nypl_title_script if nypl_title_script is not None else dominant_script(nypl_title)
+    if scripts_mismatch(ctx.marc_title_script(marc_title), cce_script):
         return _script_mismatch_zero()
     marc_tokens = _prepare(marc_title, ctx)
     nypl_tokens = _prepare(nypl_title, ctx)
