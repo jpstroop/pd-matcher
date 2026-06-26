@@ -214,3 +214,31 @@ def test_indexed_nypl_reg_record_is_frozen() -> None:
     rec = IndexedNyplRegRecord(uuid="UUID-1", title="t", was_renewed=False)
     with raises(AttributeError):
         setattr(rec, "was_renewed", True)
+
+
+def test_index_reg_flags_multi_number_range_registration() -> None:
+    parsed = NyplRegRecord(uuid="UUID-1", title="t", regnum="A692774 A692775")
+    assert index_reg(parsed, was_renewed=False).is_range_registration is True
+
+
+def test_index_reg_does_not_flag_single_regnum() -> None:
+    parsed = NyplRegRecord(uuid="UUID-1", title="t", regnum="A692774")
+    assert index_reg(parsed, was_renewed=False).is_range_registration is False
+
+
+def test_index_reg_does_not_flag_missing_regnum() -> None:
+    parsed = NyplRegRecord(uuid="UUID-1", title="t")
+    assert index_reg(parsed, was_renewed=False).is_range_registration is False
+
+
+def test_indexed_nypl_reg_record_is_range_registration_defaults_false_on_legacy_decode() -> None:
+    from msgspec.msgpack import encode as msgpack_encode
+
+    from pd_matcher.index.codec import decode_reg
+
+    legacy_payload: dict[str, object] = {
+        "uuid": "UUID-LEGACY",
+        "title": "Pre-field record",
+        "was_renewed": False,
+    }
+    assert decode_reg(msgpack_encode(legacy_payload)).is_range_registration is False

@@ -11,6 +11,7 @@ from pd_matcher.index.codec import encode_ren
 from pd_matcher.index.codec import encode_uuid_list
 from pd_matcher.index.codec import encode_year_key
 from pd_matcher.index.codec import make_renewal_key
+from pd_matcher.index.codec import make_renewal_keys
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import NyplRenRecord
 
@@ -165,3 +166,38 @@ def test_make_renewal_key_differs_when_dates_differ_for_same_regnum() -> None:
     assert make_renewal_key("AI9217", date(1927, 2, 25)) != make_renewal_key(
         "AI9217", date(1930, 1, 1)
     )
+
+
+def test_make_renewal_keys_single_matches_make_renewal_key() -> None:
+    odat = date(1940, 5, 10)
+    assert make_renewal_keys("A111111", odat) == (make_renewal_key("A111111", odat),)
+
+
+def test_make_renewal_keys_single_handles_missing_date() -> None:
+    assert make_renewal_keys("A111111", None) == (make_renewal_key("A111111", None),)
+
+
+def test_make_renewal_keys_fans_multi_range_to_one_key_per_number() -> None:
+    odat = date(1950, 3, 15)
+    assert make_renewal_keys("A692774 A692775", odat) == (
+        b"A692774|1950-03-15",
+        b"A692775|1950-03-15",
+    )
+
+
+def test_make_renewal_keys_lowercase_multi_range_normalises_each_number() -> None:
+    odat = date(1950, 3, 15)
+    assert make_renewal_keys("a692774 a692775", odat) == (
+        b"A692774|1950-03-15",
+        b"A692775|1950-03-15",
+    )
+
+
+def test_make_renewal_keys_interior_space_single_stays_one_key() -> None:
+    odat = date(1927, 2, 25)
+    assert make_renewal_keys("A 963122", odat) == (make_renewal_key("A 963122", odat),)
+
+
+def test_make_renewal_keys_verbose_class_phrase_stays_one_key() -> None:
+    odat = date(1927, 2, 25)
+    assert make_renewal_keys("A ad int. 8956", odat) == (make_renewal_key("A ad int. 8956", odat),)

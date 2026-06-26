@@ -32,6 +32,9 @@ from re import compile as re_compile
 
 _NON_ALNUM: Pattern[str] = re_compile(r"[^A-Z0-9]")
 
+_INTERNAL_WS: Pattern[str] = re_compile(r"\S+\s+\S+")
+_RANGE_TOKEN: Pattern[str] = re_compile(r"^[A-Z]*[0-9]+$")
+
 _SEP = "[\\s\\u2014\\u2013\\-]*"
 
 _CLASS_PREFIX_EXPANSIONS: tuple[tuple[Pattern[str], str], ...] = (
@@ -56,6 +59,36 @@ def normalize_regnum(raw: str) -> str:
     return _NON_ALNUM.sub("", upper)
 
 
+def is_multi_regnum(raw: str) -> bool:
+    """Report whether ``raw`` is a space-separated multi-number regnum range.
+
+    A subset of CCE registrations record several numbers in the single
+    ``regnum`` attribute (``"A692774 A692775"``) because they register a
+    multi-volume whole. :func:`normalize_regnum` strips internal whitespace,
+    so it would concatenate such a value into one unmatchable token; callers
+    that need per-number join keys use this predicate to fan the value out
+    instead.
+
+    The verbose foreign/interim class phrases (``"A ad int. 8956"``) and
+    interior-space singles (``"A 963122"``, whose ``A`` token carries no
+    digit) also have internal whitespace but are NOT ranges, so every
+    whitespace token must independently look like a registration number
+    (optional letter class prefix followed by at least one digit).
+
+    Args:
+        raw: The registration number as transcribed (``regnum`` or ``oreg``).
+
+    Returns:
+        ``True`` when ``raw`` has internal whitespace and every whitespace
+        token matches ``^[A-Z]*[0-9]+$``; ``False`` otherwise.
+    """
+    if _INTERNAL_WS.search(raw) is None:
+        return False
+    tokens = raw.upper().split()
+    return len(tokens) > 1 and all(_RANGE_TOKEN.match(token) is not None for token in tokens)
+
+
 __all__ = [
+    "is_multi_regnum",
     "normalize_regnum",
 ]

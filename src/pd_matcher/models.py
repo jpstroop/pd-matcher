@@ -14,6 +14,7 @@ from datetime import date
 
 from msgspec import Struct
 
+from pd_matcher.normalize.registration_numbers import is_multi_regnum
 from pd_matcher.normalize.script import dominant_script
 
 
@@ -152,6 +153,14 @@ class IndexedNyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     """Mirrors :attr:`NyplRenRecord.claimants` as transcribed on the renewal."""
     renewal_new_matter: str | None = None
     """Mirrors :attr:`NyplRenRecord.new_matter` as transcribed on the renewal."""
+    is_range_registration: bool = False
+    """``True`` when :attr:`regnum` is a space-separated multi-number range
+    registering a multi-volume whole (``"A692774 A692775"``), as recognised by
+    :func:`pd_matcher.normalize.registration_numbers.is_multi_regnum`.
+
+    Phase 1 of the range-expansion roadmap only records the flag and fans the
+    renewal join out per number; no scorer or feature reads it yet (Phase 2
+    will). Legacy indices written before this field default to ``False``."""
     title_script: str | None = None
     """The dominant Unicode script of :attr:`title`, precomputed at index
     build via :func:`pd_matcher.normalize.script.dominant_script`.
@@ -219,6 +228,9 @@ def index_reg(
         renewal_title=renewal.title if renewal is not None else None,
         renewal_claimants=renewal.claimants if renewal is not None else None,
         renewal_new_matter=renewal.new_matter if renewal is not None else None,
+        is_range_registration=(
+            is_multi_regnum(record.regnum) if record.regnum is not None else False
+        ),
         title_script=dominant_script(record.title),
     )
 
