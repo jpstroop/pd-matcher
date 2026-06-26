@@ -42,11 +42,19 @@ def test_full_index_build_against_real_sources(tmp_path: Path) -> None:
     assert 50 <= report.year_buckets <= 150
     # Renewal joins are bounded by registrations and renewals.
     assert 0 < report.renewal_joins <= report.registrations_written
+    # The renewal-side inverted index is populated: most renewals carry an
+    # original-registration year and a title/author/claimants token.
+    assert 0 < report.renewal_year_buckets <= 150
+    assert report.renewal_title_tokens > 1_000
+    assert report.renewal_author_tokens > 1_000
+    assert report.renewal_claimants_tokens > 1_000
 
     with NyplIndexLookup(out_path) as lookup:
         stats = lookup.stats()
         assert stats.registrations_written == report.registrations_written
         assert stats.renewals_written == report.renewals_written
+        assert stats.renewal_year_buckets == report.renewal_year_buckets
+        assert stats.renewal_title_tokens == report.renewal_title_tokens
 
         # Spot-check that 1940 has a non-trivial number of candidates.
         candidates = list(lookup.candidates_for_year(1940, window=1))

@@ -13,6 +13,7 @@ table is rebuilt automatically.
 """
 
 from collections.abc import Callable
+from collections.abc import Iterable
 from math import log
 from pathlib import Path
 
@@ -77,6 +78,39 @@ def _prepare_name_tokens(
     return tuple(token for token in tokens if token not in name_stopwords)
 
 
+def _idf_table_from_documents(
+    document_token_sets: Iterable[set[str]],
+    *,
+    source_hash: str,
+    language: str,
+) -> IdfTable:
+    """Compute an :class:`IdfTable` from one token set per document.
+
+    Shared IDF math for every flavour (title/author/publisher, registration
+    and renewal): each set is one document, a token's document frequency is
+    the number of sets it appears in, and the smoothed IDF is
+    ``log((N + 1) / (df + 1)) + 1``. ``default_idf`` is the score an unseen
+    token receives (``df = 0``).
+    """
+    document_count = 0
+    df: dict[str, int] = {}
+    for record_tokens in document_token_sets:
+        document_count += 1
+        for token in record_tokens:
+            df[token] = df.get(token, 0) + 1
+    idf: dict[str, float] = {
+        token: log((document_count + 1) / (count + 1)) + 1.0 for token, count in df.items()
+    }
+    default_idf = log((document_count + 1) / 1) + 1.0
+    return IdfTable(
+        document_count=document_count,
+        default_idf=default_idf,
+        source_hash=source_hash,
+        language=language,
+        idf=idf,
+    )
+
+
 def _build_name_idf_table(
     lookup: NyplIndexLookup,
     *,
@@ -91,32 +125,20 @@ def _build_name_idf_table(
     is one document; a token's document frequency is the count of records in
     which it appears at least once across that record's values.
     """
-    document_count = 0
-    df: dict[str, int] = {}
-    for record in lookup.iter_registrations():
-        document_count += 1
-        record_tokens: set[str] = set()
-        for value in values_of(record):
-            record_tokens.update(
-                _prepare_name_tokens(
-                    value,
-                    language=language,
-                    name_stopwords=name_stopwords,
-                )
+    document_token_sets = (
+        {
+            token
+            for value in values_of(record)
+            for token in _prepare_name_tokens(
+                value, language=language, name_stopwords=name_stopwords
             )
-        for token in record_tokens:
-            df[token] = df.get(token, 0) + 1
-    idf: dict[str, float] = {
-        token: log((document_count + 1) / (count + 1)) + 1.0 for token, count in df.items()
-    }
-    default_idf = log((document_count + 1) / 1) + 1.0
-    source_hash = lookup.stats().source_hash
-    return IdfTable(
-        document_count=document_count,
-        default_idf=default_idf,
-        source_hash=source_hash,
+        }
+        for record in lookup.iter_registrations()
+    )
+    return _idf_table_from_documents(
+        document_token_sets,
+        source_hash=lookup.stats().source_hash,
         language=language,
-        idf=idf,
     )
 
 
@@ -165,6 +187,50 @@ def build_publisher_idf_table(lookup: NyplIndexLookup, *, language: str = "eng")
     )
 
 
+def build_renewal_title_idf_table(lookup: NyplIndexLookup, *, language: str = "eng") -> IdfTable:
+    """Scan the renewal corpus and return an :class:`IdfTable` over renewal title tokens.
+
+    The renewal-side mirror of :func:`build_idf_table`: ranges over each
+    renewal's ``title`` (via :meth:`NyplIndexLookup.iter_renewals`) through the
+    same title pipeline (number normalization, tokenize, drop title stopwords,
+    stem) so the table lines up with the title scorer when matching a MARC
+    record directly against renewals.
+    """
+    stopwords = load_stopwords(language)
+    document_token_sets = (
+        set(_prepare_tokens(record.title or "", language=language, title_stopwords=stopwords.title))
+        for record in lookup.iter_renewals()
+    )
+    return _idf_table_from_documents(
+        document_token_sets,
+        source_hash=lookup.stats().source_hash,
+        language=language,
+    )
+
+
+def build_renewal_author_idf_table(lookup: NyplIndexLookup, *, language: str = "eng") -> IdfTable:
+    """Scan the renewal corpus and return an :class:`IdfTable` over renewal author tokens.
+
+    The renewal-side mirror of :func:`build_author_idf_table`: ranges over each
+    renewal's ``author`` (via :meth:`NyplIndexLookup.iter_renewals`) through the
+    unstemmed name pipeline so the table lines up with the author scorer.
+    """
+    stopwords = load_stopwords(language)
+    document_token_sets = (
+        set(
+            _prepare_name_tokens(
+                record.author or "", language=language, name_stopwords=stopwords.author
+            )
+        )
+        for record in lookup.iter_renewals()
+    )
+    return _idf_table_from_documents(
+        document_token_sets,
+        source_hash=lookup.stats().source_hash,
+        language=language,
+    )
+
+
 def build_idf_table(lookup: NyplIndexLookup, *, language: str = "eng") -> IdfTable:
     """Scan the entire NYPL corpus and return an :class:`IdfTable`.
 
@@ -180,28 +246,14 @@ def build_idf_table(lookup: NyplIndexLookup, *, language: str = "eng") -> IdfTab
         the index's current build.
     """
     stopwords = load_stopwords(language)
-    document_count = 0
-    df: dict[str, int] = {}
-    for record in lookup.iter_registrations():
-        document_count += 1
-        tokens = _prepare_tokens(
-            record.title,
-            language=language,
-            title_stopwords=stopwords.title,
-        )
-        for token in set(tokens):
-            df[token] = df.get(token, 0) + 1
-    idf: dict[str, float] = {
-        token: log((document_count + 1) / (count + 1)) + 1.0 for token, count in df.items()
-    }
-    default_idf = log((document_count + 1) / 1) + 1.0
-    source_hash = lookup.stats().source_hash
-    return IdfTable(
-        document_count=document_count,
-        default_idf=default_idf,
-        source_hash=source_hash,
+    document_token_sets = (
+        set(_prepare_tokens(record.title, language=language, title_stopwords=stopwords.title))
+        for record in lookup.iter_registrations()
+    )
+    return _idf_table_from_documents(
+        document_token_sets,
+        source_hash=lookup.stats().source_hash,
         language=language,
-        idf=idf,
     )
 
 
@@ -304,14 +356,56 @@ def load_or_build_publisher_idf(
     )
 
 
+def load_or_build_renewal_title_idf(
+    cache_path: Path,
+    lookup_factory: Callable[[], NyplIndexLookup],
+    *,
+    language: str = "eng",
+) -> IdfTable:
+    """Return a cached renewal-title :class:`IdfTable`, rebuilding on source drift.
+
+    Same caching contract as :func:`load_or_build_idf` but over CCE renewal
+    ``title`` tokens (see :func:`build_renewal_title_idf_table`).
+    """
+    return _load_or_build(
+        cache_path,
+        lookup_factory,
+        lambda lookup: build_renewal_title_idf_table(lookup, language=language),
+        language=language,
+    )
+
+
+def load_or_build_renewal_author_idf(
+    cache_path: Path,
+    lookup_factory: Callable[[], NyplIndexLookup],
+    *,
+    language: str = "eng",
+) -> IdfTable:
+    """Return a cached renewal-author :class:`IdfTable`, rebuilding on source drift.
+
+    Same caching contract as :func:`load_or_build_idf` but over CCE renewal
+    ``author`` tokens (see :func:`build_renewal_author_idf_table`).
+    """
+    return _load_or_build(
+        cache_path,
+        lookup_factory,
+        lambda lookup: build_renewal_author_idf_table(lookup, language=language),
+        language=language,
+    )
+
+
 __all__ = [
     "IdfTable",
     "build_author_idf_table",
     "build_idf_table",
     "build_publisher_idf_table",
+    "build_renewal_author_idf_table",
+    "build_renewal_title_idf_table",
     "load_idf_table",
     "load_or_build_author_idf",
     "load_or_build_idf",
     "load_or_build_publisher_idf",
+    "load_or_build_renewal_author_idf",
+    "load_or_build_renewal_title_idf",
     "save_idf_table",
 ]
