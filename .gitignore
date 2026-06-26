@@ -32,6 +32,7 @@ scripts/*
 !scripts/separation_wild_test.py
 !scripts/disagreement_scan.py
 !scripts/range_regnum_characterize.py
+!scripts/renewal_join_recovery.py
 
 # Groundtruth labeling artifacts (the vault itself IS tracked at data/label_vault.jsonl;
 # it is *.jsonl, so the *.db rules below never touch it). Review/queue SQLite DBs
