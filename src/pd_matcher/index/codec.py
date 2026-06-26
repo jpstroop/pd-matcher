@@ -25,6 +25,7 @@ from msgspec.msgpack import Encoder
 
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import NyplRenRecord
+from pd_matcher.normalize.registration_numbers import normalize_regnum
 
 _REG_ENCODER: Encoder = Encoder()
 _REG_DECODER: Decoder[IndexedNyplRegRecord] = Decoder(IndexedNyplRegRecord)
@@ -84,11 +85,17 @@ def decode_year_key(key: bytes) -> int:
 def make_renewal_key(regnum: str, regdate: date | None) -> bytes:
     """Build the join key shared by ``ren_by_oreg`` writers and readers.
 
-    Both sides assemble ``f"{regnum}|{isoformat(regdate) if regdate else ''}"``
-    so a registration looks up the same key the builder wrote when it ingested
-    the corresponding renewal row. The ``|`` separator is reserved punctuation
-    that does not appear inside copyright registration numbers (which are
-    alphanumeric runs).
+    The registration number is canonicalised with :func:`normalize_regnum`
+    before assembly so transcription variance (interior spaces, hyphens,
+    verbose foreign/interim class phrases) cannot split an otherwise-valid
+    join. The same normalizer runs on the renewal ``oreg`` writer and the
+    registration ``regnum`` reader, so both sides land on the identical key.
+    The date suffix is left untouched: registration id numbers are not unique
+    across the catalog's series, so the date remains part of the join key.
+
+    Both sides assemble ``f"{normalize_regnum(regnum)}|{isoformat(regdate) if
+    regdate else ''}"``. The ``|`` separator is reserved punctuation that does
+    not survive normalization, so it cannot collide with the regnum payload.
 
     Args:
         regnum: Copyright Office registration number.
@@ -98,7 +105,7 @@ def make_renewal_key(regnum: str, regdate: date | None) -> bytes:
         UTF-8 encoded composite key suitable for use as an LMDB key.
     """
     suffix = regdate.isoformat() if regdate is not None else ""
-    return f"{regnum}|{suffix}".encode()
+    return f"{normalize_regnum(regnum)}|{suffix}".encode()
 
 
 __all__ = [

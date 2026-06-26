@@ -32,6 +32,17 @@ def _seed_sources(root: Path) -> tuple[Path, Path]:
     return reg_dir, ren_dir
 
 
+def _seed_regnum_variant_sources(root: Path) -> tuple[Path, Path]:
+    """Copy the regnum-variant reg/ren fixtures into isolated source dirs."""
+    reg_dir = root / "reg"
+    ren_dir = root / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "variant_reg.xml").write_bytes((_FIXTURES / "regnum_variant_reg.xml").read_bytes())
+    (ren_dir / "variant_ren.tsv").write_bytes((_FIXTURES / "regnum_variant_ren.tsv").read_bytes())
+    return reg_dir, ren_dir
+
+
 def test_build_index_writes_records_year_buckets_and_meta(tmp_path: Path) -> None:
     reg_dir, ren_dir = _seed_sources(tmp_path)
     out_path = tmp_path / "idx.lmdb"
@@ -280,6 +291,39 @@ def test_build_index_rebuilds_when_parser_fingerprint_missing(tmp_path: Path) ->
     rebuilt = build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
     assert rebuilt.skipped is False
     assert rebuilt.registrations_written == 9
+
+
+def test_parser_fingerprint_files_includes_registration_numbers_module() -> None:
+    """The regnum normalizer is fingerprinted so edits to it force a rebuild."""
+    assert _PACKAGE_ROOT / "normalize" / "registration_numbers.py" in _PARSER_FINGERPRINT_FILES
+
+
+def test_build_index_joins_format_variant_regnum_against_renewal(tmp_path: Path) -> None:
+    """A registration whose regnum is a format-variant of a renewal's oreg joins.
+
+    The renewal carries the canonical ``AI9217``; UUID-V001's ``regnum`` is the
+    hyphenated ``AI-9217`` at the same original date, so it joins only because
+    :func:`make_renewal_key` normalizes both sides identically — under the raw
+    key (``AI-9217|…`` vs ``AI9217|…``) it would not. UUID-V002 shares the
+    normalized regnum but registers under a different date, so it must not join,
+    proving the date stays part of the key.
+    """
+    reg_dir, ren_dir = _seed_regnum_variant_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+
+    report = build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    assert report.renewal_joins == 1
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        variant_blob = store.reg_by_id.get(b"UUID-V001")
+        assert variant_blob is not None
+        variant = decode_reg(variant_blob)
+        assert variant.was_renewed is True
+        assert variant.renewal_id == "R129296"
+
+        mismatch_blob = store.reg_by_id.get(b"UUID-V002")
+        assert mismatch_blob is not None
+        assert decode_reg(mismatch_blob).was_renewed is False
 
 
 def test_cache_mismatch_reason_reports_each_field_in_declaration_order() -> None:

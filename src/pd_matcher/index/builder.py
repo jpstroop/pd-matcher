@@ -66,6 +66,7 @@ _PARSER_FINGERPRINT_FILES: tuple[Path, ...] = (
     _PACKAGE_ROOT / "parsers" / "nypl_reg.py",
     _PACKAGE_ROOT / "parsers" / "nypl_ren.py",
     _PACKAGE_ROOT / "models.py",
+    _PACKAGE_ROOT / "normalize" / "registration_numbers.py",
     _PACKAGE_ROOT / "index" / "codec.py",
     _PACKAGE_ROOT / "index" / "builder.py",
 )
