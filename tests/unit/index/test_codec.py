@@ -149,3 +149,19 @@ def test_make_renewal_key_includes_iso_date() -> None:
 def test_make_renewal_key_handles_missing_date() -> None:
     key = make_renewal_key("A111111", None)
     assert key == b"A111111|"
+
+
+def test_make_renewal_key_normalises_regnum() -> None:
+    assert make_renewal_key("AI-9217", date(1927, 2, 25)) == b"AI9217|1927-02-25"
+
+
+def test_make_renewal_key_equal_for_format_variant_regnums_same_date() -> None:
+    odat = date(1927, 2, 25)
+    assert make_renewal_key("A 963122", odat) == make_renewal_key("A963122", odat)
+    assert make_renewal_key("AI-9217", odat) == make_renewal_key("AI9217", odat)
+
+
+def test_make_renewal_key_differs_when_dates_differ_for_same_regnum() -> None:
+    assert make_renewal_key("AI9217", date(1927, 2, 25)) != make_renewal_key(
+        "AI9217", date(1930, 1, 1)
+    )
