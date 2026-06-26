@@ -46,6 +46,7 @@ def _pair(
     cce_lccn: str | None = "28000854",
     marc_notes: tuple[str, ...] = (),
     audit_note: str | None = None,
+    pairing_type: str = "registration",
 ) -> PairInsert:
     marc = MarcRecord(
         control_id=control_id,
@@ -73,6 +74,7 @@ def _pair(
         score=0.93,
         band="ge90",
         source="banded",
+        pairing_type=pairing_type,
         marc_control_id=control_id,
         marc_json=json_encode(marc).decode("utf-8"),
         marc_title=marc.title,
@@ -382,6 +384,34 @@ def test_index_renders_a_card(client: TestClient) -> None:
     assert "A Studied Title" in response.text
     assert "title.token_set" in response.text
     assert "Renewed" in response.text
+
+
+@fixture
+def renewal_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="ren-1",
+                nypl_uuid="ren-entry-1",
+                pairing_type="renewal",
+                renewal_title="A renewed study of widgets",
+            )
+        )
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def test_renewal_card_presents_renewal_record_as_cce_side(renewal_client: TestClient) -> None:
+    response = renewal_client.get("/pair/1")
+    assert response.status_code == 200
+    assert "CCE (Copyright Office — Renewal)" in response.text
+    assert "A renewed study of widgets" in response.text
+    assert "ren entry" in response.text
+    # The registration-only presentation is not used for a renewal pair.
+    assert "<h2>CCE (Copyright Office)</h2>" not in response.text
 
 
 def test_audit_note_banner_renders_when_set(audit_note_client: TestClient) -> None:

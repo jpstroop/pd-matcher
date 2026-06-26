@@ -42,6 +42,16 @@ at label time via :func:`cce_facts`. The version-bound fields — a
 :class:`MatcherScores` pair of matcher confidences and the ``matcher_version``
 that produced them — stay ``None`` on label-time writes and are filled by the
 ``enrich-vault`` command on publish. Neither path alters a human-entered field.
+
+Schema 7 adds ``match_source``: which CCE pathway surfaced the pair —
+``"registration"`` (the default; the matched CCE side is a registration),
+``"renewal"`` (the pair was retrieved against the renewal index for a MARC
+with no confident registration match), or ``"both"`` (reserved for a future
+pipeline that links a single pair through both pathways). It defaults to
+``None`` so schema-6 entries still decode via the v7 struct; the
+``migrate-vault-v6`` migration backfills ``"registration"`` on every
+pre-schema-7 entry, and the review server stamps it at label time from the
+review pair's ``pairing_type``.
 """
 
 from collections.abc import Iterator
@@ -57,7 +67,13 @@ from msgspec.json import encode as json_encode
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 
-SCHEMA_VERSION: int = 6
+SCHEMA_VERSION: int = 7
+
+MatchSource = Literal[
+    "registration",
+    "renewal",
+    "both",
+]
 
 CategoryKey = Literal[
     "marc_whole_cce_part",
@@ -189,6 +205,11 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     * ``was_renewed`` — ``True`` when a renewal joined this registration.
     * ``scores`` — both matchers' confidence (:class:`MatcherScores`).
     * ``matcher_version`` — the matcher build that produced ``scores``.
+
+    Schema 7 adds ``match_source`` (a :data:`MatchSource` value or ``None``):
+    which CCE pathway surfaced the pair. It is stamped at label time from the
+    review pair's ``pairing_type`` and is a human-pathway fact, not a
+    version-bound score, so ``enrich-vault`` preserves it untouched.
     """
 
     schema: int
@@ -208,6 +229,7 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     was_renewed: bool | None = None
     scores: MatcherScores | None = None
     matcher_version: str | None = None
+    match_source: MatchSource | None = None
 
 
 def upsert_entry(path: Path, entry: VaultEntry) -> None:
@@ -292,6 +314,7 @@ __all__ = [
     "CategoryKey",
     "CceFacts",
     "MarcIdentifiers",
+    "MatchSource",
     "MatcherScores",
     "VaultEntry",
     "cce_facts",

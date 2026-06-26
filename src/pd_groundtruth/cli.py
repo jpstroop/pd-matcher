@@ -25,6 +25,7 @@ from pd_groundtruth.active_learning import run_active_learning
 from pd_groundtruth.active_select import DEFAULT_LANGUAGE_WEIGHTS
 from pd_groundtruth.build_corpus import build_corpus
 from pd_groundtruth.build_queue import build_queue
+from pd_groundtruth.build_renewal_queue import build_renewal_queue
 from pd_groundtruth.disk_guard import InsufficientDiskSpaceError
 from pd_groundtruth.dump_vault_marcs import dump_vault_marcs
 from pd_groundtruth.enrich_vault import run_enrich
@@ -46,6 +47,7 @@ from pd_groundtruth.vault_into_queue import vault_into_queue
 from pd_groundtruth.vault_migration import migrate_vault_v3
 from pd_groundtruth.vault_migration import migrate_vault_v4
 from pd_groundtruth.vault_migration import migrate_vault_v5
+from pd_groundtruth.vault_migration import migrate_vault_v6
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
 from pd_matcher.index.lookup import NyplIndexLookup
@@ -57,6 +59,7 @@ _DEFAULT_PER_DECADE_CAP = 20000
 _DEFAULT_SEED = 42
 _DEFAULT_WORKERS = 8
 _DEFAULT_SAMPLE_PER_LANG = 1500
+_DEFAULT_RENEWAL_MIN_SCORE = 60.0
 _DEFAULT_REVIEW_HOST = "127.0.0.1"
 _DEFAULT_REVIEW_PORT = 8000
 _DEFAULT_POOL_PATH = Path("data/candidates")
@@ -500,6 +503,49 @@ def build_queue_command(
     )
 
 
+@app.command(name="build-renewal-queue")
+def build_renewal_queue_command(
+    pool: Annotated[
+        Path,
+        Option("--pool", help="Root dir whose <lang>/*.xml shards form the candidate pool."),
+    ] = _DEFAULT_POOL_PATH,
+    index: Annotated[
+        Path, Option("--index", help="LMDB env produced by `pd-matcher index build`.")
+    ] = _DEFAULT_INDEX_PATH,
+    out: Annotated[
+        Path, Option("--out", help="Destination SQLite review database (appended to).")
+    ] = _DEFAULT_REVIEW_DB_PATH,
+    min_score: Annotated[
+        float,
+        Option(
+            "--min-score",
+            help="Score floor (0-100); only the best renewal candidate at or above it is queued.",
+        ),
+    ] = _DEFAULT_RENEWAL_MIN_SCORE,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Retrieve, score, and queue MARC↔renewal-only pairs for hand-labeling.
+
+    For every pool MARC not already in the ``--out`` review DB, retrieves
+    renewal candidates, scores them with the production title / author /
+    claimants / year scorers, and appends the best candidate scoring at or
+    above ``--min-score`` as a ``pairing_type="renewal"`` pair. Existing
+    registration pairs are left untouched and never duplicated.
+    """
+    _configure_logging("build-renewal-queue", log_file)
+    summary = build_renewal_queue(
+        pool=pool,
+        index_path=index,
+        out_path=out,
+        matching_config=_load_default_matching_config(),
+        min_score=min_score,
+    )
+    echo(f"records_scanned={summary.records_scanned} pairs_written={summary.pairs_written}")
+
+
 def _parse_language_weights(values: list[str] | None) -> dict[str, float]:
     """Parse repeated ``lang=weight`` options into a weights mapping.
 
@@ -903,6 +949,31 @@ def migrate_vault_v5_command(
     _configure_logging("migrate-vault-v5", log_file)
     report = migrate_vault_v5(vault)
     echo(f"migrated {report.total_entries} entries; bumped {report.migrated} to schema 5")
+
+
+@app.command(name="migrate-vault-v6")
+def migrate_vault_v6_command(
+    vault: Annotated[
+        Path,
+        Option("--vault", help="JSONL label vault to migrate in place."),
+    ] = _DEFAULT_VAULT_PATH,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Bump every vault entry to schema 7 and backfill ``match_source``.
+
+    Schema 7 adds the ``match_source`` field recording which CCE pathway
+    surfaced the pair. Every pre-schema-7 label came from the registration
+    pathway, so the migration uniformly stamps ``"registration"`` on each.
+    The pre-migration vault lives in git history; no on-disk archive is
+    written. Idempotent: re-running on an already-migrated vault is a no-op
+    and does not rewrite the file.
+    """
+    _configure_logging("migrate-vault-v6", log_file)
+    report = migrate_vault_v6(vault)
+    echo(f"migrated {report.total_entries} entries; bumped {report.migrated} to schema 7")
 
 
 @app.command(name="enrich-vault")

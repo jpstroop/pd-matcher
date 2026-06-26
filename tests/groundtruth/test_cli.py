@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 from pd_groundtruth.acquire import AcquireReport
 from pd_groundtruth.build_corpus import CorpusReport
 from pd_groundtruth.build_queue import BuildSummary
+from pd_groundtruth.build_renewal_queue import RenewalBuildSummary
 from pd_groundtruth.cli import _configure_logging
 from pd_groundtruth.cli import app
 from pd_groundtruth.disk_guard import InsufficientDiskSpaceError
@@ -119,6 +120,32 @@ def test_build_queue_command_defaults(tmp_path: Path) -> None:
     assert kwargs["vault_path"] == Path("data/training/label_vault.jsonl")
     assert "pairs_written=5" in result.stdout
     assert "eng/ge90=3" in result.stdout
+
+
+def test_build_renewal_queue_command_passes_arguments_and_reports(tmp_path: Path) -> None:
+    summary = RenewalBuildSummary(records_scanned=12, pairs_written=3)
+    with patch("pd_groundtruth.cli.build_renewal_queue", return_value=summary) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-renewal-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "cce.lmdb"),
+                "--out",
+                str(tmp_path / "review.db"),
+                "--min-score",
+                "70",
+            ],
+        )
+    assert result.exit_code == 0, result.stdout
+    _, kwargs = mock_build.call_args
+    assert kwargs["pool"] == tmp_path / "pool"
+    assert kwargs["out_path"] == tmp_path / "review.db"
+    assert kwargs["min_score"] == 70.0
+    assert "records_scanned=12" in result.stdout
+    assert "pairs_written=3" in result.stdout
 
 
 def test_configure_logging_with_explicit_path_writes_to_it(tmp_path: Path) -> None:

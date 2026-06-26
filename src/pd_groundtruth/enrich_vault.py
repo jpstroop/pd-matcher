@@ -1,4 +1,4 @@
-"""Backfill machine-derived fields onto every vault entry (schema 6).
+"""Backfill machine-derived fields onto every vault entry (current schema).
 
 ``enrich-vault`` sweeps the label vault and ADDS derived data to each entry
 without ever touching a human-entered field (verdict, note, categories,
@@ -8,7 +8,8 @@ resolves the MARC record and the CCE registration, copies the CCE-side
 the pair through the production matcher's per-scorer Evidence exactly once, and
 applies both combiners to that single Evidence stream so the two confidences
 are directly comparable to ``1.0``. The enriched vault is rewritten atomically
-at ``schema=6`` via :func:`pd_groundtruth.label_vault.upsert_entry`.
+at the current :data:`~pd_groundtruth.label_vault.SCHEMA_VERSION` via
+:func:`pd_groundtruth.label_vault.upsert_entry`.
 
 The orchestration here is dependency-injected: it takes plain lookup callables
 and a combiner pair so it can be exercised against tiny fixtures without an
@@ -99,10 +100,11 @@ def _enriched_entry(
     scores: MatcherScores,
     matcher_version: str,
 ) -> VaultEntry:
-    """Return ``entry`` with derived fields filled and ``schema`` bumped to 6.
+    """Return ``entry`` with derived fields filled and ``schema`` bumped to current.
 
-    Every human-entered field is copied through unchanged; only the
-    machine-derived fields and the schema version are written.
+    Every human-entered field is copied through unchanged (including the
+    label-time ``match_source`` pathway fact); only the machine-derived
+    fields and the schema version are written.
     """
     facts = cce_facts(cce)
     return VaultEntry(
@@ -123,6 +125,7 @@ def _enriched_entry(
         was_renewed=facts.was_renewed,
         scores=scores,
         matcher_version=matcher_version,
+        match_source=entry.match_source,
     )
 
 
@@ -137,7 +140,7 @@ def enrich_vault(
     matcher_version: str,
     dry_run: bool,
 ) -> EnrichReport:
-    """Backfill schema-6 derived fields onto every resolvable vault entry.
+    """Backfill current-schema derived fields onto every resolvable vault entry.
 
     Walks every ``(marc_control_id, nypl_uuid)`` entry, resolves the MARC via
     ``marc_lookup`` and the CCE registration via ``cce_lookup``, scores the pair

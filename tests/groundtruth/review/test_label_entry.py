@@ -40,6 +40,7 @@ def _row(
     cce_regnum: str | None = "R99",
     cce_renewal_id: str | None = "R200001",
     cce_renewal_oreg: str | None = "A111111",
+    pairing_type: str = "registration",
 ) -> ReviewPairRow:
     blob = marc if marc is not None else _marc()
     return ReviewPairRow(
@@ -49,6 +50,7 @@ def _row(
         score=0.91,
         band="ge90",
         source="banded",
+        pairing_type=pairing_type,
         marc_control_id=blob.control_id,
         marc_json=json_encode(blob).decode("utf-8"),
         marc_title=blob.title,
@@ -95,9 +97,19 @@ def test_build_label_entry_leaves_scores_and_matcher_version_none() -> None:
     assert entry.matcher_version is None
 
 
-def test_build_label_entry_writes_schema_six() -> None:
+def test_build_label_entry_writes_current_schema() -> None:
     entry = _build(_row())
     assert entry.schema == SCHEMA_VERSION
+
+
+def test_build_label_entry_defaults_match_source_to_registration() -> None:
+    entry = _build(_row())
+    assert entry.match_source == "registration"
+
+
+def test_build_label_entry_sets_match_source_renewal_for_renewal_pairing() -> None:
+    entry = _build(_row(pairing_type="renewal"))
+    assert entry.match_source == "renewal"
 
 
 def test_build_label_entry_copies_human_and_identifier_fields() -> None:

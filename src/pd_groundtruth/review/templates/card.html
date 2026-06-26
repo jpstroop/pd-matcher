@@ -134,6 +134,34 @@
       </div>
     </section>
 
+    {% if card.pairing_type == "renewal" %}
+    <section class="panel">
+      <h2>CCE (Copyright Office — Renewal)</h2>
+      <div class="row">
+        {%- if card.cce_renewal_title %}<div class="field"><div class="k">renewal title</div><div class="v title">{{ card.cce_renewal_title }}</div></div>{% endif -%}
+        {%- if card.cce_is_translation %}<div class="field"><span class="badge-translation">Translation</span></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if card.cce_renewal_author %}<div class="field"><div class="k">renewal author</div><div class="v">{{ card.cce_renewal_author }}</div></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if card.cce_renewal_claimants %}<div class="field"><div class="k">renewal claimants</div><div class="v">{{ card.cce_renewal_claimants }}</div></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if card.cce_reg_year is not none %}<div class="field"><div class="k">original reg year</div><div class="v">{{ card.cce_reg_year }}</div></div>{% endif -%}
+        {%- if card.cce_renewal_rdat %}<div class="field"><div class="k">renewal date</div><div class="v">{{ card.cce_renewal_rdat.isoformat() }}</div></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if card.cce_renewal_new_matter %}<div class="field"><div class="k">new matter (renewal)</div><div class="v cce-new-matter">{{ card.cce_renewal_new_matter }}</div></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if card.cce_renewal_id or card.cce_renewal_oreg %}<div class="renewal-meta">
+          {%- if card.cce_renewal_id %}<span>renewal id <code>{{ card.cce_renewal_id }}</code></span>{% endif -%}
+          {%- if card.cce_renewal_oreg %}<span>oreg <code>{{ card.cce_renewal_oreg }}</code></span>{% endif -%}
+        </div>{% endif -%}
+      </div>
+    </section>
+    {% else %}
     <section class="panel">
       <h2>CCE (Copyright Office)</h2>
       <div class="row">
@@ -190,13 +218,19 @@
         {%- if card.cce_notice_date %}<div class="field"><div class="k">notice date</div><div class="v">{{ card.cce_notice_date.isoformat() }}</div></div>{% endif -%}
       </div>
     </section>
+    {% endif %}
   </div>
 
 </form>
 <div class="card-ids">
   <span>marc <code>{{ card.marc_control_id }}</code></span>
+  {% if card.pairing_type == "renewal" %}
+  <span>ren entry <code>{{ card.nypl_uuid }}</code></span>
+  {% if card.cce_renewal_id %}<span>ren <code>{{ card.cce_renewal_id }}</code></span>{% endif %}
+  {% else %}
   <span>reg <code>{{ card.nypl_uuid }}</code></span>
   {% if card.cce_renewal_id %}<span>ren <code>{{ card.cce_renewal_id }}</code></span>{% endif %}
+  {% endif %}
 </div>
 <p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}{% if forward_id is not none %} · <strong>f</strong> or <strong>&rarr;</strong> forward{% endif %}. The note field captures whatever you think is worth flagging about the pair; accumulated notes will be analyzed later to surface patterns.</p>
 
