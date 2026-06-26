@@ -117,6 +117,43 @@ def test_build_index_writes_token_inverted_indexes(tmp_path: Path) -> None:
         assert "UUID-0002" in decode_uuid_list(estate)
 
 
+def test_build_index_writes_renewal_token_indexes_and_year_buckets(tmp_path: Path) -> None:
+    """Renewal title/author/claimants tokens and odat-year buckets are built.
+
+    entry-001 (odat 1940) has title "A study of widgets", author "Smith, John",
+    and claimants "Acme Press|PWH"; its tokens retrieve its entry id from the
+    three renewal inverted indexes, and the renewal year bucket is keyed on the
+    original-registration year (1940), not the renewal date (1968).
+    """
+    reg_dir, ren_dir = _seed_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+    report = build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+
+    assert report.renewal_year_buckets == 2
+    assert report.renewal_title_tokens > 0
+    assert report.renewal_author_tokens > 0
+    assert report.renewal_claimants_tokens > 0
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        widgets = store.ren_title_index.get(b"widgets")
+        assert widgets is not None
+        assert decode_uuid_list(widgets) == ("entry-001",)
+
+        smith = store.ren_author_index.get(b"smith")
+        assert smith is not None
+        assert decode_uuid_list(smith) == ("entry-001",)
+
+        acme = store.ren_claimants_index.get(b"acme")
+        assert acme is not None
+        assert decode_uuid_list(acme) == ("entry-001",)
+
+        # Bucketed by odat (1940), not rdat (1968).
+        bucket_1940 = store.ren_by_year.get(encode_year_key(1940))
+        assert bucket_1940 is not None
+        assert decode_uuid_list(bucket_1940) == ("entry-001",)
+        assert store.ren_by_year.get(encode_year_key(1968)) is None
+
+
 def test_build_index_is_idempotent_without_force(tmp_path: Path) -> None:
     reg_dir, ren_dir = _seed_sources(tmp_path)
     out_path = tmp_path / "idx.lmdb"
@@ -291,7 +328,7 @@ def test_build_index_rebuilds_when_parser_fingerprint_missing(tmp_path: Path) ->
 
     build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
 
-    env = LmdbEnvironment(str(out_path), max_dbs=12, readonly=False)
+    env = LmdbEnvironment(str(out_path), max_dbs=16, readonly=False)
     try:
         meta_db = env.open_db(b"meta")
         with env.begin(db=meta_db, write=True) as txn:

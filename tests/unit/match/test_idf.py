@@ -8,10 +8,14 @@ from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import build_author_idf_table
 from pd_matcher.match.idf import build_idf_table
 from pd_matcher.match.idf import build_publisher_idf_table
+from pd_matcher.match.idf import build_renewal_author_idf_table
+from pd_matcher.match.idf import build_renewal_title_idf_table
 from pd_matcher.match.idf import load_idf_table
 from pd_matcher.match.idf import load_or_build_author_idf
 from pd_matcher.match.idf import load_or_build_idf
 from pd_matcher.match.idf import load_or_build_publisher_idf
+from pd_matcher.match.idf import load_or_build_renewal_author_idf
+from pd_matcher.match.idf import load_or_build_renewal_title_idf
 from pd_matcher.match.idf import save_idf_table
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
@@ -146,6 +150,60 @@ def test_load_or_build_publisher_idf_creates_cache_when_missing(tmp_path: Path) 
     out_path = _build_tiny_index(tmp_path)
     cache_path = tmp_path / "publisher_idf.msgpack"
     table = load_or_build_publisher_idf(cache_path, lambda: NyplIndexLookup(out_path))
+    assert cache_path.exists()
+    assert isinstance(table, IdfTable)
+
+
+def test_build_renewal_title_idf_table_counts_documents_and_emits_token_scores(
+    tmp_path: Path,
+) -> None:
+    """The renewal-title table records document_count and per-token IDF entries."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        table = build_renewal_title_idf_table(lookup)
+    assert table.document_count > 0
+    assert table.default_idf > 0.0
+    assert table.language == "eng"
+    assert all(value > 0.0 for value in table.idf.values())
+    # The renewal-title pipeline stems tokens, so entry-001's "A study of
+    # widgets" contributes the stem of "widgets" (not the surface form).
+    from pd_matcher.normalize.stemming import stem_tokens
+
+    (widget_stem,) = stem_tokens(("widgets",), "eng")
+    assert widget_stem in table.idf
+
+
+def test_build_renewal_author_idf_table_counts_documents_and_emits_token_scores(
+    tmp_path: Path,
+) -> None:
+    """The renewal-author table records document_count and per-token IDF entries."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        table = build_renewal_author_idf_table(lookup)
+    assert table.document_count > 0
+    assert table.default_idf > 0.0
+    assert table.language == "eng"
+    assert all(value > 0.0 for value in table.idf.values())
+    # entry-001's renewal author "Smith, John" contributes "smith".
+    assert "smith" in table.idf
+
+
+def test_load_or_build_renewal_title_idf_creates_and_reuses_cache(tmp_path: Path) -> None:
+    """The renewal-title cache is created on first call and reused verbatim after."""
+    out_path = _build_tiny_index(tmp_path)
+    cache_path = tmp_path / "renewal_title_idf.msgpack"
+    first = load_or_build_renewal_title_idf(cache_path, lambda: NyplIndexLookup(out_path))
+    assert cache_path.exists()
+    assert isinstance(first, IdfTable)
+    second = load_or_build_renewal_title_idf(cache_path, lambda: NyplIndexLookup(out_path))
+    assert first == second
+
+
+def test_load_or_build_renewal_author_idf_creates_cache_when_missing(tmp_path: Path) -> None:
+    """When no renewal-author cache exists, the function builds and writes one."""
+    out_path = _build_tiny_index(tmp_path)
+    cache_path = tmp_path / "renewal_author_idf.msgpack"
+    table = load_or_build_renewal_author_idf(cache_path, lambda: NyplIndexLookup(out_path))
     assert cache_path.exists()
     assert isinstance(table, IdfTable)
 
