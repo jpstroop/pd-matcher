@@ -31,6 +31,7 @@ def _cce(
     title: str = "Some title",
     desc: str | None = None,
     notes: tuple[str, ...] = (),
+    is_range_registration: bool = False,
 ) -> IndexedNyplRegRecord:
     return IndexedNyplRegRecord(
         uuid="u",
@@ -38,6 +39,7 @@ def _cce(
         was_renewed=False,
         desc=desc,
         notes=notes,
+        is_range_registration=is_range_registration,
     )
 
 
@@ -170,6 +172,26 @@ def test_score_volume_features_record_classification(scorer_context: ScorerConte
     assert feature_map["marc_is_part"] == 0.0
     assert feature_map["cce_is_whole"] == 0.0
     assert feature_map["cce_is_part"] == 1.0
+    assert feature_map["cce_is_range"] == 0.0
+
+
+def test_score_volume_cce_range_registration_sets_range_feature(
+    scorer_context: ScorerContext,
+) -> None:
+    """A registered multi-volume range candidate (#104) emits ``cce_is_range``.
+
+    A single MARC volume against a registered range whole still scores 0.0
+    (whole-vs-part), but the ``cce_is_range`` sub-feature flags the candidate
+    as a registered whole so the #82 cross-scorer signal treats it as
+    corroborated rather than a suspect incompatibility.
+    """
+    marc = _marc(extent="5 v.")
+    cce = _cce(desc="v. 1", is_range_registration=True)
+    ev = score_volume(marc, cce, scorer_context)
+    feature_map = dict(ev.features)
+    assert feature_map["cce_is_part"] == 1.0
+    assert feature_map["cce_is_range"] == 1.0
+    assert ev.score == 0.0
 
 
 def test_score_volume_collected_title_on_cce_side(scorer_context: ScorerContext) -> None:
