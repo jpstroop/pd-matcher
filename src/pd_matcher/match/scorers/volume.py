@@ -370,14 +370,24 @@ def _refine_cce_kind(
 def _build_features(
     marc_kind: str,
     cce_kind: str,
+    cce_is_range: bool,
 ) -> tuple[tuple[str, float], ...]:
-    """Project per-side classification onto the Evidence feature tuple."""
+    """Project per-side classification onto the Evidence feature tuple.
+
+    ``cce_is_range`` mirrors :attr:`IndexedNyplRegRecord.is_range_registration`
+    — ``True`` when the candidate is a registered multi-volume WHOLE whose
+    regnum is a space-separated number list. It is emitted unconditionally so
+    the learned model can weight a part-of-registered-range as legitimate and
+    the cross-scorer ``volume_incompatible_uncorroborated`` signal can treat it
+    as corroboration rather than a suspect whole/part mismatch.
+    """
     return (
         ("marc_is_whole", 1.0 if marc_kind == _Cardinality.WHOLE else 0.0),
         ("marc_is_whole_open", 1.0 if marc_kind == _Cardinality.WHOLE_OPEN else 0.0),
         ("marc_is_part", 1.0 if marc_kind == _Cardinality.PART else 0.0),
         ("cce_is_whole", 1.0 if cce_kind == _Cardinality.WHOLE else 0.0),
         ("cce_is_part", 1.0 if cce_kind == _Cardinality.PART else 0.0),
+        ("cce_is_range", 1.0 if cce_is_range else 0.0),
     )
 
 
@@ -421,7 +431,7 @@ def score_volume(
     marc_kind, marc_part = _classify_marc(marc)
     cce_kind, cce_part = _classify_cce(cce, marc)
     cce_kind = _refine_cce_kind(marc, cce, marc_kind, cce_kind, ctx)
-    features = _build_features(marc_kind, cce_kind)
+    features = _build_features(marc_kind, cce_kind, cce.is_range_registration)
     if marc_kind in (_Cardinality.WHOLE, _Cardinality.WHOLE_OPEN):
         return _score_whole(cce_kind, cce, features)
     if marc_kind == _Cardinality.UNKNOWN or cce_kind == _Cardinality.UNKNOWN:

@@ -23,10 +23,11 @@ tightening round (``docs/findings/learned_scorer_tightening_2026-06-12.md``):
   title scorer's ``marc_token_len`` / ``nypl_token_len`` sub-features
   (``0.0`` when either is ``0`` or absent).
 
-The expanded count is **51**: 16 baseline + 33 named sub-features (incl.
-presence flags, the two title token-length sub-features, and the asymmetric
-title ``coverage`` sub-feature added in issue #85) + 1 pair-level
-(``pair.title_len_ratio``) + 1 cross-scorer derived
+The expanded count is **52**: 16 baseline + 34 named sub-features (incl.
+presence flags, the two title token-length sub-features, the asymmetric
+title ``coverage`` sub-feature added in issue #85, and the
+``volume.compat.cce_is_range`` sub-feature added in issue #104) + 1
+pair-level (``pair.title_len_ratio``) + 1 cross-scorer derived
 (``volume.incompatible_uncorroborated``, issue #82).
 ``year.delta`` was dropped as a scoring feature in issue #88: exact-year
 retrieval bucketing (``year_window = 0``) makes its delta a constant ``1.0``
@@ -107,6 +108,7 @@ _NAMED_SUBFEATURES: dict[str, tuple[str, ...]] = {
         "marc_is_part",
         "cce_is_whole",
         "cce_is_part",
+        "cce_is_range",
     ),
 }
 
@@ -138,6 +140,14 @@ _VOLUME_INCOMPAT_UNCORROBORATED: str = "volume.incompatible_uncorroborated"
 _VOLUME_SCORER: str = "volume.compat"
 _VETO_SCORERS: tuple[str, ...] = ("lccn.exact", "isbn.exact")
 
+# A volume sub-feature (issue #104) that itself corroborates a whole/part
+# mismatch: when the CCE candidate is a registered multi-volume range
+# (``is_range_registration``), a single MARC volume scoring whole-vs-part 0.0
+# is a LEGITIMATE part-of-registered-whole, not a suspect incompatibility. The
+# registration range IS the corroboration that the part belongs to the whole.
+_CCE_IS_RANGE: str = "cce_is_range"
+_RANGE_CORROBORATION: float = 1.0
+
 # A scorer "fires incompatible" at exactly normalized 0.0; a veto "corroborates"
 # at exactly normalized 1.0 (an exact identifier hit). Both are exact endpoints
 # of ``Evidence.normalized``; no tolerance band is needed.
@@ -152,7 +162,11 @@ def volume_incompatible_uncorroborated(evidence: Sequence[Evidence]) -> float:
     skipped, and scored a normalized ``0.0`` (the whole-vs-part mismatch) AND
     no veto scorer (an exact LCCN or ISBN hit, normalized ``1.0``) corroborates
     the pair. It is ``0.0`` otherwise — when volume is absent/skipped/non-zero,
-    or when a strong identifier vetoes the incompatibility.
+    when a strong identifier vetoes the incompatibility, or when the CCE
+    candidate is a registered multi-volume range (``cce_is_range == 1.0``,
+    issue #104): a single MARC volume against a registered range whole is a
+    legitimate part-of-whole, and the registration range is itself the
+    corroboration that the part belongs to the whole.
 
     Args:
         evidence: The winning per-scorer Evidence for one candidate pair.
@@ -164,6 +178,8 @@ def volume_incompatible_uncorroborated(evidence: Sequence[Evidence]) -> float:
     by_name = _evidence_by_scorer(evidence)
     volume = by_name.get(_VOLUME_SCORER)
     if volume is None or volume.skipped or volume.normalized != _INCOMPATIBLE_SCORE:
+        return 0.0
+    if dict(volume.features).get(_CCE_IS_RANGE) == _RANGE_CORROBORATION:
         return 0.0
     for scorer in _VETO_SCORERS:
         veto = by_name.get(scorer)

@@ -6,7 +6,7 @@ from pd_matcher.match.combiners.features import feature_row
 from pd_matcher.match.combiners.features import volume_incompatible_uncorroborated
 from pd_matcher.match.evidence import Evidence
 
-_EXPECTED_FEATURE_COUNT: int = 51
+_EXPECTED_FEATURE_COUNT: int = 52
 
 
 def _evidence(
@@ -29,8 +29,13 @@ def _evidence(
 
 
 def test_feature_names_length_matches_expected_count() -> None:
-    """The canonical builder yields exactly 51 columns."""
+    """The canonical builder yields exactly 52 columns."""
     assert len(feature_names()) == _EXPECTED_FEATURE_COUNT
+
+
+def test_volume_cce_is_range_is_a_feature_column() -> None:
+    """The registered-range volume sub-feature (#104) is a learned column."""
+    assert "volume.compat.cce_is_range" in feature_names()
 
 
 def test_title_coverage_is_a_feature_column() -> None:
@@ -305,6 +310,39 @@ def test_volume_incompatible_uncorroborated_partial_lccn_does_not_veto() -> None
     evidence = (
         _evidence("volume.compat", score=0.0, skipped=False),
         _evidence("lccn.exact", score=50.0, skipped=False),
+    )
+    assert volume_incompatible_uncorroborated(evidence) == 1.0
+
+
+def test_volume_incompatible_uncorroborated_corroborated_by_cce_range() -> None:
+    """A registered multi-volume range (#104) corroborates the part-of-whole.
+
+    A single MARC volume scoring whole/part 0.0 against a CCE registered
+    range is a legitimate part-of-whole, not a suspect incompatibility, so
+    the ``cce_is_range`` sub-feature suppresses the signal to 0.0.
+    """
+    evidence = (
+        _evidence(
+            "volume.compat",
+            score=0.0,
+            skipped=False,
+            features=(("cce_is_part", 1.0), ("cce_is_range", 1.0)),
+        ),
+        _evidence("lccn.exact", skipped=True),
+    )
+    assert volume_incompatible_uncorroborated(evidence) == 0.0
+
+
+def test_volume_incompatible_uncorroborated_fires_when_cce_range_absent() -> None:
+    """A volume 0.0 with ``cce_is_range`` 0.0 still fires (no corroboration)."""
+    evidence = (
+        _evidence(
+            "volume.compat",
+            score=0.0,
+            skipped=False,
+            features=(("cce_is_part", 1.0), ("cce_is_range", 0.0)),
+        ),
+        _evidence("lccn.exact", skipped=True),
     )
     assert volume_incompatible_uncorroborated(evidence) == 1.0
 
