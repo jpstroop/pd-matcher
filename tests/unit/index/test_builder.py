@@ -43,6 +43,17 @@ def _seed_regnum_variant_sources(root: Path) -> tuple[Path, Path]:
     return reg_dir, ren_dir
 
 
+def _seed_range_regnum_sources(root: Path) -> tuple[Path, Path]:
+    """Copy the range-regnum reg/ren fixtures into isolated source dirs."""
+    reg_dir = root / "reg"
+    ren_dir = root / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "range_reg.xml").write_bytes((_FIXTURES / "range_regnum_reg.xml").read_bytes())
+    (ren_dir / "range_ren.tsv").write_bytes((_FIXTURES / "range_regnum_ren.tsv").read_bytes())
+    return reg_dir, ren_dir
+
+
 def test_build_index_writes_records_year_buckets_and_meta(tmp_path: Path) -> None:
     reg_dir, ren_dir = _seed_sources(tmp_path)
     out_path = tmp_path / "idx.lmdb"
@@ -324,6 +335,39 @@ def test_build_index_joins_format_variant_regnum_against_renewal(tmp_path: Path)
         mismatch_blob = store.reg_by_id.get(b"UUID-V002")
         assert mismatch_blob is not None
         assert decode_reg(mismatch_blob).was_renewed is False
+
+
+def test_build_index_joins_multi_number_range_registration_on_interior_number(
+    tmp_path: Path,
+) -> None:
+    """A multi-number range registration joins a renewal citing an interior number.
+
+    UUID-R001's ``regnum`` is the space-separated whole ``"A692774 A692775"``;
+    the renewal cites the interior number ``A692775`` at the same original date.
+    Under the single mashed key (``A692774A692775|…``) the renewal can never
+    collide, so the join only lands because :func:`make_renewal_keys` fans the
+    range out into one per-number key on both sides. The registration is flagged
+    ``is_range_registration`` and carries the projected renewal.
+    """
+    reg_dir, ren_dir = _seed_range_regnum_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+
+    report = build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    assert report.renewal_joins == 1
+
+    odat = date(1950, 3, 15)
+    with NyplIndexStore(out_path, readonly=True) as store:
+        blob = store.reg_by_id.get(b"UUID-R001")
+        assert blob is not None
+        record = decode_reg(blob)
+        assert record.was_renewed is True
+        assert record.is_range_registration is True
+        assert record.renewal_id == "R301045"
+        assert record.renewal_oreg == "A692775"
+
+        # The mashed whole-string key never resolves; the interior number does.
+        assert store.ren_by_oreg.get(make_renewal_key("A692774 A692775", odat)) is None
+        assert store.ren_by_oreg.get(make_renewal_key("A692775", odat)) == b"entry-200"
 
 
 def test_cache_mismatch_reason_reports_each_field_in_declaration_order() -> None:

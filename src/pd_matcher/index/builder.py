@@ -38,7 +38,7 @@ from pd_matcher.index.codec import encode_reg
 from pd_matcher.index.codec import encode_ren
 from pd_matcher.index.codec import encode_uuid_list
 from pd_matcher.index.codec import encode_year_key
-from pd_matcher.index.codec import make_renewal_key
+from pd_matcher.index.codec import make_renewal_keys
 from pd_matcher.index.keys import author_keys
 from pd_matcher.index.keys import publisher_keys
 from pd_matcher.index.keys import title_keys
@@ -241,8 +241,9 @@ def _ingest_renewals(
             for record in iter_nypl_ren_directory(ren_dir, stats=parser_stats):
                 store.ren_by_id.put(record.entry_id.encode("utf-8"), encode_ren(record))
                 if record.oreg is not None and record.odat is not None:
-                    join_key = make_renewal_key(record.oreg, record.odat)
-                    store.ren_by_oreg.put(join_key, record.entry_id.encode("utf-8"))
+                    entry_id_blob = record.entry_id.encode("utf-8")
+                    for join_key in make_renewal_keys(record.oreg, record.odat):
+                        store.ren_by_oreg.put(join_key, entry_id_blob)
                 written += 1
         _LOGGER.info(
             "index.renewals.ingested",
@@ -292,13 +293,16 @@ def _ingest_registrations(
                 was_renewed = False
                 renewal = None
                 if record.regnum is not None:
-                    join_key = make_renewal_key(record.regnum, record.reg_date)
-                    entry_id_blob = store.ren_by_oreg.get(join_key)
-                    if entry_id_blob is not None:
-                        was_renewed = True
-                        ren_blob = store.ren_by_id.get(entry_id_blob)
-                        if ren_blob is not None:  # pragma: no branch
-                            renewal = decode_ren(ren_blob)
+                    for join_key in make_renewal_keys(record.regnum, record.reg_date):
+                        entry_id_blob = store.ren_by_oreg.get(join_key)
+                        if entry_id_blob is not None:
+                            was_renewed = True
+                            ren_blob = store.ren_by_id.get(entry_id_blob)
+                            if ren_blob is not None:  # pragma: no branch
+                                renewal = decode_ren(ren_blob)
+                            # Phase 1 projects the first matched renewal only;
+                            # per-volume renewal projection is deferred.
+                            break
                 if was_renewed:
                     joins += 1
                 indexed = index_reg(record, was_renewed=was_renewed, renewal=renewal)

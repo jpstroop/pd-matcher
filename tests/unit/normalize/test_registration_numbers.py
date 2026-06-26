@@ -2,7 +2,9 @@
 
 from hypothesis import given
 from hypothesis import strategies as st
+from pytest import mark
 
+from pd_matcher.normalize.registration_numbers import is_multi_regnum
 from pd_matcher.normalize.registration_numbers import normalize_regnum
 
 
@@ -77,3 +79,35 @@ def test_variant_pair_canonicalises_to_same_token() -> None:
 def test_is_idempotent(value: str) -> None:
     once = normalize_regnum(value)
     assert normalize_regnum(once) == once
+
+
+@mark.parametrize(
+    "raw",
+    [
+        "A692774 A692775",
+        "a692774 a692775",
+        "A160078 A160079 A160080",
+        "692774 692775",
+        "A692774  A692775",
+    ],
+)
+def test_is_multi_regnum_true_for_space_separated_number_lists(raw: str) -> None:
+    assert is_multi_regnum(raw) is True
+
+
+@mark.parametrize(
+    "raw",
+    [
+        "A692774",
+        "A 963122",
+        "A ad int. 8956",
+        "A int. 241",
+        "A INTERNATIONAL",
+        "AI-9217",
+        "",
+        "   ",
+        "A692774 ",
+    ],
+)
+def test_is_multi_regnum_false_for_singles_and_verbose_phrases(raw: str) -> None:
+    assert is_multi_regnum(raw) is False

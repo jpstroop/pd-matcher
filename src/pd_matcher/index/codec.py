@@ -25,6 +25,7 @@ from msgspec.msgpack import Encoder
 
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import NyplRenRecord
+from pd_matcher.normalize.registration_numbers import is_multi_regnum
 from pd_matcher.normalize.registration_numbers import normalize_regnum
 
 _REG_ENCODER: Encoder = Encoder()
@@ -108,6 +109,34 @@ def make_renewal_key(regnum: str, regdate: date | None) -> bytes:
     return f"{normalize_regnum(regnum)}|{suffix}".encode()
 
 
+def make_renewal_keys(regnum: str, regdate: date | None) -> tuple[bytes, ...]:
+    """Build every join key a registration or renewal contributes to the join.
+
+    A registered multi-volume whole records several numbers in one ``regnum``
+    value (``"A692774 A692775"``); :func:`make_renewal_key` would collapse it
+    into a single mashed token (``A692774A692775|…``) that a renewal citing an
+    interior number (``A692775``) can never collide with. When
+    :func:`is_multi_regnum` recognises such a range, this fans it out into one
+    normalized key per listed number so both the ``ren_by_oreg`` writer and the
+    registration reader land on the same per-number key. Otherwise it returns a
+    one-tuple byte-identical to :func:`make_renewal_key`. The date suffix is
+    carried on every key exactly as the single-key path does.
+
+    Args:
+        regnum: Copyright Office registration number, possibly a
+            space-separated multi-number range.
+        regdate: Original registration date, or ``None`` when absent.
+
+    Returns:
+        A tuple of UTF-8 encoded composite keys, one per listed number for a
+        multi-number range and a single key otherwise.
+    """
+    if not is_multi_regnum(regnum):
+        return (make_renewal_key(regnum, regdate),)
+    suffix = regdate.isoformat() if regdate is not None else ""
+    return tuple(f"{normalize_regnum(token)}|{suffix}".encode() for token in regnum.split())
+
+
 __all__ = [
     "decode_reg",
     "decode_ren",
@@ -118,4 +147,5 @@ __all__ = [
     "encode_uuid_list",
     "encode_year_key",
     "make_renewal_key",
+    "make_renewal_keys",
 ]
