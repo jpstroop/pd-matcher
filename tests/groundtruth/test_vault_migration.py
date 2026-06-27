@@ -12,6 +12,7 @@ from pd_groundtruth.label_vault import iter_entries
 from pd_groundtruth.vault_migration import migrate_vault_v3
 from pd_groundtruth.vault_migration import migrate_vault_v4
 from pd_groundtruth.vault_migration import migrate_vault_v5
+from pd_groundtruth.vault_migration import migrate_vault_v6
 from pd_matcher.models import IndexedNyplRegRecord
 
 _RUNNER = CliRunner()
@@ -701,3 +702,125 @@ def test_cli_migrate_vault_v5_missing_file_reports_zero(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "migrated 0 entries" in result.stdout
     assert "bumped 0 to schema 5" in result.stdout
+
+
+# ---- v6 migration (-> schema 7, match_source backfill) ---------------------
+
+
+def _v6_line(
+    *,
+    marc_id: str,
+    nypl_uuid: str,
+    categories: tuple[str, ...] = (),
+) -> str:
+    rendered = "[" + ",".join(f'"{c}"' for c in categories) + "]"
+    return (
+        f'{{"schema":6,"marc_control_id":"{marc_id}","nypl_uuid":"{nypl_uuid}",'
+        '"verdict":"match","note":null,"labeled_at":"2026-06-10T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]},'
+        '"cce_regnum":null,"cce_renewal_id":null,"cce_renewal_oreg":null,'
+        f'"categories":{rendered},"reg_year":1953,"renewal_year":null,'
+        '"was_renewed":false,"scores":null,"matcher_version":null}'
+    )
+
+
+def _v7_line(*, marc_id: str, nypl_uuid: str, match_source: str = "registration") -> str:
+    return (
+        f'{{"schema":7,"marc_control_id":"{marc_id}","nypl_uuid":"{nypl_uuid}",'
+        '"verdict":"match","note":null,"labeled_at":"2026-06-11T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]},'
+        '"cce_regnum":null,"cce_renewal_id":null,"cce_renewal_oreg":null,'
+        '"categories":[],"reg_year":null,"renewal_year":null,"was_renewed":null,'
+        f'"scores":null,"matcher_version":null,"match_source":"{match_source}"}}'
+    )
+
+
+def test_v6_migrates_pre_v7_vault_to_schema_7_with_registration_source(tmp_path: Path) -> None:
+    """Every pre-v7 entry becomes schema 7 with ``match_source="registration"``."""
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v6_line(marc_id="a", nypl_uuid="u-a"),
+            _v6_line(marc_id="b", nypl_uuid="u-b", categories=("translation",)),
+        ],
+    )
+    report = migrate_vault_v6(path)
+    assert report.total_entries == 2
+    assert report.migrated == 2
+    entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
+    assert entries["a"].schema == 7
+    assert entries["a"].match_source == "registration"
+    assert entries["b"].match_source == "registration"
+    # Pre-existing fields survive the bump.
+    assert entries["b"].categories == ("translation",)
+    assert entries["a"].reg_year == 1953
+    assert entries["a"].was_renewed is False
+
+
+def test_v6_is_idempotent_on_already_v7_vault(tmp_path: Path) -> None:
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v7_line(marc_id="a", nypl_uuid="u-a"),
+            _v7_line(marc_id="b", nypl_uuid="u-b", match_source="renewal"),
+        ],
+    )
+    original_bytes = path.read_bytes()
+    report = migrate_vault_v6(path)
+    assert report.total_entries == 2
+    assert report.migrated == 0
+    assert path.read_bytes() == original_bytes
+
+
+def test_v6_handles_missing_vault_file(tmp_path: Path) -> None:
+    path = tmp_path / "absent.jsonl"
+    report = migrate_vault_v6(path)
+    assert report.total_entries == 0
+    assert report.migrated == 0
+    assert not path.exists()
+
+
+def test_v6_handles_empty_vault_file(tmp_path: Path) -> None:
+    path = tmp_path / "empty.jsonl"
+    path.write_bytes(b"")
+    report = migrate_vault_v6(path)
+    assert report.total_entries == 0
+    assert report.migrated == 0
+
+
+def test_v6_mixed_vault_only_bumps_pre_v7_entries(tmp_path: Path) -> None:
+    """A mix of v6 and v7 entries: only the v6 ones get bumped + tagged."""
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v6_line(marc_id="old", nypl_uuid="u-old"),
+            _v7_line(marc_id="new", nypl_uuid="u-new", match_source="renewal"),
+        ],
+    )
+    report = migrate_vault_v6(path)
+    assert report.total_entries == 2
+    assert report.migrated == 1
+    entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
+    assert entries["old"].match_source == "registration"
+    # The already-v7 renewal entry is untouched.
+    assert entries["new"].match_source == "renewal"
+
+
+def test_cli_migrate_vault_v6_runs_and_reports(tmp_path: Path) -> None:
+    vault_path = tmp_path / "vault.jsonl"
+    _write_vault(vault_path, [_v6_line(marc_id="a", nypl_uuid="u-a")])
+    result = _RUNNER.invoke(app, ["migrate-vault-v6", "--vault", str(vault_path)])
+    assert result.exit_code == 0, result.stdout
+    assert "migrated 1 entries" in result.stdout
+    assert "bumped 1 to schema 7" in result.stdout
+
+
+def test_cli_migrate_vault_v6_missing_file_reports_zero(tmp_path: Path) -> None:
+    vault_path = tmp_path / "absent.jsonl"
+    result = _RUNNER.invoke(app, ["migrate-vault-v6", "--vault", str(vault_path)])
+    assert result.exit_code == 0
+    assert "migrated 0 entries" in result.stdout
+    assert "bumped 0 to schema 7" in result.stdout

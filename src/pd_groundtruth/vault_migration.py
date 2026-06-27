@@ -33,6 +33,8 @@ CceLookupFn = Callable[[str], IndexedNyplRegRecord | None]
 _SCHEMA_V3: int = 3
 _SCHEMA_V4: int = 4
 _SCHEMA_V5: int = 5
+_SCHEMA_V7: int = 7
+_DEFAULT_MATCH_SOURCE: str = "registration"
 _ARCHIVE_SUFFIX: str = ".pre-v3"
 
 
@@ -63,6 +65,17 @@ class MigrationReportV5(Struct, frozen=True, forbid_unknown_fields=True):
 
     ``migrated`` is the number of entries whose ``schema`` was below 5 and
     that received the empty-tuple ``categories`` backfill.
+    """
+
+    total_entries: int
+    migrated: int
+
+
+class MigrationReportV6(Struct, frozen=True, forbid_unknown_fields=True):
+    """Counts emitted by :func:`migrate_vault_v6` for the CLI to print.
+
+    ``migrated`` is the number of entries whose ``schema`` was below 7 and
+    that received the ``match_source="registration"`` backfill.
     """
 
     total_entries: int
@@ -316,12 +329,52 @@ def migrate_vault_v5(vault_path: Path) -> MigrationReportV5:
     return MigrationReportV5(total_entries=len(raw_entries), migrated=migrated)
 
 
+def migrate_vault_v6(vault_path: Path) -> MigrationReportV6:
+    """Bump every entry to schema 7 and backfill ``match_source="registration"``.
+
+    Schema 7 adds the ``match_source`` field recording which CCE pathway
+    surfaced the pair. Every label written before schema 7 came from the
+    registration pathway, so the migration is uniform — no external lookup —
+    and stamps ``"registration"`` onto every pre-v7 entry while bumping its
+    ``schema`` to 7.
+
+    Despite the ``v6`` name (it is the sixth vault migration), the target
+    schema is 7: schema 6 carried no migration because its fields are filled
+    by ``enrich-vault`` rather than backfilled.
+
+    Idempotent: a vault already entirely at schema 7 returns a zero-count
+    report and is not rewritten. A missing or empty vault is also a
+    zero-count no-op.
+
+    The write itself is atomic: a temp file in the same directory is renamed
+    over the canonical path. The pre-migration vault is preserved in git
+    history rather than on disk.
+    """
+    if not vault_path.exists() or vault_path.stat().st_size == 0:
+        return MigrationReportV6(total_entries=0, migrated=0)
+    raw_entries = list(_iter_raw_entries(vault_path))
+    if all(_schema_at_least(entry, _SCHEMA_V7) for entry in raw_entries):
+        return MigrationReportV6(total_entries=len(raw_entries), migrated=0)
+    migrated = 0
+    migrated_entries: list[dict[str, object]] = []
+    for raw in raw_entries:
+        if not _schema_at_least(raw, _SCHEMA_V7):
+            raw["schema"] = _SCHEMA_V7
+            raw["match_source"] = _DEFAULT_MATCH_SOURCE
+            migrated += 1
+        migrated_entries.append(raw)
+    _atomic_write_jsonl(vault_path, migrated_entries)
+    return MigrationReportV6(total_entries=len(raw_entries), migrated=migrated)
+
+
 __all__ = [
     "CceLookupFn",
     "MigrationReport",
     "MigrationReportV4",
     "MigrationReportV5",
+    "MigrationReportV6",
     "migrate_vault_v3",
     "migrate_vault_v4",
     "migrate_vault_v5",
+    "migrate_vault_v6",
 ]

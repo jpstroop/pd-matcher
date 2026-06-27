@@ -33,6 +33,9 @@ VERDICT_UNSURE: str = "unsure"
 
 _VALID_VERDICTS: frozenset[str] = frozenset({VERDICT_MATCH, VERDICT_NO_MATCH, VERDICT_UNSURE})
 
+PAIRING_REGISTRATION: str = "registration"
+PAIRING_RENEWAL: str = "renewal"
+
 _SCHEMA: str = """
 CREATE TABLE IF NOT EXISTS review_pair (
     id INTEGER PRIMARY KEY,
@@ -41,6 +44,7 @@ CREATE TABLE IF NOT EXISTS review_pair (
     score REAL NOT NULL,
     band TEXT NOT NULL,
     source TEXT NOT NULL,
+    pairing_type TEXT NOT NULL DEFAULT 'registration',
     marc_control_id TEXT NOT NULL,
     marc_json TEXT NOT NULL,
     marc_title TEXT,
@@ -218,6 +222,7 @@ class PairInsert(Struct, frozen=True, forbid_unknown_fields=True):
     cce_renewal_new_matter: str | None = None
     evidence_sources_json: str = "{}"
     audit_note: str | None = None
+    pairing_type: str = PAIRING_REGISTRATION
 
 
 class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
@@ -267,6 +272,7 @@ class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
     cce_renewal_new_matter: str | None = None
     evidence_sources_json: str = "{}"
     audit_note: str | None = None
+    pairing_type: str = PAIRING_REGISTRATION
 
 
 class LanguageProgress(Struct, frozen=True, forbid_unknown_fields=True):
@@ -341,6 +347,7 @@ _ADDITIVE_CCE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("cce_renewal_new_matter", "TEXT"),
     ("evidence_sources_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("audit_note", "TEXT"),
+    ("pairing_type", "TEXT NOT NULL DEFAULT 'registration'"),
 )
 
 
@@ -391,6 +398,7 @@ def _row_to_pair(row: Row) -> ReviewPairRow:
         cce_renewal_new_matter=row["cce_renewal_new_matter"],
         evidence_sources_json=row["evidence_sources_json"] or "{}",
         audit_note=row["audit_note"],
+        pairing_type=row["pairing_type"],
     )
 
 
@@ -459,7 +467,7 @@ class ReviewDb:
         cursor = self._conn.execute(
             """
             INSERT INTO review_pair (
-                language, decade, score, band, source, marc_control_id,
+                language, decade, score, band, source, pairing_type, marc_control_id,
                 marc_json, marc_title, marc_author, marc_publisher, marc_year,
                 nypl_uuid, cce_title, cce_author, cce_publishers, cce_claimants,
                 cce_reg_year, cce_was_renewed, cce_regnum, evidence_json,
@@ -474,7 +482,7 @@ class ReviewDb:
                 audit_note,
                 created_at
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?,
                 ?, ?, ?,
@@ -491,6 +499,7 @@ class ReviewDb:
                 pair.score,
                 pair.band,
                 pair.source,
+                pair.pairing_type,
                 pair.marc_control_id,
                 pair.marc_json,
                 pair.marc_title,
@@ -941,6 +950,8 @@ class ReviewDb:
 
 
 __all__ = [
+    "PAIRING_REGISTRATION",
+    "PAIRING_RENEWAL",
     "SORT_ASC",
     "SORT_DESC",
     "VERDICT_MATCH",

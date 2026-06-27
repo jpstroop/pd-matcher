@@ -95,6 +95,7 @@ def _row(
     cce_claimants: str | None = "Jane Doe",
     evidence_sources_json: str = "{}",
     audit_note: str | None = None,
+    pairing_type: str = "registration",
 ) -> ReviewPairRow:
     return ReviewPairRow(
         id=7,
@@ -103,6 +104,7 @@ def _row(
         score=0.91,
         band="ge90",
         source="banded",
+        pairing_type=pairing_type,
         marc_control_id=marc.control_id,
         marc_json=json_encode(marc).decode("utf-8"),
         marc_title=marc.title,
@@ -265,6 +267,27 @@ def test_build_card_renders_cce_and_renewal() -> None:
     assert card.cce_reg_year == 1953
     assert card.cce_regnum == "R99"
     assert card.cce_renewal_label == RENEWAL_NOT_RENEWED
+
+
+def test_build_card_defaults_pairing_type_to_registration() -> None:
+    card = build_card(_row(_marc(), evidence_json="{}"))
+    assert card.pairing_type == "registration"
+
+
+def test_build_card_passes_pairing_type_renewal_through() -> None:
+    row = _row(
+        _marc(),
+        evidence_json='{"title": 0.9, "claimants": 0.5}',
+        pairing_type="renewal",
+        cce_renewal_id="ren-1",
+        cce_renewal_title="Renewal Title",
+        cce_renewal_author="Renewal Author",
+        cce_renewal_claimants="Renewal Claimant",
+    )
+    card = build_card(row)
+    assert card.pairing_type == "renewal"
+    assert card.cce_renewal_title == "Renewal Title"
+    assert tuple(bar.scorer for bar in card.evidence) == ("title", "claimants")
 
 
 def test_build_card_carries_evidence_bars() -> None:

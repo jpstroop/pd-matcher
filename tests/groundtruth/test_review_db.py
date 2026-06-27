@@ -4,6 +4,8 @@ from pathlib import Path
 
 from pytest import raises
 
+from pd_groundtruth.review_db import PAIRING_REGISTRATION
+from pd_groundtruth.review_db import PAIRING_RENEWAL
 from pd_groundtruth.review_db import SORT_ASC
 from pd_groundtruth.review_db import SORT_DESC
 from pd_groundtruth.review_db import VERDICT_MATCH
@@ -1135,3 +1137,65 @@ def test_decoding_empty_categories_text_collapses_to_empty_tuple(tmp_path: Path)
     with ReviewDb.connect(db_path) as db:
         rows = db.iter_labeled_pairs()
     assert rows[0].categories == ()
+
+
+def test_pairing_type_defaults_to_registration(tmp_path: Path) -> None:
+    """A pair inserted without ``pairing_type`` round-trips as ``registration``."""
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        pair_id = db.insert_pair(_pair())
+    with ReviewDb.connect(db_path) as db:
+        row = db.get_pair(pair_id)
+    assert row is not None
+    assert row.pairing_type == PAIRING_REGISTRATION
+
+
+def test_pairing_type_renewal_round_trips(tmp_path: Path) -> None:
+    """An explicit ``pairing_type="renewal"`` is persisted and read back."""
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        pair_id = db.insert_pair(
+            PairInsert(
+                language="eng",
+                decade=1950,
+                score=0.8,
+                band="b80_90",
+                source="renewal",
+                pairing_type=PAIRING_RENEWAL,
+                marc_control_id="ctrl-r",
+                marc_json='{"control_id": "ctrl-r"}',
+                marc_title="A Title",
+                marc_author="An Author",
+                marc_publisher=None,
+                marc_year=1953,
+                nypl_uuid="ren-entry-1",
+                cce_title="Renewal Title",
+                cce_author="Renewal Author",
+                cce_publishers=None,
+                cce_claimants="Renewal Claimant",
+                cce_reg_year=1953,
+                cce_was_renewed=True,
+                cce_regnum=None,
+                evidence_json='{"title": 0.9}',
+                cce_renewal_id="ren-1",
+                cce_renewal_oreg="A123",
+            )
+        )
+    with ReviewDb.connect(db_path) as db:
+        row = db.get_pair(pair_id)
+    assert row is not None
+    assert row.pairing_type == PAIRING_RENEWAL
+    assert row.nypl_uuid == "ren-entry-1"
+    assert row.cce_renewal_id == "ren-1"
+
+
+def test_legacy_db_without_pairing_type_column_is_backfilled(tmp_path: Path) -> None:
+    """A pre-``pairing_type`` DB gains the column on connect with the default."""
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        pair_id = db.insert_pair(_pair())
+        db._conn.execute("ALTER TABLE review_pair DROP COLUMN pairing_type")
+    with ReviewDb.connect(db_path) as db:
+        row = db.get_pair(pair_id)
+    assert row is not None
+    assert row.pairing_type == PAIRING_REGISTRATION

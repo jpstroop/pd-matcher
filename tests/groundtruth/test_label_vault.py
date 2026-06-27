@@ -214,9 +214,9 @@ def test_extract_marc_identifiers_handles_missing_identifiers() -> None:
     assert identifiers.isbns == ()
 
 
-def test_schema_version_is_six() -> None:
-    """New vault writes use schema 6 (adds the enrichment fields)."""
-    assert SCHEMA_VERSION == 6
+def test_schema_version_is_seven() -> None:
+    """New vault writes use schema 7 (adds the ``match_source`` pathway field)."""
+    assert SCHEMA_VERSION == 7
 
 
 def test_legacy_schema_entries_with_old_fields_reject_decode(tmp_path: Path) -> None:
@@ -450,3 +450,28 @@ def test_matcher_scores_rejects_unknown_field(tmp_path: Path) -> None:
     )
     with raises(Exception, match=r"bogus|scores"):
         list(iter_entries(path))
+
+
+def test_match_source_defaults_to_none_and_round_trips(tmp_path: Path) -> None:
+    """``match_source`` defaults to ``None`` and survives an upsert round-trip."""
+    path = tmp_path / "vault.jsonl"
+    default_entry = _entry(marc_control_id="a", nypl_uuid="u-a")
+    assert default_entry.match_source is None
+    upsert_entry(path, default_entry)
+    upsert_entry(
+        path,
+        VaultEntry(
+            schema=SCHEMA_VERSION,
+            marc_control_id="b",
+            nypl_uuid="u-b",
+            verdict="match",
+            note=None,
+            labeled_at="2026-06-20T00:00:00+00:00",
+            labeler="jpstroop",
+            marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+            match_source="renewal",
+        ),
+    )
+    entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
+    assert entries["a"].match_source is None
+    assert entries["b"].match_source == "renewal"

@@ -112,6 +112,7 @@ def _entry(
         marc_identifiers=MarcIdentifiers(lccn="40012345", oclc=None, isbns=()),
         cce_regnum="A1",
         categories=("generic_title",),
+        match_source="renewal",
     )
 
 
@@ -151,7 +152,7 @@ def test_enrich_writes_derived_fields_and_preserves_human_fields(tmp_path: Path)
         learned_scored=1,
     )
     [entry] = list(iter_entries(vault_path))
-    assert entry.schema == 6
+    assert entry.schema == 7
     assert entry.reg_year == 1953
     assert entry.renewal_year == 1981
     assert entry.was_renewed is True
@@ -166,6 +167,7 @@ def test_enrich_writes_derived_fields_and_preserves_human_fields(tmp_path: Path)
     assert entry.marc_identifiers == original.marc_identifiers
     assert entry.cce_regnum == original.cce_regnum
     assert entry.categories == original.categories
+    assert entry.match_source == "renewal"
 
 
 def test_enrich_rounds_scores_to_four_decimals(tmp_path: Path) -> None:

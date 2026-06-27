@@ -1,4 +1,4 @@
-"""Build the schema-6 vault entry the review server writes at label time.
+"""Build the schema-7 vault entry the review server writes at label time.
 
 When a labeler submits a verdict, the server writes a :class:`VaultEntry`
 immediately. Because the three static CCE facts (``reg_year`` /
@@ -22,9 +22,11 @@ from msgspec.json import decode as json_decode
 
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import CategoryKey
+from pd_groundtruth.label_vault import MatchSource
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.label_vault import renewal_year_of
+from pd_groundtruth.review_db import PAIRING_RENEWAL
 from pd_groundtruth.review_db import ReviewPairRow
 from pd_matcher.models import MarcRecord
 
@@ -53,6 +55,17 @@ def _renewal_year(renewal_rdat: str | None) -> int | None:
     return renewal_year_of(date.fromisoformat(renewal_rdat))
 
 
+def _match_source(pairing_type: str) -> MatchSource:
+    """Map a review pair's ``pairing_type`` to the vault's ``match_source``.
+
+    A ``"renewal"`` pairing records ``"renewal"``; every other pairing
+    (the default ``"registration"``) records ``"registration"``. The
+    ``"both"`` value is reserved for a future pipeline that links a pair
+    through both pathways and is never produced here.
+    """
+    return "renewal" if pairing_type == PAIRING_RENEWAL else "registration"
+
+
 def build_label_entry(
     pair: ReviewPairRow,
     *,
@@ -62,13 +75,15 @@ def build_label_entry(
     labeler: str,
     categories: tuple[CategoryKey, ...],
 ) -> VaultEntry:
-    """Assemble the schema-6 vault entry for a freshly-submitted verdict.
+    """Assemble the schema-7 vault entry for a freshly-submitted verdict.
 
     The human-entered fields (``verdict`` / ``note`` / ``categories`` /
     ``labeled_at`` / ``labeler``) and the CCE-side identifiers are taken
     verbatim; the three static CCE facts are derived off ``pair``'s
-    denormalized columns. ``scores`` and ``matcher_version`` are left ``None``
-    — they are version-bound and written only by ``enrich-vault``.
+    denormalized columns. ``match_source`` is derived from the pair's
+    ``pairing_type`` (a human-pathway fact preserved by ``enrich-vault``).
+    ``scores`` and ``matcher_version`` are left ``None`` — they are
+    version-bound and written only by ``enrich-vault``.
 
     Args:
         pair: The persisted review-pair row carrying ``marc_json`` and the
@@ -98,6 +113,7 @@ def build_label_entry(
         was_renewed=_was_renewed(pair.cce_was_renewed),
         scores=None,
         matcher_version=None,
+        match_source=_match_source(pair.pairing_type),
     )
 
 
