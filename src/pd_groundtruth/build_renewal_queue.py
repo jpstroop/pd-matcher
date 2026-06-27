@@ -10,6 +10,26 @@ scorers and the weighted-mean combiner (mirroring
 score floor, and writes it into the review DB as a ``pairing_type="renewal"``
 pair so the same UI can label it.
 
+Before the renewal arm runs, each MARC is first put through the production
+*registration* matcher (the learned scorer with a high ``reg_min_score`` floor)
+to decide whether a renewal pair is worth labeling at all:
+
+* **Scenario 2** — a registration matches above the floor and that
+  registration is already joined to a renewal (``was_renewed=True``). The
+  copyright story is already settled, so the MARC is skipped entirely; no
+  renewal pair is emitted.
+* **Scenario 3** — a registration matches above the floor but is *not* joined
+  to a renewal (``was_renewed=False``). A renewal may exist unlinked, so the
+  renewal arm runs and any emitted pair records the scenario on its
+  ``audit_note``.
+* **Scenario 4** — no registration clears the floor. The renewal arm runs as a
+  renewal-only candidate and the emitted pair records the scenario.
+
+The registration arm uses the learned scorer by construction, so its model
+artifact must be present beside the index; its absence fails the build loudly
+via :func:`pd_matcher.match.combiners.build_combiner`. The renewal arm stays on
+the weighted-mean combiner because the renewal pathway is untrained.
+
 A renewal pair's ``nypl_uuid`` column carries the renewal record's
 ``entry_id`` rather than a registration UUID — the column is polymorphic by
 ``pairing_type``. The renewal record's fields populate both the denormalized
@@ -29,6 +49,7 @@ from pathlib import Path
 
 from msgspec import Struct
 from msgspec.json import encode as json_encode
+from msgspec.structs import replace
 
 from pd_groundtruth.build_queue import _decade_of
 from pd_groundtruth.build_queue import _iter_language_dirs
@@ -45,6 +66,7 @@ from pd_groundtruth.vault_pair_resolver import (
     PUBLISHER_IDF_CACHE_NAME as _SHARED_PUBLISHER_IDF_CACHE_NAME,
 )
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners import build_combiner
 from pd_matcher.match.combiners.base import CombinedScore
@@ -57,7 +79,11 @@ from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import load_or_build_author_idf
 from pd_matcher.match.idf import load_or_build_idf
 from pd_matcher.match.idf import load_or_build_publisher_idf
+from pd_matcher.match.pairing_compiler import CompiledPairings
+from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import _build_context
+from pd_matcher.match.pipeline import match_record
+from pd_matcher.match.result import MatchResult
 from pd_matcher.match.scorers.context import ScorerContext
 from pd_matcher.match.scorers.name import score_author
 from pd_matcher.match.scorers.name import score_publisher
@@ -73,6 +99,17 @@ _CALIBRATOR_NAME: str = "calibrator.msgpack"
 _FILL_LOG_INTERVAL: int = 250
 
 SOURCE_RENEWAL: str = "renewal"
+
+_LEARNED_SCORER: str = "learned"
+
+SCENARIO_ALREADY_RENEWED: int = 2
+SCENARIO_REG_UNLINKED: int = 3
+SCENARIO_NO_REG_MATCH: int = 4
+
+_SCENARIO_AUDIT_NOTES: dict[int, str] = {
+    SCENARIO_REG_UNLINKED: "scenario 3: registration matched (was_renewed=False)",
+    SCENARIO_NO_REG_MATCH: "scenario 4: no registration match",
+}
 
 _SCORER_TITLE: str = "title"
 _SCORER_AUTHOR: str = "author"
@@ -94,6 +131,60 @@ class RenewalScore(Struct, frozen=True, forbid_unknown_fields=True):
 
 
 RenewalScoreFn = Callable[[MarcRecord, NyplRenRecord], RenewalScore]
+
+RegScenarioFn = Callable[[MarcRecord], int]
+
+
+def _scenario_for_result(result: MatchResult, lookup: NyplIndexLookup) -> int:
+    """Classify ``result`` into a renewal-queue scenario (2, 3, or 4).
+
+    Returns :data:`SCENARIO_NO_REG_MATCH` when no registration cleared the
+    floor, :data:`SCENARIO_ALREADY_RENEWED` when the best registration is
+    already joined to a renewal (``was_renewed=True``), and
+    :data:`SCENARIO_REG_UNLINKED` otherwise. A best registration whose record
+    can no longer be fetched is treated as unlinked.
+    """
+    if result.best is None:
+        return SCENARIO_NO_REG_MATCH
+    registration = lookup.get_registration(result.best.nypl_uuid)
+    if registration is not None and registration.was_renewed:
+        return SCENARIO_ALREADY_RENEWED
+    return SCENARIO_REG_UNLINKED
+
+
+def _make_reg_scenario_fn(
+    lookup: NyplIndexLookup,
+    reg_config: MatchingConfig,
+    idf: IdfTable,
+    author_idf: IdfTable,
+    publisher_idf: IdfTable,
+    calibrator: PlattCalibrator | None,
+    combiner: Combiner,
+    pairings: CompiledPairings,
+) -> RegScenarioFn:
+    """Build a ``marc -> scenario`` closure over the registration matcher.
+
+    Each call runs the production :func:`pd_matcher.match.pipeline.match_record`
+    with the learned scorer and the registration floor baked into
+    ``reg_config``, then maps the verdict to a scenario via
+    :func:`_scenario_for_result`.
+    """
+
+    def scenario_fn(marc: MarcRecord) -> int:
+        result = match_record(
+            marc,
+            lookup=lookup,
+            config=reg_config,
+            idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
+            calibrator=calibrator,
+            combiner=combiner,
+            pairings=pairings,
+        )
+        return _scenario_for_result(result, lookup)
+
+    return scenario_fn
 
 
 def _best_evidence(candidates: tuple[Evidence, ...]) -> Evidence:
@@ -186,6 +277,7 @@ def _build_renewal_pair_insert(
     *,
     language: str,
     band: str,
+    audit_note: str,
 ) -> PairInsert:
     """Assemble a ``pairing_type="renewal"`` :class:`PairInsert` for one pairing.
 
@@ -226,6 +318,7 @@ def _build_renewal_pair_insert(
         cce_renewal_title=renewal.title,
         cce_renewal_claimants=renewal.claimants,
         cce_renewal_new_matter=renewal.new_matter,
+        audit_note=audit_note,
     )
 
 
@@ -235,12 +328,15 @@ def renewal_pair_for(
     *,
     score_fn: RenewalScoreFn,
     min_calibrated: float,
+    audit_note: str,
 ) -> PairInsert | None:
     """Return the best renewal :class:`PairInsert` for ``marc``, or ``None``.
 
     Selects the highest-calibrated candidate via :func:`best_renewal` and
     returns a renewal pair only when its calibrated score is at or above
     ``min_calibrated``; otherwise ``None`` (no candidate, or all below floor).
+    ``audit_note`` is stamped onto the emitted pair so the labeler sees which
+    scenario produced it.
     """
     best = best_renewal(marc, candidates, score_fn)
     if best is None:
@@ -254,6 +350,7 @@ def renewal_pair_for(
         score,
         language=_language_of(marc),
         band=band_of(score.calibrated),
+        audit_note=audit_note,
     )
 
 
@@ -262,11 +359,17 @@ class RenewalBuildSummary(Struct, frozen=True, forbid_unknown_fields=True):
 
     ``records_scanned`` counts distinct pool MARCs considered (after skipping
     those already in the target DB); ``pairs_written`` counts renewal pairs
-    inserted.
+    inserted. ``scenario2_skipped`` counts MARCs dropped because their
+    confident registration was already renewed; ``scenario3_written`` and
+    ``scenario4_written`` count the renewal pairs emitted under each remaining
+    scenario (their sum equals ``pairs_written``).
     """
 
     records_scanned: int
     pairs_written: int
+    scenario2_skipped: int
+    scenario3_written: int
+    scenario4_written: int
 
 
 def _load_calibrator(parent: Path) -> PlattCalibrator | None:
@@ -317,14 +420,21 @@ def build_renewal_queue(
     index_path: Path,
     out_path: Path,
     matching_config: MatchingConfig,
+    pairing_config: PairingConfig,
     min_score: float,
+    reg_min_score: float,
+    reg_scorer: str,
 ) -> RenewalBuildSummary:
-    """Build (or append) renewal pairs into the review DB at ``out_path``.
+    """Build (or append) scenario-filtered renewal pairs into ``out_path``.
 
     Loads the IDF caches and calibrator beside ``index_path``, opens the CCE
-    index and the review DB, and for every pool MARC not already queued
-    retrieves renewal candidates, scores them, and inserts the best candidate
-    scoring at or above ``min_score`` as a ``pairing_type="renewal"`` pair.
+    index and the review DB, and for every pool MARC not already queued first
+    runs the production registration matcher (``reg_scorer`` with a
+    ``reg_min_score`` floor) to classify the MARC. MARCs whose confident
+    registration is already renewed (scenario 2) are skipped; the rest run the
+    renewal arm and the best renewal candidate scoring at or above ``min_score``
+    is inserted as a ``pairing_type="renewal"`` pair carrying a scenario
+    ``audit_note``.
 
     Args:
         pool: Root directory whose ``<lang>/*.xml`` shards form the pool.
@@ -333,8 +443,15 @@ def build_renewal_queue(
             MARCs already present (any pairing type) are skipped.
         matching_config: Active matcher config; supplies the year window used
             for renewal retrieval and the scoring weights.
-        min_score: Score floor on the 0-100 scale; only the best candidate at
-            or above it is queued.
+        pairing_config: Field-pairing config driving the registration matcher's
+            title/author/publisher scorer groups.
+        min_score: Renewal-arm score floor on the 0-100 scale; only the best
+            renewal candidate at or above it is queued.
+        reg_min_score: Registration-arm score floor on the 0-100 scale; the
+            production criterion separating scenario 2/3 from scenario 4.
+        reg_scorer: Combiner used by the registration arm
+            (``learned`` | ``weighted_mean``); the learned model artifact must
+            exist beside ``index_path`` when ``learned`` is selected.
 
     Returns:
         A populated :class:`RenewalBuildSummary`.
@@ -350,19 +467,32 @@ def build_renewal_queue(
     )
     calibrator = _load_calibrator(index_path.parent)
     combiner = build_combiner(matching_config, learned_model_dir=None)
+    reg_config = replace(matching_config, scorer=reg_scorer, min_combined_score=reg_min_score)
+    learned_model_dir = index_path.parent if reg_scorer == _LEARNED_SCORER else None
+    reg_combiner = build_combiner(reg_config, learned_model_dir=learned_model_dir)
+    pairings = compile_pairings(pairing_config)
     window = matching_config.year_window
     min_calibrated = min_score / 100.0
     score_fn = _make_score_fn(idf, author_idf, publisher_idf, matching_config, combiner, calibrator)
     _LOGGER.info(
-        "renewal queue start: pool=%s window=%d min_score=%.1f calibrator=%s",
+        "renewal queue start: pool=%s window=%d min_score=%.1f reg_min_score=%.1f "
+        "reg_scorer=%s calibrator=%s",
         pool,
         window,
         min_score,
+        reg_min_score,
+        reg_scorer,
         "yes" if calibrator is not None else "no",
     )
     scanned = 0
     written = 0
+    scenario2_skipped = 0
+    scenario3_written = 0
+    scenario4_written = 0
     with NyplIndexLookup(index_path) as lookup, ReviewDb.connect(out_path) as db:
+        reg_scenario_fn = _make_reg_scenario_fn(
+            lookup, reg_config, idf, author_idf, publisher_idf, calibrator, reg_combiner, pairings
+        )
         seen = {marc_id for marc_id, _uuid in db.pair_keys()}
         # Commit incrementally so an interrupted long build keeps its progress:
         # insert_pair does not commit, and ReviewDb.__exit__ only commits on a
@@ -374,27 +504,62 @@ def build_renewal_queue(
                     continue
                 seen.add(marc.control_id)
                 scanned += 1
+                scenario = reg_scenario_fn(marc)
+                if scenario == SCENARIO_ALREADY_RENEWED:
+                    scenario2_skipped += 1
+                    continue
                 pair = renewal_pair_for(
                     marc,
                     lookup.candidates_for_renewal(marc, window),
                     score_fn=score_fn,
                     min_calibrated=min_calibrated,
+                    audit_note=_SCENARIO_AUDIT_NOTES[scenario],
                 )
                 if pair is None:
                     continue
                 db.insert_pair(pair)
                 written += 1
+                if scenario == SCENARIO_REG_UNLINKED:
+                    scenario3_written += 1
+                else:
+                    scenario4_written += 1
                 if written % _FILL_LOG_INTERVAL == 0:
                     db.commit()
-                    _LOGGER.info("renewal queue: scanned=%d written=%d", scanned, written)
+                    _LOGGER.info(
+                        "renewal queue: scanned=%d written=%d "
+                        "scenario2_skipped=%d scenario3_written=%d scenario4_written=%d",
+                        scanned,
+                        written,
+                        scenario2_skipped,
+                        scenario3_written,
+                        scenario4_written,
+                    )
         finally:
             db.commit()
-    _LOGGER.info("renewal queue complete: scanned=%d written=%d", scanned, written)
-    return RenewalBuildSummary(records_scanned=scanned, pairs_written=written)
+    _LOGGER.info(
+        "renewal queue complete: scanned=%d written=%d "
+        "scenario2_skipped=%d scenario3_written=%d scenario4_written=%d",
+        scanned,
+        written,
+        scenario2_skipped,
+        scenario3_written,
+        scenario4_written,
+    )
+    return RenewalBuildSummary(
+        records_scanned=scanned,
+        pairs_written=written,
+        scenario2_skipped=scenario2_skipped,
+        scenario3_written=scenario3_written,
+        scenario4_written=scenario4_written,
+    )
 
 
 __all__ = [
+    "SCENARIO_ALREADY_RENEWED",
+    "SCENARIO_NO_REG_MATCH",
+    "SCENARIO_REG_UNLINKED",
     "SOURCE_RENEWAL",
+    "RegScenarioFn",
     "RenewalBuildSummary",
     "RenewalScore",
     "RenewalScoreFn",
