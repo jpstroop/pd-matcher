@@ -364,23 +364,31 @@ def build_renewal_queue(
     written = 0
     with NyplIndexLookup(index_path) as lookup, ReviewDb.connect(out_path) as db:
         seen = {marc_id for marc_id, _uuid in db.pair_keys()}
-        for marc in _iter_pool_records(pool):
-            if marc.control_id in seen:
-                continue
-            seen.add(marc.control_id)
-            scanned += 1
-            pair = renewal_pair_for(
-                marc,
-                lookup.candidates_for_renewal(marc, window),
-                score_fn=score_fn,
-                min_calibrated=min_calibrated,
-            )
-            if pair is None:
-                continue
-            db.insert_pair(pair)
-            written += 1
-            if written % _FILL_LOG_INTERVAL == 0:
-                _LOGGER.info("renewal queue: scanned=%d written=%d", scanned, written)
+        # Commit incrementally so an interrupted long build keeps its progress:
+        # insert_pair does not commit, and ReviewDb.__exit__ only commits on a
+        # clean exit, so without this a Ctrl-C (KeyboardInterrupt) would discard
+        # every inserted row. The finally clause flushes the final partial batch.
+        try:
+            for marc in _iter_pool_records(pool):
+                if marc.control_id in seen:
+                    continue
+                seen.add(marc.control_id)
+                scanned += 1
+                pair = renewal_pair_for(
+                    marc,
+                    lookup.candidates_for_renewal(marc, window),
+                    score_fn=score_fn,
+                    min_calibrated=min_calibrated,
+                )
+                if pair is None:
+                    continue
+                db.insert_pair(pair)
+                written += 1
+                if written % _FILL_LOG_INTERVAL == 0:
+                    db.commit()
+                    _LOGGER.info("renewal queue: scanned=%d written=%d", scanned, written)
+        finally:
+            db.commit()
     _LOGGER.info("renewal queue complete: scanned=%d written=%d", scanned, written)
     return RenewalBuildSummary(records_scanned=scanned, pairs_written=written)
 

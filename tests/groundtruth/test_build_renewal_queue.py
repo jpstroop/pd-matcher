@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
 from pytest import MonkeyPatch
+from pytest import raises
 
 from pd_groundtruth import build_renewal_queue as module
 from pd_groundtruth.build_renewal_queue import RenewalScore
@@ -309,6 +311,41 @@ def test_build_renewal_queue_writes_pairs_above_floor(
     with ReviewDb.connect(out) as db:
         rows = [db.get_pair(1), db.get_pair(2)]
     assert all(row is not None and row.pairing_type == PAIRING_RENEWAL for row in rows)
+
+
+def test_build_renewal_queue_persists_rows_on_interrupt(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A Ctrl-C mid-build must keep rows inserted before the interrupt.
+
+    insert_pair does not commit and ReviewDb.__exit__ only commits on a clean
+    exit, so without the finally-commit a KeyboardInterrupt would roll back the
+    whole queue. This drives the pool iterator to raise after two records and
+    asserts both survive.
+    """
+    pool = tmp_path / "pool"
+    _write_pool(pool, ("ctrl-a", "ctrl-b"))
+    lookup = _FakeLookup({"ctrl-a": (_renewal("ea"),), "ctrl-b": (_renewal("eb"),)})
+    _patch_wiring(monkeypatch, lookup, 0.9)
+
+    def _interrupting_pool(_pool: Path) -> Iterator[MarcRecord]:
+        yield _marc("ctrl-a")
+        yield _marc("ctrl-b")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(module, "_iter_pool_records", _interrupting_pool)
+    out = tmp_path / "review.db"
+    with raises(KeyboardInterrupt):
+        build_renewal_queue(
+            pool=pool,
+            index_path=tmp_path / "index.lmdb",
+            out_path=out,
+            matching_config=_config(),
+            min_score=60.0,
+        )
+    with ReviewDb.connect(out) as db:
+        assert db.get_pair(1) is not None
+        assert db.get_pair(2) is not None
 
 
 def test_build_renewal_queue_skips_below_floor(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
