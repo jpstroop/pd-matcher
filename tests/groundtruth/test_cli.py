@@ -125,9 +125,8 @@ def test_build_queue_command_defaults(tmp_path: Path) -> None:
 def test_build_renewal_queue_command_passes_arguments_and_reports(tmp_path: Path) -> None:
     summary = RenewalBuildSummary(
         records_scanned=12,
-        pairs_written=3,
-        scenario2_skipped=4,
-        scenario3_written=1,
+        renewal_havers=5,
+        reg_excluded=3,
         scenario4_written=2,
     )
     with patch("pd_groundtruth.cli.build_renewal_queue", return_value=summary) as mock_build:
@@ -157,9 +156,8 @@ def test_build_renewal_queue_command_passes_arguments_and_reports(tmp_path: Path
     assert kwargs["reg_min_score"] == 85.0
     assert kwargs["reg_scorer"] == "weighted_mean"
     assert "records_scanned=12" in result.stdout
-    assert "pairs_written=3" in result.stdout
-    assert "scenario2_skipped=4" in result.stdout
-    assert "scenario3_written=1" in result.stdout
+    assert "renewal_havers=5" in result.stdout
+    assert "reg_excluded=3" in result.stdout
     assert "scenario4_written=2" in result.stdout
 
 

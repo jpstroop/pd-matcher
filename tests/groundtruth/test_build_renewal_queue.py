@@ -1,4 +1,4 @@
-"""Unit tests for the renewal-pair review-queue builder."""
+"""Unit tests for the renewal-first review-queue builder."""
 
 from __future__ import annotations
 
@@ -6,20 +6,17 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
+from pytest import LogCaptureFixture
 from pytest import MonkeyPatch
 from pytest import raises
 
 from pd_groundtruth import build_renewal_queue as module
-from pd_groundtruth.build_renewal_queue import SCENARIO_ALREADY_RENEWED
-from pd_groundtruth.build_renewal_queue import SCENARIO_NO_REG_MATCH
-from pd_groundtruth.build_renewal_queue import SCENARIO_REG_UNLINKED
 from pd_groundtruth.build_renewal_queue import RenewalScore
-from pd_groundtruth.build_renewal_queue import _scenario_for_result
 from pd_groundtruth.build_renewal_queue import best_renewal
 from pd_groundtruth.build_renewal_queue import build_renewal_queue
-from pd_groundtruth.build_renewal_queue import renewal_pair_for
 from pd_groundtruth.build_renewal_queue import score_renewal
 from pd_groundtruth.review_db import PAIRING_RENEWAL
 from pd_groundtruth.review_db import PairInsert
@@ -33,9 +30,8 @@ from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.idf import IdfTable
+from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pipeline import _build_context
-from pd_matcher.match.result import CandidateMatch
-from pd_matcher.match.result import MatchResult
 from pd_matcher.match.scorers.context import ScorerContext
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
@@ -87,14 +83,9 @@ def _indexed_reg(uuid: str = "reg-uuid", *, was_renewed: bool = False) -> Indexe
     )
 
 
-def _candidate_match(uuid: str) -> CandidateMatch:
-    return CandidateMatch(
-        nypl_uuid=uuid,
-        nypl_year=1953,
-        combined=CombinedScore(raw=99.0, calibrated=0.99),
-        evidence=(),
-        losing_evidence=(),
-    )
+def _scored(calibrated: float) -> SimpleNamespace:
+    """A stand-in for a ``CandidateMatch`` exposing only ``combined.calibrated``."""
+    return SimpleNamespace(combined=SimpleNamespace(calibrated=calibrated))
 
 
 def _evidence(scorer: str, score: float, *, skipped: bool = False) -> Evidence:
@@ -131,6 +122,19 @@ def _calibrator() -> PlattCalibrator:
     return PlattCalibrator(
         a=-1.0, b=0.0, trained_at="2026-06-20T00:00:00+00:00", n_positive=1, n_negative=1
     )
+
+
+def _config() -> MatchingConfig:
+    return _load_default_matching_config()
+
+
+def _pairing_config() -> PairingConfig:
+    return _load_default_pairing_config()
+
+
+# --------------------------------------------------------------------------- #
+# score_renewal
+# --------------------------------------------------------------------------- #
 
 
 def test_score_renewal_builds_payload_from_fired_scorers(monkeypatch: MonkeyPatch) -> None:
@@ -194,6 +198,11 @@ def test_score_renewal_handles_renewal_without_odat(monkeypatch: MonkeyPatch) ->
     assert captured["renewal_year"] is None
 
 
+# --------------------------------------------------------------------------- #
+# best_renewal / _best_evidence
+# --------------------------------------------------------------------------- #
+
+
 def test_best_renewal_returns_none_without_candidates() -> None:
     assert best_renewal(_marc(), (), lambda _m, _r: RenewalScore(0.9, {})) is None
 
@@ -213,38 +222,41 @@ def test_best_renewal_picks_highest_calibrated() -> None:
     assert score.calibrated == 0.8
 
 
-def test_renewal_pair_for_returns_none_when_below_floor() -> None:
-    pair = renewal_pair_for(
+def test_best_renewal_keeps_first_when_later_candidate_is_worse() -> None:
+    high = _renewal(entry_id="high")
+    low = _renewal(entry_id="low")
+    scores = {"high": 0.8, "low": 0.3}
+    result = best_renewal(
         _marc(),
-        (_renewal(),),
-        score_fn=lambda _m, _r: RenewalScore(0.4, {"title": 0.4}),
-        min_calibrated=0.6,
-        audit_note="scenario 4: no registration match",
+        (high, low),
+        lambda _m, renewal: RenewalScore(scores[renewal.entry_id], {}),
     )
-    assert pair is None
+    assert result is not None
+    renewal, _score = result
+    assert renewal.entry_id == "high"
 
 
-def test_renewal_pair_for_returns_none_when_no_candidate() -> None:
-    pair = renewal_pair_for(
+def test_best_evidence_picks_higher_scoring_candidate() -> None:
+    low = _evidence("title", 0.2)
+    high = _evidence("title", 0.8)
+    assert module._best_evidence((low, high)) is high
+
+
+# --------------------------------------------------------------------------- #
+# _build_renewal_pair_insert
+# --------------------------------------------------------------------------- #
+
+
+def test_build_renewal_pair_insert_maps_renewal_fields() -> None:
+    pair = module._build_renewal_pair_insert(
         _marc(),
-        (),
-        score_fn=lambda _m, _r: RenewalScore(0.9, {}),
-        min_calibrated=0.6,
-        audit_note="scenario 4: no registration match",
+        _renewal(),
+        RenewalScore(0.85, {"title": 0.9, "claimants": 0.5}),
+        language="eng",
+        band="b80_90",
+        audit_note="scenario 4: renewal-only (no registration in odat year 1953)",
     )
-    assert pair is None
-
-
-def test_renewal_pair_for_builds_renewal_pair_insert() -> None:
-    pair = renewal_pair_for(
-        _marc(),
-        (_renewal(),),
-        score_fn=lambda _m, _r: RenewalScore(0.85, {"title": 0.9, "claimants": 0.5}),
-        min_calibrated=0.6,
-        audit_note="scenario 3: registration matched (was_renewed=False)",
-    )
-    assert pair is not None
-    assert pair.audit_note == "scenario 3: registration matched (was_renewed=False)"
+    assert pair.audit_note == "scenario 4: renewal-only (no registration in odat year 1953)"
     assert pair.pairing_type == PAIRING_RENEWAL
     assert pair.source == module.SOURCE_RENEWAL
     assert pair.band == "b80_90"
@@ -260,36 +272,61 @@ def test_renewal_pair_for_builds_renewal_pair_insert() -> None:
     assert pair.evidence_json == '{"title":0.9,"claimants":0.5}'
 
 
-def test_renewal_pair_for_handles_renewal_without_odat_or_rdat() -> None:
+def test_build_renewal_pair_insert_handles_renewal_without_odat_or_rdat() -> None:
     renewal = NyplRenRecord(id="R", entry_id="e", title="T", claimants="C")
-    pair = renewal_pair_for(
+    pair = module._build_renewal_pair_insert(
         _marc(),
-        (renewal,),
-        score_fn=lambda _m, _r: RenewalScore(0.7, {}),
-        min_calibrated=0.6,
-        audit_note="scenario 4: no registration match",
+        renewal,
+        RenewalScore(0.7, {}),
+        language="eng",
+        band="b60_70",
+        audit_note="scenario 4: renewal-only (no registration in odat year None)",
     )
-    assert pair is not None
     assert pair.cce_reg_year is None
     assert pair.cce_renewal_rdat is None
+
+
+# --------------------------------------------------------------------------- #
+# _scenario_4_note
+# --------------------------------------------------------------------------- #
+
+
+def test_scenario_4_note_names_odat_year() -> None:
+    assert (
+        module._scenario_4_note(1949)
+        == "scenario 4: renewal-only (no registration in odat year 1949)"
+    )
+
+
+def test_scenario_4_note_handles_missing_year() -> None:
+    assert (
+        module._scenario_4_note(None)
+        == "scenario 4: renewal-only (no registration in odat year None)"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# _make_reg_present_fn
+# --------------------------------------------------------------------------- #
 
 
 class _FakeLookup:
     """A stand-in for ``NyplIndexLookup`` serving canned renewal and registration data.
 
-    ``by_marc`` maps a MARC control id to its renewal candidates; ``reg_by_marc``
-    maps a control id to its registration candidates (driving the scenario arm).
-    ``get_registration`` resolves a uuid against every registration supplied.
+    ``by_marc`` maps a MARC control id to its renewal candidates. ``reg_by_year``
+    maps a ``(control_id, year)`` pair to the registration candidates returned by
+    :meth:`candidates_in_year`, so a test can prove the registration check keys
+    off an explicit year. Every ``candidates_in_year`` call is recorded.
     """
 
     def __init__(
         self,
         by_marc: dict[str, tuple[NyplRenRecord, ...]],
-        reg_by_marc: dict[str, tuple[IndexedNyplRegRecord, ...]] | None = None,
+        reg_by_year: dict[tuple[str, int], tuple[IndexedNyplRegRecord, ...]] | None = None,
     ) -> None:
         self._by_marc = by_marc
-        self._reg_by_marc = reg_by_marc or {}
-        self._reg_by_uuid = {reg.uuid: reg for regs in self._reg_by_marc.values() for reg in regs}
+        self._reg_by_year = reg_by_year or {}
+        self.candidates_in_year_calls: list[tuple[str, int]] = []
 
     def __enter__(self) -> _FakeLookup:
         return self
@@ -300,26 +337,122 @@ class _FakeLookup:
     def candidates_for_renewal(self, marc: MarcRecord, _window: int) -> tuple[NyplRenRecord, ...]:
         return self._by_marc.get(marc.control_id, ())
 
-    def candidates_for(self, marc: MarcRecord, _window: int) -> tuple[IndexedNyplRegRecord, ...]:
-        return self._reg_by_marc.get(marc.control_id, ())
+    def candidates_in_year(
+        self, marc: MarcRecord, year: int, _window: int = 0
+    ) -> tuple[IndexedNyplRegRecord, ...]:
+        self.candidates_in_year_calls.append((marc.control_id, year))
+        return self._reg_by_year.get((marc.control_id, year), ())
 
-    def get_registration(self, uuid: str) -> IndexedNyplRegRecord | None:
-        return self._reg_by_uuid.get(uuid)
 
-
-def _fake_match_record(marc: MarcRecord, *, lookup: _FakeLookup, **_kwargs: object) -> MatchResult:
-    """Stand-in for ``match_record``: the first reg candidate (if any) is the best."""
-    candidates = lookup.candidates_for(marc, 0)
-    if not candidates:
-        return MatchResult(
-            marc_control_id=marc.control_id, best=None, alternates=(), candidates_considered=0
-        )
-    return MatchResult(
-        marc_control_id=marc.control_id,
-        best=_candidate_match(candidates[0].uuid),
-        alternates=(),
-        candidates_considered=len(candidates),
+def _reg_present_fn(
+    monkeypatch: MonkeyPatch,
+    lookup: _FakeLookup,
+    *,
+    reg_scores: dict[str, float],
+    reg_min_calibrated: float,
+) -> module.RegPresentFn:
+    monkeypatch.setattr(
+        module,
+        "_score_candidate",
+        lambda _m, candidate, *_a, **_k: _scored(reg_scores.get(candidate.uuid, 0.99)),
     )
+    return module._make_reg_present_fn(
+        cast(NyplIndexLookup, lookup),
+        _config(),
+        _idf(),
+        _idf(),
+        _idf(),
+        None,
+        _FakeCombiner(0.0),
+        cast(CompiledPairings, object()),
+        reg_min_calibrated,
+    )
+
+
+def test_reg_present_fn_returns_false_for_none_year(monkeypatch: MonkeyPatch) -> None:
+    """A renewal without an ``odat`` year cannot be checked and is not present."""
+    lookup = _FakeLookup({})
+    fn = _reg_present_fn(monkeypatch, lookup, reg_scores={}, reg_min_calibrated=0.9)
+    assert fn(_marc(), None) is False
+    assert lookup.candidates_in_year_calls == []
+
+
+def test_reg_present_fn_true_when_candidate_clears_floor(monkeypatch: MonkeyPatch) -> None:
+    lookup = _FakeLookup({}, {("ctrl-1", 1953): (_indexed_reg("u1"),)})
+    fn = _reg_present_fn(monkeypatch, lookup, reg_scores={"u1": 0.95}, reg_min_calibrated=0.9)
+    assert fn(_marc(), 1953) is True
+    assert lookup.candidates_in_year_calls == [("ctrl-1", 1953)]
+
+
+def test_reg_present_fn_false_when_candidate_below_floor(monkeypatch: MonkeyPatch) -> None:
+    lookup = _FakeLookup({}, {("ctrl-1", 1953): (_indexed_reg("u1"),)})
+    fn = _reg_present_fn(monkeypatch, lookup, reg_scores={"u1": 0.5}, reg_min_calibrated=0.9)
+    assert fn(_marc(), 1953) is False
+
+
+def test_reg_present_fn_caches_context_per_marc(monkeypatch: MonkeyPatch) -> None:
+    """The per-MARC context is built once and reused across both year lookups."""
+    calls: list[str] = []
+
+    def fake_build_context(marc: MarcRecord, *_a: object) -> object:
+        calls.append(marc.control_id)
+        return object()
+
+    monkeypatch.setattr(module, "_build_context", fake_build_context)
+    lookup = _FakeLookup(
+        {}, {("ctrl-1", 1953): (_indexed_reg("u1"),), ("ctrl-1", 1954): (_indexed_reg("u2"),)}
+    )
+    fn = _reg_present_fn(
+        monkeypatch, lookup, reg_scores={"u1": 0.0, "u2": 0.0}, reg_min_calibrated=0.9
+    )
+    marc = _marc()
+    fn(marc, 1953)
+    fn(marc, 1954)
+    assert calls == ["ctrl-1"]
+
+
+# --------------------------------------------------------------------------- #
+# _make_score_fn
+# --------------------------------------------------------------------------- #
+
+
+def test_make_score_fn_caches_context_per_marc(monkeypatch: MonkeyPatch) -> None:
+    """The per-MARC context is built once and reused across that MARC's candidates."""
+    calls: list[str] = []
+
+    def fake_build_context(marc: MarcRecord, *_a: object) -> object:
+        calls.append(marc.control_id)
+        return object()
+
+    monkeypatch.setattr(module, "_build_context", fake_build_context)
+    monkeypatch.setattr(module, "score_renewal", lambda *_a: RenewalScore(0.5, {}))
+    score_fn = module._make_score_fn(_idf(), _idf(), _idf(), _config(), _FakeCombiner(0.5), None)
+    marc = _marc()
+    score_fn(marc, _renewal("a"))
+    score_fn(marc, _renewal("b"))
+    score_fn(_marc("other"), _renewal("c"))
+    assert calls == ["ctrl-1", "other"]
+
+
+# --------------------------------------------------------------------------- #
+# _load_calibrator
+# --------------------------------------------------------------------------- #
+
+
+def test_load_calibrator_returns_none_when_absent(tmp_path: Path) -> None:
+    assert module._load_calibrator(tmp_path) is None
+
+
+def test_load_calibrator_loads_when_present(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    (tmp_path / "calibrator.msgpack").write_bytes(b"unused")
+    calibrator = _calibrator()
+    monkeypatch.setattr(module, "load_calibrator", lambda _path: calibrator)
+    assert module._load_calibrator(tmp_path) is calibrator
+
+
+# --------------------------------------------------------------------------- #
+# build_renewal_queue (renewal-first integration)
+# --------------------------------------------------------------------------- #
 
 
 def _write_pool(pool: Path, control_ids: tuple[str, ...]) -> None:
@@ -334,56 +467,215 @@ def _write_pool(pool: Path, control_ids: tuple[str, ...]) -> None:
 def _patch_wiring(
     monkeypatch: MonkeyPatch,
     lookup: _FakeLookup,
-    calibrated: float,
+    renewal_calibrated: float,
+    *,
+    reg_scores: dict[str, float] | None = None,
 ) -> None:
     monkeypatch.setattr(module, "load_or_build_idf", lambda *_a, **_k: object())
     monkeypatch.setattr(module, "load_or_build_author_idf", lambda *_a, **_k: object())
     monkeypatch.setattr(module, "load_or_build_publisher_idf", lambda *_a, **_k: object())
     monkeypatch.setattr(module, "_load_calibrator", lambda _parent: None)
-    monkeypatch.setattr(module, "build_combiner", lambda _c, **_k: _FakeCombiner(calibrated))
+    monkeypatch.setattr(
+        module, "build_combiner", lambda _c, **_k: _FakeCombiner(renewal_calibrated)
+    )
     monkeypatch.setattr(module, "compile_pairings", lambda _c: object())
     monkeypatch.setattr(module, "NyplIndexLookup", lambda _path: lookup)
-    monkeypatch.setattr(module, "match_record", _fake_match_record)
     monkeypatch.setattr(
         module,
         "_make_score_fn",
-        lambda *_a, **_k: lambda _m, _r: RenewalScore(calibrated, {"title": calibrated}),
+        lambda *_a, **_k: (
+            lambda _m, _r: RenewalScore(renewal_calibrated, {"title": renewal_calibrated})
+        ),
+    )
+    scores = reg_scores or {}
+    monkeypatch.setattr(
+        module,
+        "_score_candidate",
+        lambda _m, candidate, *_a, **_k: _scored(scores.get(candidate.uuid, 0.99)),
     )
 
 
-def _config() -> MatchingConfig:
-    return _load_default_matching_config()
-
-
-def _pairing_config() -> PairingConfig:
-    return _load_default_pairing_config()
-
-
-def test_build_renewal_queue_writes_pairs_above_floor(
-    tmp_path: Path, monkeypatch: MonkeyPatch
-) -> None:
-    pool = tmp_path / "pool"
-    _write_pool(pool, ("ctrl-a", "ctrl-b"))
-    lookup = _FakeLookup({"ctrl-a": (_renewal("ea"),), "ctrl-b": (_renewal("eb"),)})
-    _patch_wiring(monkeypatch, lookup, 0.9)
-    # Force the periodic fill log to fire on the second write.
-    monkeypatch.setattr(module, "_FILL_LOG_INTERVAL", 2)
-    out = tmp_path / "review.db"
-    summary = build_renewal_queue(
-        pool=pool,
+def _run(tmp_path: Path) -> module.RenewalBuildSummary:
+    return build_renewal_queue(
+        pool=tmp_path / "pool",
         index_path=tmp_path / "index.lmdb",
-        out_path=out,
+        out_path=tmp_path / "review.db",
         matching_config=_config(),
         pairing_config=_pairing_config(),
         min_score=60.0,
         reg_min_score=90.0,
         reg_scorer="learned",
     )
+
+
+def test_build_renewal_queue_emits_scenario_4_when_no_registration(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A renewal-haver with no registration in the odat year yields a scenario-4 pair."""
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    lookup = _FakeLookup({"ctrl-a": (_renewal("ea", odat_year=1953),)})
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    summary = _run(tmp_path)
+    assert summary.records_scanned == 1
+    assert summary.renewal_havers == 1
+    assert summary.reg_excluded == 0
+    assert summary.scenario4_written == 1
+    assert lookup.candidates_in_year_calls == [("ctrl-a", 1953)]
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair = db.get_pair(1)
+    assert pair is not None
+    assert pair.pairing_type == PAIRING_RENEWAL
+    assert pair.audit_note == "scenario 4: renewal-only (no registration in odat year 1953)"
+
+
+def test_build_renewal_queue_excludes_when_registration_found(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A renewal-haver WITH a registration at or above the floor is excluded."""
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    lookup = _FakeLookup(
+        {"ctrl-a": (_renewal("ea", odat_year=1953),)},
+        {("ctrl-a", 1953): (_indexed_reg("u1"),)},
+    )
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    summary = _run(tmp_path)
+    assert summary.renewal_havers == 1
+    assert summary.reg_excluded == 1
+    assert summary.scenario4_written == 0
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        assert db.get_pair(1) is None
+
+
+def test_build_renewal_queue_emits_when_registration_below_floor(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A registration present but below the reg floor does not exclude the book."""
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    lookup = _FakeLookup(
+        {"ctrl-a": (_renewal("ea", odat_year=1953),)},
+        {("ctrl-a", 1953): (_indexed_reg("u1"),)},
+    )
+    _patch_wiring(monkeypatch, lookup, 0.9, reg_scores={"u1": 0.5})
+    summary = _run(tmp_path)
+    assert summary.reg_excluded == 0
+    assert summary.scenario4_written == 1
+
+
+def test_build_renewal_queue_reg_check_uses_odat_year_not_pub_year(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """The registration check keys off the renewal's odat year, not the MARC pub year.
+
+    The MARC's publication year is 1953 (from the 008 fixture) but the best
+    renewal's ``odat`` year is 1949. A registration planted only at 1949 must
+    exclude the book, proving the check looked at the odat year.
+    """
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    lookup = _FakeLookup(
+        {"ctrl-a": (_renewal("ea", odat_year=1949),)},
+        {("ctrl-a", 1949): (_indexed_reg("u1"),)},
+    )
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    summary = _run(tmp_path)
+    assert summary.reg_excluded == 1
+    assert summary.scenario4_written == 0
+    assert lookup.candidates_in_year_calls == [("ctrl-a", 1949)]
+
+
+def test_build_renewal_queue_ignores_registration_in_pub_year(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A registration only in the MARC pub year (not the odat year) is ignored."""
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    lookup = _FakeLookup(
+        {"ctrl-a": (_renewal("ea", odat_year=1949),)},
+        {("ctrl-a", 1953): (_indexed_reg("u1"),)},
+    )
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    summary = _run(tmp_path)
+    assert summary.reg_excluded == 0
+    assert summary.scenario4_written == 1
+    assert lookup.candidates_in_year_calls == [("ctrl-a", 1949)]
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        pair = db.get_pair(1)
+    assert pair is not None
+    assert pair.audit_note == "scenario 4: renewal-only (no registration in odat year 1949)"
+
+
+def test_build_renewal_queue_skips_non_renewal_haver_without_running_reg_check(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A best renewal below the floor is skipped and the reg check never runs (efficiency)."""
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    lookup = _FakeLookup(
+        {"ctrl-a": (_renewal("ea", odat_year=1953),)},
+        {("ctrl-a", 1953): (_indexed_reg("u1"),)},
+    )
+    reg_calls: list[str] = []
+    _patch_wiring(monkeypatch, lookup, 0.3)
+
+    def _recording_score(
+        _m: object, candidate: IndexedNyplRegRecord, *_a: object, **_k: object
+    ) -> SimpleNamespace:
+        reg_calls.append(candidate.uuid)
+        return _scored(0.99)
+
+    monkeypatch.setattr(module, "_score_candidate", _recording_score)
+    summary = _run(tmp_path)
+    assert summary.records_scanned == 1
+    assert summary.renewal_havers == 0
+    assert summary.scenario4_written == 0
+    assert reg_calls == []
+    assert lookup.candidates_in_year_calls == []
+
+
+def test_build_renewal_queue_skips_marc_without_renewal_candidates(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A MARC with no renewal candidates at all is skipped before the reg check."""
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    lookup = _FakeLookup({})
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    summary = _run(tmp_path)
+    assert summary.records_scanned == 1
+    assert summary.renewal_havers == 0
+    assert summary.scenario4_written == 0
+    assert lookup.candidates_in_year_calls == []
+
+
+def test_build_renewal_queue_writes_multiple_pairs_and_commits(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Two scenario-4 books are both written; the fill-interval commit fires."""
+    _write_pool(tmp_path / "pool", ("ctrl-a", "ctrl-b"))
+    lookup = _FakeLookup(
+        {"ctrl-a": (_renewal("ea", odat_year=1953),), "ctrl-b": (_renewal("eb", odat_year=1953),)}
+    )
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    monkeypatch.setattr(module, "_FILL_LOG_INTERVAL", 1)
+    summary = _run(tmp_path)
     assert summary.records_scanned == 2
-    assert summary.pairs_written == 2
-    with ReviewDb.connect(out) as db:
+    assert summary.scenario4_written == 2
+    with ReviewDb.connect(tmp_path / "review.db") as db:
         rows = [db.get_pair(1), db.get_pair(2)]
     assert all(row is not None and row.pairing_type == PAIRING_RENEWAL for row in rows)
+
+
+def test_build_renewal_queue_skips_marcs_already_in_db(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    _write_pool(tmp_path / "pool", ("ctrl-a", "ctrl-b"))
+    out = tmp_path / "review.db"
+    with ReviewDb.connect(out) as db:
+        db.insert_pair(_existing_registration_pair("ctrl-a"))
+    lookup = _FakeLookup(
+        {"ctrl-a": (_renewal("ea", odat_year=1953),), "ctrl-b": (_renewal("eb", odat_year=1953),)}
+    )
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    summary = _run(tmp_path)
+    assert summary.records_scanned == 1
+    assert summary.scenario4_written == 1
+    assert lookup.candidates_in_year_calls == [("ctrl-b", 1953)]
 
 
 def test_build_renewal_queue_persists_rows_on_interrupt(
@@ -396,9 +688,10 @@ def test_build_renewal_queue_persists_rows_on_interrupt(
     whole queue. This drives the pool iterator to raise after two records and
     asserts both survive.
     """
-    pool = tmp_path / "pool"
-    _write_pool(pool, ("ctrl-a", "ctrl-b"))
-    lookup = _FakeLookup({"ctrl-a": (_renewal("ea"),), "ctrl-b": (_renewal("eb"),)})
+    _write_pool(tmp_path / "pool", ("ctrl-a", "ctrl-b"))
+    lookup = _FakeLookup(
+        {"ctrl-a": (_renewal("ea", odat_year=1953),), "ctrl-b": (_renewal("eb", odat_year=1953),)}
+    )
     _patch_wiring(monkeypatch, lookup, 0.9)
 
     def _interrupting_pool(_pool: Path) -> Iterator[MarcRecord]:
@@ -407,66 +700,24 @@ def test_build_renewal_queue_persists_rows_on_interrupt(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(module, "_iter_pool_records", _interrupting_pool)
-    out = tmp_path / "review.db"
     with raises(KeyboardInterrupt):
-        build_renewal_queue(
-            pool=pool,
-            index_path=tmp_path / "index.lmdb",
-            out_path=out,
-            matching_config=_config(),
-            pairing_config=_pairing_config(),
-            min_score=60.0,
-            reg_min_score=90.0,
-            reg_scorer="learned",
-        )
-    with ReviewDb.connect(out) as db:
+        _run(tmp_path)
+    with ReviewDb.connect(tmp_path / "review.db") as db:
         assert db.get_pair(1) is not None
         assert db.get_pair(2) is not None
 
 
-def test_build_renewal_queue_skips_below_floor(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    pool = tmp_path / "pool"
-    _write_pool(pool, ("ctrl-a",))
-    lookup = _FakeLookup({"ctrl-a": (_renewal("ea"),)})
-    _patch_wiring(monkeypatch, lookup, 0.3)
-    out = tmp_path / "review.db"
-    summary = build_renewal_queue(
-        pool=pool,
-        index_path=tmp_path / "index.lmdb",
-        out_path=out,
-        matching_config=_config(),
-        pairing_config=_pairing_config(),
-        min_score=60.0,
-        reg_min_score=90.0,
-        reg_scorer="learned",
-    )
-    assert summary.records_scanned == 1
-    assert summary.pairs_written == 0
-
-
-def test_build_renewal_queue_skips_marcs_already_in_db(
-    tmp_path: Path, monkeypatch: MonkeyPatch
+def test_build_renewal_queue_logs_scanned_progress(
+    tmp_path: Path, monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
 ) -> None:
-    pool = tmp_path / "pool"
-    _write_pool(pool, ("ctrl-a", "ctrl-b"))
-    out = tmp_path / "review.db"
-    # ctrl-a is already queued (as a registration pair) and must not be redone.
-    with ReviewDb.connect(out) as db:
-        db.insert_pair(_existing_registration_pair("ctrl-a"))
-    lookup = _FakeLookup({"ctrl-a": (_renewal("ea"),), "ctrl-b": (_renewal("eb"),)})
+    """The scanned-progress log fires on the scanned interval."""
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    lookup = _FakeLookup({"ctrl-a": (_renewal("ea", odat_year=1953),)})
     _patch_wiring(monkeypatch, lookup, 0.9)
-    summary = build_renewal_queue(
-        pool=pool,
-        index_path=tmp_path / "index.lmdb",
-        out_path=out,
-        matching_config=_config(),
-        pairing_config=_pairing_config(),
-        min_score=60.0,
-        reg_min_score=90.0,
-        reg_scorer="learned",
-    )
-    assert summary.records_scanned == 1
-    assert summary.pairs_written == 1
+    monkeypatch.setattr(module, "_SCANNED_LOG_INTERVAL", 1)
+    with caplog.at_level("INFO", logger="pd_groundtruth.build_renewal_queue"):
+        _run(tmp_path)
+    assert any("renewal queue: scanned=1" in message for message in caplog.messages)
 
 
 def _existing_registration_pair(control_id: str) -> PairInsert:
@@ -492,211 +743,3 @@ def _existing_registration_pair(control_id: str) -> PairInsert:
         cce_regnum="R1",
         evidence_json="{}",
     )
-
-
-def test_scenario_for_result_returns_no_reg_match_when_best_absent() -> None:
-    result = MatchResult(marc_control_id="ctrl", best=None, alternates=(), candidates_considered=3)
-    lookup = cast(NyplIndexLookup, _FakeLookup({}))
-    assert _scenario_for_result(result, lookup) == SCENARIO_NO_REG_MATCH
-
-
-def test_scenario_for_result_returns_already_renewed_when_best_was_renewed() -> None:
-    lookup = cast(
-        NyplIndexLookup, _FakeLookup({}, {"ctrl": (_indexed_reg("u1", was_renewed=True),)})
-    )
-    result = MatchResult(
-        marc_control_id="ctrl",
-        best=_candidate_match("u1"),
-        alternates=(),
-        candidates_considered=1,
-    )
-    assert _scenario_for_result(result, lookup) == SCENARIO_ALREADY_RENEWED
-
-
-def test_scenario_for_result_returns_reg_unlinked_when_best_not_renewed() -> None:
-    lookup = cast(
-        NyplIndexLookup, _FakeLookup({}, {"ctrl": (_indexed_reg("u1", was_renewed=False),)})
-    )
-    result = MatchResult(
-        marc_control_id="ctrl",
-        best=_candidate_match("u1"),
-        alternates=(),
-        candidates_considered=1,
-    )
-    assert _scenario_for_result(result, lookup) == SCENARIO_REG_UNLINKED
-
-
-def test_scenario_for_result_treats_missing_registration_as_unlinked() -> None:
-    result = MatchResult(
-        marc_control_id="ctrl",
-        best=_candidate_match("ghost"),
-        alternates=(),
-        candidates_considered=1,
-    )
-    lookup = cast(NyplIndexLookup, _FakeLookup({}))
-    assert _scenario_for_result(result, lookup) == SCENARIO_REG_UNLINKED
-
-
-def test_build_renewal_queue_skips_scenario_2(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """A MARC whose confident registration is already renewed is not queued."""
-    pool = tmp_path / "pool"
-    _write_pool(pool, ("ctrl-a",))
-    lookup = _FakeLookup(
-        {"ctrl-a": (_renewal("ea"),)},
-        {"ctrl-a": (_indexed_reg("u-a", was_renewed=True),)},
-    )
-    _patch_wiring(monkeypatch, lookup, 0.9)
-    out = tmp_path / "review.db"
-    summary = build_renewal_queue(
-        pool=pool,
-        index_path=tmp_path / "index.lmdb",
-        out_path=out,
-        matching_config=_config(),
-        pairing_config=_pairing_config(),
-        min_score=60.0,
-        reg_min_score=90.0,
-        reg_scorer="learned",
-    )
-    assert summary.records_scanned == 1
-    assert summary.pairs_written == 0
-    assert summary.scenario2_skipped == 1
-    with ReviewDb.connect(out) as db:
-        assert db.get_pair(1) is None
-
-
-def test_build_renewal_queue_writes_scenario_3(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """A confident-but-unrenewed registration yields a scenario-3 renewal pair."""
-    pool = tmp_path / "pool"
-    _write_pool(pool, ("ctrl-a",))
-    lookup = _FakeLookup(
-        {"ctrl-a": (_renewal("ea"),)},
-        {"ctrl-a": (_indexed_reg("u-a", was_renewed=False),)},
-    )
-    _patch_wiring(monkeypatch, lookup, 0.9)
-    out = tmp_path / "review.db"
-    summary = build_renewal_queue(
-        pool=pool,
-        index_path=tmp_path / "index.lmdb",
-        out_path=out,
-        matching_config=_config(),
-        pairing_config=_pairing_config(),
-        min_score=60.0,
-        reg_min_score=90.0,
-        reg_scorer="learned",
-    )
-    assert summary.records_scanned == 1
-    assert summary.pairs_written == 1
-    assert summary.scenario3_written == 1
-    with ReviewDb.connect(out) as db:
-        pair = db.get_pair(1)
-    assert pair is not None
-    assert pair.audit_note == "scenario 3: registration matched (was_renewed=False)"
-
-
-def test_build_renewal_queue_writes_scenario_4(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """A MARC with no confident registration yields a scenario-4 renewal pair."""
-    pool = tmp_path / "pool"
-    _write_pool(pool, ("ctrl-a",))
-    lookup = _FakeLookup({"ctrl-a": (_renewal("ea"),)})
-    _patch_wiring(monkeypatch, lookup, 0.9)
-    out = tmp_path / "review.db"
-    summary = build_renewal_queue(
-        pool=pool,
-        index_path=tmp_path / "index.lmdb",
-        out_path=out,
-        matching_config=_config(),
-        pairing_config=_pairing_config(),
-        min_score=60.0,
-        reg_min_score=90.0,
-        reg_scorer="learned",
-    )
-    assert summary.records_scanned == 1
-    assert summary.pairs_written == 1
-    assert summary.scenario4_written == 1
-    with ReviewDb.connect(out) as db:
-        pair = db.get_pair(1)
-    assert pair is not None
-    assert pair.audit_note == "scenario 4: no registration match"
-
-
-def test_build_renewal_queue_scenario_counts(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """Mixed scenarios produce correct scanned/skip/write counts in the summary."""
-    pool = tmp_path / "pool"
-    _write_pool(pool, ("ctrl-2", "ctrl-3", "ctrl-4"))
-    lookup = _FakeLookup(
-        {
-            "ctrl-2": (_renewal("e2"),),
-            "ctrl-3": (_renewal("e3"),),
-            "ctrl-4": (_renewal("e4"),),
-        },
-        {
-            "ctrl-2": (_indexed_reg("u-2", was_renewed=True),),
-            "ctrl-3": (_indexed_reg("u-3", was_renewed=False),),
-        },
-    )
-    _patch_wiring(monkeypatch, lookup, 0.9)
-    out = tmp_path / "review.db"
-    summary = build_renewal_queue(
-        pool=pool,
-        index_path=tmp_path / "index.lmdb",
-        out_path=out,
-        matching_config=_config(),
-        pairing_config=_pairing_config(),
-        min_score=60.0,
-        reg_min_score=90.0,
-        reg_scorer="learned",
-    )
-    assert summary.records_scanned == 3
-    assert summary.scenario2_skipped == 1
-    assert summary.scenario3_written == 1
-    assert summary.scenario4_written == 1
-    assert summary.pairs_written == 2
-
-
-def test_make_score_fn_caches_context_per_marc(monkeypatch: MonkeyPatch) -> None:
-    """The per-MARC context is built once and reused across that MARC's candidates."""
-    calls: list[str] = []
-
-    def fake_build_context(marc: MarcRecord, *_a: object) -> object:
-        calls.append(marc.control_id)
-        return object()
-
-    monkeypatch.setattr(module, "_build_context", fake_build_context)
-    monkeypatch.setattr(module, "score_renewal", lambda *_a: RenewalScore(0.5, {}))
-    score_fn = module._make_score_fn(_idf(), _idf(), _idf(), _config(), _FakeCombiner(0.5), None)
-    marc = _marc()
-    score_fn(marc, _renewal("a"))
-    score_fn(marc, _renewal("b"))
-    score_fn(_marc("other"), _renewal("c"))
-    assert calls == ["ctrl-1", "other"]
-
-
-def test_best_evidence_picks_higher_scoring_candidate() -> None:
-    low = _evidence("title", 0.2)
-    high = _evidence("title", 0.8)
-    assert module._best_evidence((low, high)) is high
-
-
-def test_best_renewal_keeps_first_when_later_candidate_is_worse() -> None:
-    high = _renewal(entry_id="high")
-    low = _renewal(entry_id="low")
-    scores = {"high": 0.8, "low": 0.3}
-    result = best_renewal(
-        _marc(),
-        (high, low),
-        lambda _m, renewal: RenewalScore(scores[renewal.entry_id], {}),
-    )
-    assert result is not None
-    renewal, _score = result
-    assert renewal.entry_id == "high"
-
-
-def test_load_calibrator_returns_none_when_absent(tmp_path: Path) -> None:
-    assert module._load_calibrator(tmp_path) is None
-
-
-def test_load_calibrator_loads_when_present(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    (tmp_path / "calibrator.msgpack").write_bytes(b"unused")
-    calibrator = _calibrator()
-    monkeypatch.setattr(module, "load_calibrator", lambda _path: calibrator)
-    assert module._load_calibrator(tmp_path) is calibrator

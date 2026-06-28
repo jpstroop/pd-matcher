@@ -188,19 +188,45 @@ class NyplIndexLookup:
             candidates.update(self._postings(self._store.publisher_index, token))
         return candidates
 
+    def _candidates_intersecting_year(
+        self,
+        marc: MarcRecord,
+        year: int,
+        window: int,
+    ) -> Iterator[IndexedNyplRegRecord]:
+        """Yield registrations in ``[year-window, year+window]`` sharing a field token.
+
+        The shared retrieval core behind :meth:`candidates_for` and
+        :meth:`candidates_in_year`: it intersects the year set for ``year`` with
+        the union of registrations sharing a title/author/publisher token with
+        ``marc``. Nothing is yielded when either side is empty.
+        """
+        year_set = self._year_candidates(year, window)
+        if not year_set:
+            return
+        token_set = self._token_candidates(marc)
+        if not token_set:
+            return
+        for uuid in year_set & token_set:
+            record = self.get_registration(uuid)
+            if record is not None:
+                yield record
+
     def candidates_for(
         self,
         marc: MarcRecord,
         window: int = 0,
     ) -> Iterator[IndexedNyplRegRecord]:
-        """Yield registrations sharing a year AND at least one field token.
+        """Yield registrations sharing ``marc``'s publication year AND a field token.
 
         Candidate retrieval (cheap) is separated from scoring (expensive):
         rather than scoring an entire year bucket, only registrations that
         both fall inside the year window and share a title/author/publisher
         token with ``marc`` are returned. The token side is a UNION across
         all query tokens (favouring recall); the final candidate set is the
-        INTERSECTION of the year set and the token set.
+        INTERSECTION of the year set and the token set. The year is taken from
+        ``marc.publication_year``; use :meth:`candidates_in_year` to pin a
+        different year.
 
         Args:
             marc: The MARC record to retrieve candidates for.
@@ -213,16 +239,34 @@ class NyplIndexLookup:
         """
         if marc.publication_year is None:
             return
-        year_set = self._year_candidates(marc.publication_year, window)
-        if not year_set:
-            return
-        token_set = self._token_candidates(marc)
-        if not token_set:
-            return
-        for uuid in year_set & token_set:
-            record = self.get_registration(uuid)
-            if record is not None:
-                yield record
+        yield from self._candidates_intersecting_year(marc, marc.publication_year, window)
+
+    def candidates_in_year(
+        self,
+        marc: MarcRecord,
+        year: int,
+        window: int = 0,
+    ) -> Iterator[IndexedNyplRegRecord]:
+        """Yield registrations in an EXPLICIT ``year`` sharing a field token with ``marc``.
+
+        Identical to :meth:`candidates_for` except the year window is centred on
+        the supplied ``year`` rather than ``marc.publication_year``. This is the
+        renewal-first registration-presence path: a renewal's original
+        registration year (``odat``) is the relevant year to look a registration
+        up in, which is generally not the MARC's publication year.
+
+        Args:
+            marc: The MARC record supplying the title/author/publisher tokens.
+            year: The registration year to centre the window on (e.g. a
+                renewal's ``odat`` year).
+            window: Inclusive year radius; ``0`` restricts to the exact year.
+
+        Yields:
+            :class:`IndexedNyplRegRecord` instances, deduplicated by uuid.
+            Nothing is yielded when the year set is empty or the record shares
+            no token.
+        """
+        yield from self._candidates_intersecting_year(marc, year, window)
 
     def _renewal_year_candidates(self, year: int, window: int) -> set[str]:
         """Return the union of renewal entry ids across the ``ren_by_year`` window buckets."""

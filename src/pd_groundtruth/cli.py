@@ -522,21 +522,27 @@ def build_renewal_queue_command(
         float,
         Option(
             "--min-score",
-            help="Score floor (0-100); only the best renewal candidate at or above it is queued.",
+            help=(
+                "Renewal-arm score floor (0-100); a MARC whose best renewal scores below it "
+                "is not a renewal-haver and is skipped before the registration check runs."
+            ),
         ),
     ] = _DEFAULT_RENEWAL_MIN_SCORE,
     reg_min_score: Annotated[
         float,
         Option(
             "--reg-min-score",
-            help="Registration-arm score floor (0-100) separating scenario 2/3 from scenario 4.",
+            help=(
+                "Registration-arm score floor (0-100); a registration at or above it in the "
+                "renewal's odat year excludes the book (scenario 2/3, not scenario 4)."
+            ),
         ),
     ] = _DEFAULT_REG_MIN_SCORE,
     reg_scorer: Annotated[
         _ScorerChoice,
         Option(
             "--reg-scorer",
-            help="Combiner for the registration arm (weighted_mean|learned).",
+            help="Combiner for the registration check (weighted_mean|learned).",
         ),
     ] = _DEFAULT_REG_SCORER,
     log_file: Annotated[
@@ -544,19 +550,22 @@ def build_renewal_queue_command(
         Option("--log-file", help="Override the auto-generated log file path."),
     ] = None,
 ) -> None:
-    """Retrieve, score, and queue high-value MARC↔renewal pairs for labeling.
+    """Queue scenario-4 (renewal-only) MARC↔renewal pairs for labeling.
 
-    For every pool MARC not already in the ``--out`` review DB, first runs the
-    production registration matcher (``--reg-scorer`` with the ``--reg-min-score``
-    floor) to classify the MARC:
+    Renewal-first: for every pool MARC not already in the ``--out`` review DB the
+    cheap renewal search runs first, keeping only books whose best renewal clears
+    ``--min-score`` (the renewal-havers). Each renewal-haver is then checked for a
+    registration in the renewal's original-registration (``odat``) year using
+    ``--reg-scorer`` and the ``--reg-min-score`` floor:
 
-    * scenario 2 (registration matches and is already renewed) is skipped;
-    * scenario 3 (registration matches but is unrenewed) and scenario 4 (no
-      registration match) run the renewal arm.
+    * a registration at or above the floor excludes the book (scenario 2/3 — a
+      registration exists);
+    * no registration in the ``odat`` year emits the renewal as a scenario-4
+      ``pairing_type="renewal"`` pair with an audit note.
 
-    The best renewal candidate scoring at or above ``--min-score`` is appended
-    as a ``pairing_type="renewal"`` pair carrying a scenario ``audit_note``.
-    Existing registration pairs are left untouched and never duplicated.
+    The expensive registration check only ever runs for renewal-havers, and only
+    within the single ``odat`` year. Existing registration pairs are left
+    untouched and never duplicated.
     """
     _configure_logging("build-renewal-queue", log_file)
     summary = build_renewal_queue(
@@ -571,9 +580,8 @@ def build_renewal_queue_command(
     )
     echo(
         f"records_scanned={summary.records_scanned} "
-        f"pairs_written={summary.pairs_written} "
-        f"scenario2_skipped={summary.scenario2_skipped} "
-        f"scenario3_written={summary.scenario3_written} "
+        f"renewal_havers={summary.renewal_havers} "
+        f"reg_excluded={summary.reg_excluded} "
         f"scenario4_written={summary.scenario4_written}"
     )
 

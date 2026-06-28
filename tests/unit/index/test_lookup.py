@@ -241,6 +241,46 @@ def test_candidates_for_skips_uuid_with_no_registration(tmp_path: Path) -> None:
     assert records == []
 
 
+def test_candidates_in_year_uses_explicit_year_not_publication_year(tmp_path: Path) -> None:
+    """The explicit year drives retrieval even when it differs from the MARC year."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        # MARC publication year is 1962, but the explicit year 1940 reaches the
+        # bucket holding UUID-0001 (which shares the ``widgets`` title token).
+        marc = _marc(title="A study of widgets", publication_year=1962)
+        records = list(lookup.candidates_in_year(marc, 1940))
+    assert [r.uuid for r in records] == ["UUID-0001"]
+
+
+def test_candidates_in_year_yields_nothing_when_year_bucket_empty(tmp_path: Path) -> None:
+    """An explicit year with no registrations yields nothing even with shared tokens."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="A study of widgets", publication_year=1940)
+        records = list(lookup.candidates_in_year(marc, 1800))
+    assert records == []
+
+
+def test_candidates_in_year_yields_nothing_without_shared_token(tmp_path: Path) -> None:
+    """A populated year but no shared token yields nothing (token set empty)."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="Zzz qqq xyzzy", publication_year=1940)
+        records = list(lookup.candidates_in_year(marc, 1940))
+    assert records == []
+
+
+def test_candidates_in_year_window_widens_year_set(tmp_path: Path) -> None:
+    """A non-zero window reaches an adjacent year's token sharer."""
+    out_path = _build_tiny_index(tmp_path)
+    with NyplIndexLookup(out_path) as lookup:
+        marc = _marc(title="folie", publication_year=2000)
+        zero_window = list(lookup.candidates_in_year(marc, 1963, window=0))
+        widened = list(lookup.candidates_in_year(marc, 1963, window=1))
+    assert zero_window == []
+    assert [r.uuid for r in widened] == ["UUID-0011"]
+
+
 def test_candidates_for_renewal_returns_year_and_title_token_sharer(tmp_path: Path) -> None:
     """A title token shared with entry-001 in the odat-1940 bucket retrieves it."""
     out_path = _build_tiny_index(tmp_path)
