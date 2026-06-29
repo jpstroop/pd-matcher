@@ -26,7 +26,19 @@ A registration matched, and that registration is already linked to a renewal in 
 
 A registration matched, but its `was_renewed` flag is `False` — no renewal was joined to it. Read naively, this says "registered, never renewed," which is exactly the 1909-Act pattern that *generally* falls into the public domain. That reading is a **trap**.
 
-`was_renewed=False` means only that *the precomputed registration↔renewal join found no renewal* — not that no renewal exists. A renewal can be real and still go unjoined: the renewal side may carry a date or a registration number the join couldn't reconcile, or the renewal may sit in a part of the CCE the registration corpus doesn't cover. Treating scenario 3 as public domain without further checking is how you publish a false positive on a work that was actually renewed. This is the scenario the **renewal matcher** exists to re-examine — it goes looking for the renewal the join missed before anyone trusts the "not renewed" reading.
+`was_renewed=False` is an ambiguous *observable state*, not a verdict: it means only that *the precomputed registration↔renewal join found no renewal* — not that no renewal exists. A renewal can be real and still go unjoined (the renewal side may carry a date or a registration number the join couldn't reconcile, or the renewal may sit in a part of the CCE the registration corpus doesn't cover). So before anyone trusts the "not renewed" reading, the **renewal matcher** re-examines the work — it goes looking for the renewal the join missed. That re-examination resolves the single `was_renewed=False` state into one of two fundamentally different outcomes, distinguished by whether a renewal is a *fact in the data* (3a) or an *inference of its absence* (3b).
+
+#### 3a. Registration matched, renewal exists but unlinked — in copyright
+
+The renewal record *is* in the NYPL data; the join simply missed it (a date or number it couldn't reconcile, or a coverage gap). The renewal matcher finds it. A found renewal is a **positive, verifiable MARC↔renewal link**: the work was renewed, so it is **in copyright**. This is the false-PD trap *caught* — the save. Because it is a real link between two records, it is a pair you can label and study like any other.
+
+#### 3b. Registration matched, no renewal found — the public-domain candidate
+
+The renewal matcher searches and finds nothing. This is the project's headline outcome — **registered, not renewed**, the 1909-Act public-domain pattern — but be precise about what kind of claim it is. There is no renewal record to point at, so 3b is an **inference from absence, not a fact in the data**. We can never *prove* a work was never renewed; the strongest defensible claim is "we searched both the precomputed join *and* the renewal matcher and found nothing." It is therefore inherently **softer** than 3a: a renewal could still exist in some CCE corpus we don't hold. And it is **not a MARC↔renewal pair** — there is no second record to link to. It is a record-level assertion *about the registered work*: "renewal-searched, none found."
+
+The whole reason to separate 3a from 3b is this data-fact-versus-inference distinction. 3a is hard evidence — a link you can verify; 3b is an inference — an absence you can only attest you searched for. Scenario 3 is the ambiguous observable, and 3a and 3b are what it resolves into.
+
+This resolution is a *process* (the renewal matcher plus a re-examination of the verified vault, issue [#107](https://github.com/jpstroop/pd-matcher/issues/107)), and the data model does not yet record its outcome: `was_renewed=False` is a single boolean that cannot distinguish 3b (renewal-searched, confirmed none) from "not yet re-examined," and 3b — having no second record — is not a pair the labeling queue can surface today. The schema and labeling-tool design for recording the renewal-search outcome is tracked as issue [#109](https://github.com/jpstroop/pd-matcher/issues/109).
 
 ### 4. Renewal-only — renewal matched, registration not
 
@@ -65,7 +77,8 @@ The two subsystems each touch different scenarios. Keep them distinct: `pd-match
 | Scenario | Where it comes from |
 |---|---|
 | 2 — registered and renewed | The precomputed `was_renewed=True` join (index-build time). |
-| 3 — registered, renewal unlinked | The **verified vault**, re-examined for renewals the join missed (issue [#107](https://github.com/jpstroop/pd-matcher/issues/107)). |
+| 3a — registered, renewal exists but unlinked | The **verified vault**, re-examined for renewals the join missed (issue [#107](https://github.com/jpstroop/pd-matcher/issues/107)); a found renewal becomes a verifiable MARC↔renewal link. |
+| 3b — registered, no renewal found | The same re-examination when it turns up nothing; recording this "renewal-searched, none found" outcome is future work (issue [#109](https://github.com/jpstroop/pd-matcher/issues/109)). |
 | 4 — renewal-only | The **renewal-first queue** (`pd-groundtruth build-renewal-queue`). |
 
 The vault records *which* CCE pathway surfaced each pair in its `match_source` field — `registration`, `renewal`, or `both` (the `both` value is reserved for a future pipeline that links a pair through both pathways and is not produced yet). On the review side the discriminator is the pair's `pairing_type` (`registration` or `renewal`); the labeling code maps `pairing_type="renewal"` to `match_source="renewal"`.
