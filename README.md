@@ -86,6 +86,7 @@ pdm run python -c "import lightgbm; print(lightgbm.__version__)"
 | Label pairs | [docs/LABELING_WORKFLOW.md](docs/LABELING_WORKFLOW.md) (operational) + [docs/LABELING_GUIDE.md](docs/LABELING_GUIDE.md) (decision rules) |
 | Understand the matching algorithm | [docs/DESIGN.md](docs/DESIGN.md) |
 | Understand candidate retrieval vs scoring | [docs/MATCHING_ARCHITECTURE.md](docs/MATCHING_ARCHITECTURE.md) |
+| Understand what a match says about copyright status | [docs/COPYRIGHT_SCENARIOS.md](docs/COPYRIGHT_SCENARIOS.md) |
 | Train and use the learned (LightGBM) matcher | [docs/LEARNED_MATCHER.md](docs/LEARNED_MATCHER.md) |
 | Ship a code change | [docs/PHASE_WORKFLOW.md](docs/PHASE_WORKFLOW.md) |
 | Look up a term | [docs/GLOSSARY.md](docs/GLOSSARY.md) |
