@@ -83,12 +83,12 @@ The two subsystems each touch different scenarios. Keep them distinct: `pd-match
 
 The vault records *which* CCE pathway surfaced each pair in its `match_source` field — `registration`, `renewal`, or `both` (the `both` value is reserved for a future pipeline that links a pair through both pathways and is not produced yet). On the review side the discriminator is the pair's `pairing_type` (`registration` or `renewal`); the labeling code maps `pairing_type="renewal"` to `match_source="renewal"`.
 
-The scenario-4 queue is **renewal-first**: for every in-scope pool MARC it runs the cheap renewal search first, keeps only books whose best renewal clears the floor, then checks for a registration *within the renewal's `odat` year* (not the MARC's publication year). Only when no registration clears the floor in that year is the book emitted as a `pairing_type="renewal"` candidate for labeling. Build it with:
+The scenario-4 queue is **renewal-first**: for every in-scope pool MARC it runs the cheap renewal search first and keeps only books whose best renewal clears the floor. Each surviving best renewal is then checked against the **joined-renewal-id set** — the renewal ids that a registration already in the index links to, derived once at startup from the index's precomputed `was_renewed` / `renewal_id` fields. A renewal in that set is *joined* (its work is already determined by a registration we hold) and is dropped; only an **unjoined** renewal is emitted as a `pairing_type="renewal"` candidate for labeling. Build it with:
 
 ```
 pdm run pd-groundtruth build-renewal-queue --pool data/candidates --index caches/cce.lmdb --out data/review.db
 ```
 
-The registration check defaults to the **learned** combiner (`--reg-scorer learned`, floor `--reg-min-score 90`), while the renewal arm uses the zero-dependency **weighted-mean** combiner (the default engine combiner) at floor `--min-score 60`, because the renewal pathway is untrained. This is the renewal-first builder for issue [#21](https://github.com/jpstroop/pd-matcher/issues/21), in `src/pd_groundtruth/build_renewal_queue.py`.
+The join check is an O(1) set-membership test and needs no index rebuild — the joined-id set is computed at runtime from data already stored. The renewal arm uses the zero-dependency **weighted-mean** combiner (the default engine combiner) at floor `--min-score 60`, because the renewal pathway is untrained. This is the renewal-first builder for issue [#21](https://github.com/jpstroop/pd-matcher/issues/21), in `src/pd_groundtruth/build_renewal_queue.py`.
 
 Independent MARC↔renewal matching as a first-class `pd-matcher` capability — surfacing scenario-4 links at production scale rather than only as a labeling queue — is tracked as issue [#45](https://github.com/jpstroop/pd-matcher/issues/45).

@@ -2,42 +2,46 @@
 
 The registration queue (:mod:`pd_groundtruth.build_queue`) proposes
 ``(MARC, registration)`` pairs; this builder is its renewal-side sibling. It is
-*renewal-first*: the cheap renewal search runs before the expensive
-registration check, so the registration matcher only ever touches the small
-fraction of pool books that actually have a renewal.
+*renewal-first*: the cheap renewal search runs before the cheap join check, so
+the build only ever emits books whose best renewal is not already joined to a
+registration we hold.
+
+A scenario-4 candidate is a renewal that is **not joined to any registration in
+our index** — its underlying work has no determined registration, so the
+renewal alone needs human review. A renewal whose original-registration the
+index already carries is *joined*: its work is already determined and it must
+never reach this queue.
+
+The reliable join signal is baked into the index at build time. Each
+:class:`pd_matcher.models.IndexedNyplRegRecord` carries ``was_renewed`` and, when
+renewed, the ``renewal_id`` of the :class:`pd_matcher.models.NyplRenRecord` it
+joined. The set of joined renewal ids is therefore::
+
+    {reg.renewal_id for reg in registrations if reg.was_renewed and reg.renewal_id is not None}
+
+This set is computed once at queue startup by scanning the registration store
+(:meth:`pd_matcher.index.lookup.NyplIndexLookup.iter_registrations`) and held as
+a ``frozenset[str]``; it requires no index schema change or rebuild.
 
 For every in-scope MARC record in the pool:
 
-1. **Renewal search (cheap, first):** renewal candidates are retrieved with
+1. **Renewal search (cheap):** renewal candidates are retrieved with
    :meth:`pd_matcher.index.lookup.NyplIndexLookup.candidates_for_renewal`
    (``odat``-year bucketed) and scored with the production title / author /
    claimants / year scorers and the weighted-mean combiner. The single best
    renewal ``R`` is kept; if none clears ``min_score`` the MARC is *not* a
-   renewal-haver and is skipped immediately. This filter is what makes the
-   build fast.
-2. **Registration presence check, limited to ``R``'s ``odat`` year:**
-   registration candidates are retrieved for ``R``'s original-registration year
-   (``R.odat`` — *not* the MARC's publication year) via
-   :meth:`pd_matcher.index.lookup.NyplIndexLookup.candidates_in_year` and scored
-   with the learned scorer. If any registration scores at or above
-   ``reg_min_score`` a registration exists, so the book is excluded (it is
-   scenario 2 or 3 — scenario 3's verified renewal link is sourced from the
-   vault, not here).
-3. **Scenario 4 (renewal-only):** when no registration clears the floor in the
-   ``odat`` year the renewal ``R`` is emitted as a ``pairing_type="renewal"``
-   pair carrying a scenario-4 ``audit_note``. This is the labeling candidate.
+   renewal-haver and is skipped immediately (the join set is never consulted for
+   it). This filter is what makes the build fast.
+2. **Join check (O(1)):** the best renewal ``R`` is emitted only when ``R.id``
+   is *not* in the joined-renewal-id set; a joined ``R`` is skipped because its
+   work is already determined by a registration we hold.
+3. **Scenario 4 (renewal-only):** the surviving unjoined renewal ``R`` is
+   emitted as a ``pairing_type="renewal"`` pair carrying a scenario-4
+   ``audit_note``. This is the labeling candidate.
 
-A full-corpus join analysis confirmed the design: a renewal's normalized
-``oreg`` + ``odat`` points to at most one registration in 99.4%+ of cases, so
-the matcher's content scoring resolves the rare many-to-one via title without
-special-casing. The registration check here only *routes* a book into scenario
-4 versus excludes it; the renewal-match labels the queue collects are
-human-verified, never seeded from unverified matcher output.
-
-The registration arm uses the learned scorer by default, so its model artifact
-must be present beside the index; its absence fails the build loudly via
-:func:`pd_matcher.match.combiners.build_combiner`. The renewal arm stays on the
-weighted-mean combiner because the renewal pathway is untrained.
+The renewal arm uses the weighted-mean combiner because the renewal pathway is
+untrained. The labels the queue collects are human-verified, never seeded from
+unverified matcher output.
 
 A renewal pair's ``nypl_uuid`` column carries the renewal record's ``entry_id``
 rather than a registration UUID — the column is polymorphic by
@@ -58,7 +62,6 @@ from pathlib import Path
 
 from msgspec import Struct
 from msgspec.json import encode as json_encode
-from msgspec.structs import replace
 
 from pd_groundtruth.build_queue import _decade_of
 from pd_groundtruth.build_queue import _iter_language_dirs
@@ -75,7 +78,6 @@ from pd_groundtruth.vault_pair_resolver import (
     PUBLISHER_IDF_CACHE_NAME as _SHARED_PUBLISHER_IDF_CACHE_NAME,
 )
 from pd_matcher.config.schemas import MatchingConfig
-from pd_matcher.config.schemas import PairingConfig
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners import build_combiner
 from pd_matcher.match.combiners.base import CombinedScore
@@ -88,10 +90,7 @@ from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import load_or_build_author_idf
 from pd_matcher.match.idf import load_or_build_idf
 from pd_matcher.match.idf import load_or_build_publisher_idf
-from pd_matcher.match.pairing_compiler import CompiledPairings
-from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import _build_context
-from pd_matcher.match.pipeline import _score_candidate
 from pd_matcher.match.scorers.context import ScorerContext
 from pd_matcher.match.scorers.name import score_author
 from pd_matcher.match.scorers.name import score_publisher
@@ -106,11 +105,10 @@ _LOGGER = getLogger(__name__)
 _CALIBRATOR_NAME: str = "calibrator.msgpack"
 _FILL_LOG_INTERVAL: int = 250
 _SCANNED_LOG_INTERVAL: int = 5000
-_REG_YEAR_WINDOW: int = 0
 
 SOURCE_RENEWAL: str = "renewal"
 
-_LEARNED_SCORER: str = "learned"
+_SCENARIO_4_NOTE: str = "scenario 4: renewal-only (unjoined renewal)"
 
 _SCORER_TITLE: str = "title"
 _SCORER_AUTHOR: str = "author"
@@ -132,13 +130,6 @@ class RenewalScore(Struct, frozen=True, forbid_unknown_fields=True):
 
 
 RenewalScoreFn = Callable[[MarcRecord, NyplRenRecord], RenewalScore]
-
-RegPresentFn = Callable[[MarcRecord, int | None], bool]
-
-
-def _scenario_4_note(odat_year: int | None) -> str:
-    """Return the scenario-4 ``audit_note`` naming the unchecked ``odat`` year."""
-    return f"scenario 4: renewal-only (no registration in odat year {odat_year})"
 
 
 def _best_evidence(candidates: tuple[Evidence, ...]) -> Evidence:
@@ -281,16 +272,16 @@ class RenewalBuildSummary(Struct, frozen=True, forbid_unknown_fields=True):
 
     ``records_scanned`` counts distinct pool MARCs considered (after skipping
     those already in the target DB); ``renewal_havers`` counts those whose best
-    renewal cleared ``min_score`` and therefore reached the registration check;
-    ``reg_excluded`` counts renewal-havers dropped because a registration was
-    found in the renewal's ``odat`` year; ``scenario4_written`` counts the
-    renewal-only pairs emitted (``renewal_havers == reg_excluded +
+    renewal cleared ``min_score`` and therefore reached the join check;
+    ``joined_excluded`` counts renewal-havers dropped because the best renewal is
+    joined to a registration in our index; ``scenario4_written`` counts the
+    renewal-only pairs emitted (``renewal_havers == joined_excluded +
     scenario4_written``).
     """
 
     records_scanned: int
     renewal_havers: int
-    reg_excluded: int
+    joined_excluded: int
     scenario4_written: int
 
 
@@ -329,44 +320,21 @@ def _make_score_fn(
     return score_fn
 
 
-def _make_reg_present_fn(
-    lookup: NyplIndexLookup,
-    config: MatchingConfig,
-    idf: IdfTable,
-    author_idf: IdfTable,
-    publisher_idf: IdfTable,
-    calibrator: PlattCalibrator | None,
-    combiner: Combiner,
-    pairings: CompiledPairings,
-    reg_min_calibrated: float,
-) -> RegPresentFn:
-    """Build a ``(marc, year) -> bool`` registration-presence closure.
+def _joined_renewal_ids(lookup: NyplIndexLookup) -> frozenset[str]:
+    """Return every renewal id that a registration in the index joins to.
 
-    The returned predicate retrieves registration candidates for the EXPLICIT
-    ``year`` (a renewal's ``odat`` year) via
-    :meth:`pd_matcher.index.lookup.NyplIndexLookup.candidates_in_year` — never
-    ``marc.publication_year`` — scores each with the learned scorer, and reports
-    whether any clears ``reg_min_calibrated``. A ``None`` year (a renewal
-    without an ``odat``) cannot be checked and reports ``False``. The per-MARC
-    :class:`ScorerContext` is cached exactly like :func:`_make_score_fn`.
+    Scans the registration store once and collects the ``renewal_id`` of every
+    :class:`pd_matcher.models.IndexedNyplRegRecord` that ``was_renewed`` and
+    carries a non-``None`` ``renewal_id``. A renewal whose id is in this set is
+    *joined* — a registration we hold already links to it — so it is not a
+    scenario-4 (renewal-only) candidate. This is computed at runtime from data
+    already in the index; no schema change or rebuild is required.
     """
-    cache: dict[str, ScorerContext] = {}
-
-    def reg_present(marc: MarcRecord, year: int | None) -> bool:
-        if year is None:
-            return False
-        ctx = cache.get(marc.control_id)
-        if ctx is None:
-            ctx = _build_context(marc, idf, author_idf, publisher_idf, config)
-            cache.clear()
-            cache[marc.control_id] = ctx
-        for candidate in lookup.candidates_in_year(marc, year, _REG_YEAR_WINDOW):
-            match = _score_candidate(marc, candidate, ctx, combiner, calibrator, pairings)
-            if match.combined.calibrated >= reg_min_calibrated:
-                return True
-        return False
-
-    return reg_present
+    return frozenset(
+        reg.renewal_id
+        for reg in lookup.iter_registrations()
+        if reg.was_renewed and reg.renewal_id is not None
+    )
 
 
 def _iter_pool_records(pool: Path) -> Iterator[MarcRecord]:
@@ -382,20 +350,17 @@ def build_renewal_queue(
     index_path: Path,
     out_path: Path,
     matching_config: MatchingConfig,
-    pairing_config: PairingConfig,
     min_score: float,
-    reg_min_score: float,
-    reg_scorer: str,
 ) -> RenewalBuildSummary:
     """Build (or append) scenario-4 renewal-only pairs into ``out_path``.
 
     Loads the IDF caches and calibrator beside ``index_path``, opens the CCE
-    index and the review DB, and runs the renewal-first pipeline over every pool
-    MARC not already queued: the cheap renewal search filters to renewal-havers,
-    then the registration check (``reg_scorer`` with a ``reg_min_score`` floor,
-    limited to the best renewal's ``odat`` year) excludes books that have a
-    registration. Survivors are emitted as ``pairing_type="renewal"`` pairs with
-    a scenario-4 ``audit_note``.
+    index and the review DB, computes the joined-renewal-id set once, and runs
+    the renewal-first pipeline over every pool MARC not already queued: the cheap
+    renewal search filters to renewal-havers, then the O(1) join check excludes
+    any book whose best renewal is already joined to a registration in the index.
+    Survivors are emitted as ``pairing_type="renewal"`` pairs with a scenario-4
+    ``audit_note``.
 
     Args:
         pool: Root directory whose ``<lang>/*.xml`` shards form the pool.
@@ -404,17 +369,9 @@ def build_renewal_queue(
             MARCs already present (any pairing type) are skipped.
         matching_config: Active matcher config; supplies the year window used
             for renewal retrieval and the scoring weights.
-        pairing_config: Field-pairing config driving the registration matcher's
-            title/author/publisher scorer groups.
         min_score: Renewal-arm score floor on the 0-100 scale; a MARC whose best
             renewal scores below it is not a renewal-haver and is skipped before
-            the registration check ever runs.
-        reg_min_score: Registration-arm score floor on the 0-100 scale; a
-            registration at or above it in the renewal's ``odat`` year excludes
-            the book (a registration exists).
-        reg_scorer: Combiner used by the registration arm
-            (``learned`` | ``weighted_mean``); the learned model artifact must
-            exist beside ``index_path`` when ``learned`` is selected.
+            the join check ever runs.
 
     Returns:
         A populated :class:`RenewalBuildSummary`.
@@ -430,42 +387,25 @@ def build_renewal_queue(
     )
     calibrator = _load_calibrator(index_path.parent)
     renewal_combiner = build_combiner(matching_config, learned_model_dir=None)
-    reg_config = replace(matching_config, scorer=reg_scorer)
-    learned_model_dir = index_path.parent if reg_scorer == _LEARNED_SCORER else None
-    reg_combiner = build_combiner(reg_config, learned_model_dir=learned_model_dir)
-    pairings = compile_pairings(pairing_config)
     window = matching_config.year_window
     min_calibrated = min_score / 100.0
-    reg_min_calibrated = reg_min_score / 100.0
     score_fn = _make_score_fn(
         idf, author_idf, publisher_idf, matching_config, renewal_combiner, calibrator
     )
     _LOGGER.info(
-        "renewal queue start: pool=%s window=%d min_score=%.1f reg_min_score=%.1f "
-        "reg_scorer=%s calibrator=%s",
+        "renewal queue start: pool=%s window=%d min_score=%.1f calibrator=%s",
         pool,
         window,
         min_score,
-        reg_min_score,
-        reg_scorer,
         "yes" if calibrator is not None else "no",
     )
     scanned = 0
     renewal_havers = 0
-    reg_excluded = 0
+    joined_excluded = 0
     scenario4_written = 0
     with NyplIndexLookup(index_path) as lookup, ReviewDb.connect(out_path) as db:
-        reg_present_fn = _make_reg_present_fn(
-            lookup,
-            matching_config,
-            idf,
-            author_idf,
-            publisher_idf,
-            calibrator,
-            reg_combiner,
-            pairings,
-            reg_min_calibrated,
-        )
+        joined_ids = _joined_renewal_ids(lookup)
+        _LOGGER.info("renewal queue: %d joined renewal ids in index", len(joined_ids))
         seen = {marc_id for marc_id, _uuid in db.pair_keys()}
         # Commit incrementally so an interrupted long build keeps its progress:
         # insert_pair does not commit, and ReviewDb.__exit__ only commits on a
@@ -481,10 +421,10 @@ def build_renewal_queue(
                     db.commit()
                     _LOGGER.info(
                         "renewal queue: scanned=%d renewal_havers=%d "
-                        "reg_excluded=%d scenario4_written=%d",
+                        "joined_excluded=%d scenario4_written=%d",
                         scanned,
                         renewal_havers,
-                        reg_excluded,
+                        joined_excluded,
                         scenario4_written,
                     )
                 best = best_renewal(marc, lookup.candidates_for_renewal(marc, window), score_fn)
@@ -494,9 +434,8 @@ def build_renewal_queue(
                 if score.calibrated < min_calibrated:
                     continue
                 renewal_havers += 1
-                odat_year = renewal.odat.year if renewal.odat is not None else None
-                if reg_present_fn(marc, odat_year):
-                    reg_excluded += 1
+                if renewal.id in joined_ids:
+                    joined_excluded += 1
                     continue
                 pair = _build_renewal_pair_insert(
                     marc,
@@ -504,7 +443,7 @@ def build_renewal_queue(
                     score,
                     language=_language_of(marc),
                     band=band_of(score.calibrated),
-                    audit_note=_scenario_4_note(odat_year),
+                    audit_note=_SCENARIO_4_NOTE,
                 )
                 db.insert_pair(pair)
                 scenario4_written += 1
@@ -513,23 +452,23 @@ def build_renewal_queue(
         finally:
             db.commit()
     _LOGGER.info(
-        "renewal queue complete: scanned=%d renewal_havers=%d reg_excluded=%d scenario4_written=%d",
+        "renewal queue complete: scanned=%d renewal_havers=%d "
+        "joined_excluded=%d scenario4_written=%d",
         scanned,
         renewal_havers,
-        reg_excluded,
+        joined_excluded,
         scenario4_written,
     )
     return RenewalBuildSummary(
         records_scanned=scanned,
         renewal_havers=renewal_havers,
-        reg_excluded=reg_excluded,
+        joined_excluded=joined_excluded,
         scenario4_written=scenario4_written,
     )
 
 
 __all__ = [
     "SOURCE_RENEWAL",
-    "RegPresentFn",
     "RenewalBuildSummary",
     "RenewalScore",
     "RenewalScoreFn",

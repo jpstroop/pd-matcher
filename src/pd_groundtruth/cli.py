@@ -50,7 +50,6 @@ from pd_groundtruth.vault_migration import migrate_vault_v5
 from pd_groundtruth.vault_migration import migrate_vault_v6
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.cli import _load_default_pairing_config
-from pd_matcher.cli import _ScorerChoice
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.models import MarcRecord
 
@@ -61,8 +60,6 @@ _DEFAULT_SEED = 42
 _DEFAULT_WORKERS = 8
 _DEFAULT_SAMPLE_PER_LANG = 1500
 _DEFAULT_RENEWAL_MIN_SCORE = 60.0
-_DEFAULT_REG_MIN_SCORE = 90.0
-_DEFAULT_REG_SCORER = _ScorerChoice.LEARNED
 _DEFAULT_REVIEW_HOST = "127.0.0.1"
 _DEFAULT_REVIEW_PORT = 8000
 _DEFAULT_POOL_PATH = Path("data/candidates")
@@ -524,27 +521,10 @@ def build_renewal_queue_command(
             "--min-score",
             help=(
                 "Renewal-arm score floor (0-100); a MARC whose best renewal scores below it "
-                "is not a renewal-haver and is skipped before the registration check runs."
+                "is not a renewal-haver and is skipped before the join check runs."
             ),
         ),
     ] = _DEFAULT_RENEWAL_MIN_SCORE,
-    reg_min_score: Annotated[
-        float,
-        Option(
-            "--reg-min-score",
-            help=(
-                "Registration-arm score floor (0-100); a registration at or above it in the "
-                "renewal's odat year excludes the book (scenario 2/3, not scenario 4)."
-            ),
-        ),
-    ] = _DEFAULT_REG_MIN_SCORE,
-    reg_scorer: Annotated[
-        _ScorerChoice,
-        Option(
-            "--reg-scorer",
-            help="Combiner for the registration check (weighted_mean|learned).",
-        ),
-    ] = _DEFAULT_REG_SCORER,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
@@ -554,18 +534,18 @@ def build_renewal_queue_command(
 
     Renewal-first: for every pool MARC not already in the ``--out`` review DB the
     cheap renewal search runs first, keeping only books whose best renewal clears
-    ``--min-score`` (the renewal-havers). Each renewal-haver is then checked for a
-    registration in the renewal's original-registration (``odat``) year using
-    ``--reg-scorer`` and the ``--reg-min-score`` floor:
+    ``--min-score`` (the renewal-havers). Each renewal-haver's best renewal is
+    then checked against the joined-renewal-id set computed once from the index:
 
-    * a registration at or above the floor excludes the book (scenario 2/3 — a
-      registration exists);
-    * no registration in the ``odat`` year emits the renewal as a scenario-4
-      ``pairing_type="renewal"`` pair with an audit note.
+    * a renewal joined to a registration we hold is excluded (its work is already
+      determined);
+    * an unjoined renewal is emitted as a scenario-4 ``pairing_type="renewal"``
+      pair with an audit note.
 
-    The expensive registration check only ever runs for renewal-havers, and only
-    within the single ``odat`` year. Existing registration pairs are left
-    untouched and never duplicated.
+    The join check is an O(1) set membership; the joined-id set is derived at
+    runtime from the index's ``was_renewed`` / ``renewal_id`` fields, so no index
+    rebuild is required. Existing registration pairs are left untouched and never
+    duplicated.
     """
     _configure_logging("build-renewal-queue", log_file)
     summary = build_renewal_queue(
@@ -573,15 +553,12 @@ def build_renewal_queue_command(
         index_path=index,
         out_path=out,
         matching_config=_load_default_matching_config(),
-        pairing_config=_load_default_pairing_config(),
         min_score=min_score,
-        reg_min_score=reg_min_score,
-        reg_scorer=reg_scorer.value,
     )
     echo(
         f"records_scanned={summary.records_scanned} "
         f"renewal_havers={summary.renewal_havers} "
-        f"reg_excluded={summary.reg_excluded} "
+        f"joined_excluded={summary.joined_excluded} "
         f"scenario4_written={summary.scenario4_written}"
     )
 
