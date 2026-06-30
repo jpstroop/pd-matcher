@@ -525,6 +525,16 @@ def build_renewal_queue_command(
             ),
         ),
     ] = _DEFAULT_RENEWAL_MIN_SCORE,
+    append: Annotated[
+        bool,
+        Option(
+            "--append",
+            help=(
+                "Append onto an existing --out database, skipping MARCs already present "
+                "(today's silent behavior, now opt-in). Required when --out exists."
+            ),
+        ),
+    ] = False,
     log_file: Annotated[
         Path | None,
         Option("--log-file", help="Override the auto-generated log file path."),
@@ -546,7 +556,21 @@ def build_renewal_queue_command(
     runtime from the index's ``was_renewed`` / ``renewal_id`` fields, so no index
     rebuild is required. Existing registration pairs are left untouched and never
     duplicated.
+
+    When ``--out`` already exists the build refuses unless ``--append`` is given:
+    appending skips MARCs already in the DB, which would keep their possibly
+    outdated pairs after the matching logic changed. The pre-flight check runs
+    before any index load or pool scan.
     """
+    if out.exists() and not append:
+        echo(
+            f"renewal review DB at {out} already exists. Appending would skip MARCs "
+            f"already present and keep their possibly-outdated pairs. Pass --append "
+            f"to add onto it deliberately, or delete it (or choose a new --out) to "
+            f"build fresh.",
+            err=True,
+        )
+        raise Exit(code=2)
     _configure_logging("build-renewal-queue", log_file)
     summary = build_renewal_queue(
         pool=pool,

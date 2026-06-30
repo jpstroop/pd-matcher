@@ -158,6 +158,86 @@ def test_build_renewal_queue_command_passes_arguments_and_reports(tmp_path: Path
     assert "scenario4_written=2" in result.stdout
 
 
+def _renewal_summary() -> RenewalBuildSummary:
+    return RenewalBuildSummary(
+        records_scanned=1,
+        renewal_havers=1,
+        joined_excluded=0,
+        scenario4_written=1,
+    )
+
+
+def test_build_renewal_queue_refuses_to_silently_append_to_existing_db(tmp_path: Path) -> None:
+    out = tmp_path / "review.db"
+    out.write_bytes(b"")
+    with patch(
+        "pd_groundtruth.cli.build_renewal_queue", return_value=_renewal_summary()
+    ) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-renewal-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "cce.lmdb"),
+                "--out",
+                str(out),
+            ],
+        )
+    assert result.exit_code == 2
+    assert "already exists" in result.stderr
+    assert "--append" in result.stderr
+    mock_build.assert_not_called()
+    assert out.exists()
+
+
+def test_build_renewal_queue_append_proceeds_against_existing_db(tmp_path: Path) -> None:
+    out = tmp_path / "review.db"
+    out.write_bytes(b"")
+    with patch(
+        "pd_groundtruth.cli.build_renewal_queue", return_value=_renewal_summary()
+    ) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-renewal-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "cce.lmdb"),
+                "--out",
+                str(out),
+                "--append",
+            ],
+        )
+    assert result.exit_code == 0
+    mock_build.assert_called_once()
+    assert out.exists()
+
+
+def test_build_renewal_queue_builds_fresh_on_missing_db(tmp_path: Path) -> None:
+    out = tmp_path / "review.db"
+    assert not out.exists()
+    with patch(
+        "pd_groundtruth.cli.build_renewal_queue", return_value=_renewal_summary()
+    ) as mock_build:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "build-renewal-queue",
+                "--pool",
+                str(tmp_path / "pool"),
+                "--index",
+                str(tmp_path / "cce.lmdb"),
+                "--out",
+                str(out),
+            ],
+        )
+    assert result.exit_code == 0
+    mock_build.assert_called_once()
+
+
 def test_configure_logging_with_explicit_path_writes_to_it(tmp_path: Path) -> None:
     target = tmp_path / "sub" / "explicit.log"
     resolved = _configure_logging("acquire", target)
