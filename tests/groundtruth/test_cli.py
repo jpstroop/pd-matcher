@@ -126,7 +126,7 @@ def test_build_renewal_queue_command_passes_arguments_and_reports(tmp_path: Path
     summary = RenewalBuildSummary(
         records_scanned=12,
         renewal_havers=5,
-        reg_excluded=3,
+        joined_excluded=3,
         scenario4_written=2,
     )
     with patch("pd_groundtruth.cli.build_renewal_queue", return_value=summary) as mock_build:
@@ -142,10 +142,6 @@ def test_build_renewal_queue_command_passes_arguments_and_reports(tmp_path: Path
                 str(tmp_path / "review.db"),
                 "--min-score",
                 "70",
-                "--reg-min-score",
-                "85",
-                "--reg-scorer",
-                "weighted_mean",
             ],
         )
     assert result.exit_code == 0, result.stdout
@@ -153,11 +149,12 @@ def test_build_renewal_queue_command_passes_arguments_and_reports(tmp_path: Path
     assert kwargs["pool"] == tmp_path / "pool"
     assert kwargs["out_path"] == tmp_path / "review.db"
     assert kwargs["min_score"] == 70.0
-    assert kwargs["reg_min_score"] == 85.0
-    assert kwargs["reg_scorer"] == "weighted_mean"
+    assert "reg_min_score" not in kwargs
+    assert "reg_scorer" not in kwargs
+    assert "pairing_config" not in kwargs
     assert "records_scanned=12" in result.stdout
     assert "renewal_havers=5" in result.stdout
-    assert "reg_excluded=3" in result.stdout
+    assert "joined_excluded=3" in result.stdout
     assert "scenario4_written=2" in result.stdout
 
 
