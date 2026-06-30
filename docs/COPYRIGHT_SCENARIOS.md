@@ -1,56 +1,56 @@
 # Copyright scenarios
 
-How a MARC↔CCE match maps to copyright-status *determinability*, and why one of the four cases is a public-domain trap.
+How a MARC↔CCE match maps to a copyright-status *determination* — in copyright, public-domain candidate, or undetermined — and why the lone public-domain signal is an inference you can never prove, not a fact in the data.
 
 This document is for library and library-IT readers deciding what a `pd-matcher` result actually tells them. It assumes you know MARC and the basics of U.S. copyright (registration vs. renewal, what the [CCE](GLOSSARY.md) is). Unfamiliar matching or tooling terms are defined in the [glossary](GLOSSARY.md). For the algorithm itself see [DESIGN.md](DESIGN.md) and [MATCHING_ARCHITECTURE.md](MATCHING_ARCHITECTURE.md).
 
-`pd-matcher` is a **linkage producer, not a public-domain determiner**. It surfaces verified links between a library MARC record and the U.S. Copyright Office's registration and renewal records (the CCE, transcribed by NYPL) and the evidence behind them. A human or a downstream consumer then applies the actual copyright reasoning — the 1909-Act notice requirement, the 1964–77 automatic-renewal rule, [URAA](GLOSSARY.md) restoration, country-of-origin analysis — to those links. The four scenarios below describe what kind of determination each match result *enables*, never a determination the tool makes for you.
+`pd-matcher` is a **linkage producer, not a public-domain determiner**. It surfaces verified links between a library MARC record and the U.S. Copyright Office's registration and renewal records (the CCE, transcribed by NYPL) and the evidence behind them. A human or a downstream consumer then applies the actual copyright reasoning — the 1909-Act notice requirement, the 1964–77 automatic-renewal rule, [URAA](GLOSSARY.md) restoration, country-of-origin analysis — to those links. The five scenarios below describe what kind of determination each match result *enables*, never a determination the tool makes for you.
 
 A legal caution that the scenarios turn on: under the 1909 Act, copyright was secured by publication with notice and had to be *renewed* in its 28th year to stay in force. A matched renewal therefore proves a renewal was filed; it does **not** prove that a clean, separate formal registration existed. The reg↔renewal relationship is something we reconstruct from the data, not a fact the data hands us directly.
 
 ---
 
-## The four scenarios
+## The five scenarios
 
-Each scenario is defined *per MARC record*, by what the matcher found (or didn't) on the registration and renewal sides.
+Each scenario is defined *per MARC record*, by what the matcher found (or didn't) on the registration and renewal sides. But the organizing axis is the **determination** each result enables, not the observable state the matcher happens to record. Three determinations cover every case: **in copyright** (scenarios 2a, 2b, and 4), **public-domain candidate** (scenario 3), and **undetermined** (scenario 1). The "joined," "matched," and "renewal-only" labels name the *discovery path* — how the evidence reached us — not the verdict.
 
-### 1. No match — registration absent, renewal absent
+### 1. No match — undetermined
 
 No registration and no renewal cleared the score floor for this MARC record. Status is **undetermined**: the work may be genuinely unregistered (and so never had a U.S. term to begin with), or it may be registered under a transcription the matcher couldn't reach. A no-match is an absence of evidence, not evidence of absence — it does not establish public domain on its own.
 
-### 2. Registration matched, renewal joined — registered *and* renewed
+### 2. Registration matched, renewed — in copyright
 
-A registration matched, and that registration is already linked to a renewal in the CCE data: its `was_renewed` flag is `True` (the precomputed join, below). The work was both registered and renewed, so its initial term was extended. For a consumer, this is the cleanest "still likely under copyright" signal the data offers.
+A registration matched, and the work was *renewed*, so its initial term was extended: it is **in copyright**. The data reaches this same determination by two different paths that differ entirely in the *kind* of evidence behind them — a hard fact in the CCE data versus a fuzzy match you have to verify. That split is the spine of this whole document, so the two paths get their own scenarios, 2a and 2b.
 
-### 3. Registration matched, renewal unlinked — the false-PD risk
+#### 2a. Joined — in copyright by a CCE data fact
 
-A registration matched, but its `was_renewed` flag is `False` — no renewal was joined to it. Read naively, this says "registered, never renewed," which is exactly the 1909-Act pattern that *generally* falls into the public domain. That reading is a **trap**.
+The matched registration is already linked to a renewal in the CCE data: its `was_renewed` flag is `True` (the precomputed registration↔renewal join, below). This is a **hard data fact, not a matcher result — there is no score to weigh**. The renewal cites this registration by number and date, and the join reconciled the two once, at index-build time. Your confidence is the *join's* reliability — not a fuzzy-match probability — roughly 99.4% at year-level granularity per the whole-corpus analysis ([docs/findings/nypl_join_analysis_2026-06-27.md](findings/nypl_join_analysis_2026-06-27.md), 2026-06-27). You trust it.
 
-`was_renewed=False` is an ambiguous *observable state*, not a verdict: it means only that *the precomputed registration↔renewal join found no renewal* — not that no renewal exists. A renewal can be real and still go unjoined (the renewal side may carry a date or a registration number the join couldn't reconcile, or the renewal may sit in a part of the CCE the registration corpus doesn't cover). So before anyone trusts the "not renewed" reading, the **renewal matcher** re-examines the work — it goes looking for the renewal the join missed. That re-examination resolves the single `was_renewed=False` state into one of two fundamentally different outcomes, distinguished by whether a renewal is a *fact in the data* (3a) or an *inference of its absence* (3b).
+#### 2b. Matched — in copyright by a recovered renewal
 
-#### 3a. Registration matched, renewal exists but unlinked — in copyright
+The matched registration's `was_renewed` flag is `False` — the precomputed join found no renewal — but that is an *observable state, not a verdict*. A renewal can be real and still go unjoined: the renewal side may carry a date or a registration number the join couldn't reconcile, or it may sit in a part of the CCE the registration corpus doesn't cover. So the **renewal matcher** re-examines the work and *finds the renewal the join missed*. That found renewal is a **fuzzy MARC↔renewal match carrying a confidence score** — exactly the kind of result a human must verify, unlike 2a's data fact. But once verified the determination is identical to 2a: the work was renewed, so it is **in copyright**. (This is the false-"not renewed" reading *caught* — the save. It is also a real link between two records, so it is a pair you can label and study like any other.)
 
-The renewal record *is* in the NYPL data; the join simply missed it (a date or number it couldn't reconcile, or a coverage gap). The renewal matcher finds it. A found renewal is a **positive, verifiable MARC↔renewal link**: the work was renewed, so it is **in copyright**. This is the false-PD trap *caught* — the save. Because it is a real link between two records, it is a pair you can label and study like any other.
+This is the axis that 2a and 2b turn on, and it is worth stating plainly: **2a is a data fact you trust; 2b is an inference from a scored match you verify** — a hard CCE join versus a matcher result, no score versus a confidence score. The same axis decides scenario 3.
 
-#### 3b. Registration matched, no renewal found — the public-domain candidate
+### 3. Registration matched, no renewal found — public-domain candidate
 
-The renewal matcher searches and finds nothing. This is the project's headline outcome — **registered, not renewed**, the 1909-Act public-domain pattern — but be precise about what kind of claim it is. There is no renewal record to point at, so 3b is an **inference from absence, not a fact in the data**. We can never *prove* a work was never renewed; the strongest defensible claim is "we searched both the precomputed join *and* the renewal matcher and found nothing." It is therefore inherently **softer** than 3a: a renewal could still exist in some CCE corpus we don't hold. And it is **not a MARC↔renewal pair** — there is no second record to link to. It is a record-level assertion *about the registered work*: "renewal-searched, none found."
+A registration matched, the precomputed join shows no renewal (`was_renewed=False`), and the renewal matcher re-examined the work and **found nothing**. This is the project's headline outcome — **registered, not renewed**, the 1909-Act public-domain pattern, and the *only* one of the five scenarios that points toward the public domain — but be precise about what kind of claim it is. There is no renewal record to point at, so scenario 3 is an **inference from absence, not a fact in the data**. We can never *prove* a work was never renewed; the strongest defensible claim is "we searched both the precomputed join *and* the renewal matcher and found nothing." It is therefore inherently **softer** than 2b: a renewal could still exist in some CCE corpus we don't hold. And it is **not a MARC↔renewal pair** — there is no second record to link to. It is a record-level assertion *about the registered work*: "renewal-searched, none found."
 
-The whole reason to separate 3a from 3b is this data-fact-versus-inference distinction. 3a is hard evidence — a link you can verify; 3b is an inference — an absence you can only attest you searched for. Scenario 3 is the ambiguous observable, and 3a and 3b are what it resolves into.
+The reason scenario 3 sits apart from 2b is exactly this data-fact-versus-inference distinction — the same axis that separates 2a from 2b, now deciding public-domain candidate versus in-copyright. `was_renewed=False` is the ambiguous observable; 2b and 3 are what the renewal matcher resolves it into.
 
-This resolution is a *process* (the renewal matcher plus a re-examination of the verified vault, issue [#107](https://github.com/jpstroop/pd-matcher/issues/107)), and the data model does not yet record its outcome: `was_renewed=False` is a single boolean that cannot distinguish 3b (renewal-searched, confirmed none) from "not yet re-examined," and 3b — having no second record — is not a pair the labeling queue can surface today. The schema and labeling-tool design for recording the renewal-search outcome is tracked as issue [#109](https://github.com/jpstroop/pd-matcher/issues/109).
+This resolution is a *process* (the renewal matcher plus a re-examination of the verified vault, issue [#107](https://github.com/jpstroop/pd-matcher/issues/107)), and the data model does not yet record its outcome: `was_renewed=False` is a single boolean that cannot distinguish scenario 3 (renewal-searched, confirmed none) from "not yet re-examined," and scenario 3 — having no second record — is not a pair the labeling queue can surface today. The schema and labeling-tool design for recording the renewal-search outcome is tracked as issue [#109](https://github.com/jpstroop/pd-matcher/issues/109).
 
-### 4. Renewal-only — renewal matched, registration not
+### 4. Renewal-only — in copyright by an unjoined renewal
 
-No registration matched, but a renewal matched the MARC record directly. This is renewal evidence the registration side missed entirely. It tells you a renewal was filed for this work (so a downstream consumer should *not* treat it as unrenewed), even though the matcher couldn't surface the corresponding registration. Per the legal caution above, a renewal here does not retroactively prove a clean registration — it proves a renewal.
+No registration matched, but a renewal matched the MARC record directly, and it is **not joined to any registration we hold**. This is renewal evidence the registration side missed entirely. It tells you a renewal was filed for this work, so it is **in copyright** — a downstream consumer should *not* treat it as unrenewed — even though the matcher couldn't surface the corresponding registration. The renewal cites an original registration (its `oreg`), so a registration *did* exist; it simply sits outside our corpus. Per the legal caution above, a renewal here does not retroactively prove a clean registration we can inspect — it proves a renewal.
 
-Scenarios 3 and 4 are both defined by *registration-match status*, and registration matches from a raw matcher run are candidates, not facts. So both scenarios are built and studied from **verified** registration information — the labeled vault — rather than from unverified matcher output. Every published row is human-verified.
+Every scenario but the no-match (1) rests on at least one matcher result — a registration match, a renewal match, or both — and a raw matcher result is a candidate, not a fact (even in 2a, where the trusted join sits on top of a registration match that still had to be made). So all of them are built and studied from **verified** information — the labeled vault — rather than from unverified matcher output. Every published row is human-verified.
 
 ---
 
 ## The registration↔renewal join
 
-Scenario 2 versus scenario 3 hinges entirely on one precomputed fact: did a renewal join this registration? Here is how that join is built and why it is trustworthy.
+Scenario 2a versus the `was_renewed=False` scenarios (2b and 3) hinges entirely on one precomputed fact: did a renewal join this registration? Here is how that join is built and why it is trustworthy.
 
 ### How the key works
 
@@ -66,7 +66,7 @@ The same analysis validated the join's core assumption — that a renewal's `(no
 
 ### What unjoined renewals are — and aren't
 
-The analysis also settled what `was_renewed=False` does *not* mean. About 61% of renewals join no registration at all, but this is a **scope mismatch, not a join defect**: the renewal corpus spans every CCE class (music, art, drama), while NYPL's registration transcription is book-focused. Renewals for non-book classes have no book registration to join, by construction. This is exactly why scenario 3 needs re-examination rather than blind trust — an unjoined renewal is invisible to a registration's `was_renewed` flag.
+The analysis also settled what `was_renewed=False` does *not* mean. About 61% of renewals join no registration at all, but this is a **scope mismatch, not a join defect**: the renewal corpus spans every CCE class (music, art, drama), while NYPL's registration transcription is book-focused. Renewals for non-book classes have no book registration to join, by construction. This is exactly why a `was_renewed=False` registration needs re-examination (scenarios 2b and 3) rather than blind trust — an unjoined renewal is invisible to a registration's `was_renewed` flag.
 
 ---
 
@@ -76,10 +76,10 @@ The two subsystems each touch different scenarios. Keep them distinct: `pd-match
 
 | Scenario | Where it comes from |
 |---|---|
-| 2 — registered and renewed | The precomputed `was_renewed=True` join (index-build time). |
-| 3a — registered, renewal exists but unlinked | The **verified vault**, re-examined for renewals the join missed (issue [#107](https://github.com/jpstroop/pd-matcher/issues/107)); a found renewal becomes a verifiable MARC↔renewal link. |
-| 3b — registered, no renewal found | The same re-examination when it turns up nothing; recording this "renewal-searched, none found" outcome is future work (issue [#109](https://github.com/jpstroop/pd-matcher/issues/109)). |
-| 4 — renewal-only | The **renewal-first queue** (`pd-groundtruth build-renewal-queue`). |
+| 2a — joined (in copyright) | The precomputed `was_renewed=True` join (index-build time). |
+| 2b — matched (in copyright) | The **verified vault**, re-examined for a renewal the join missed (issue [#107](https://github.com/jpstroop/pd-matcher/issues/107)); a found renewal becomes a verifiable MARC↔renewal link. |
+| 3 — registered, no renewal found (PD candidate) | The same re-examination when it turns up nothing; recording this "renewal-searched, none found" outcome is future work (issue [#109](https://github.com/jpstroop/pd-matcher/issues/109)). |
+| 4 — renewal-only (in copyright) | The **renewal-first queue** (`pd-groundtruth build-renewal-queue`). |
 
 The vault records *which* CCE pathway surfaced each pair in its `match_source` field — `registration`, `renewal`, or `both` (the `both` value is reserved for a future pipeline that links a pair through both pathways and is not produced yet). On the review side the discriminator is the pair's `pairing_type` (`registration` or `renewal`); the labeling code maps `pairing_type="renewal"` to `match_source="renewal"`.
 
