@@ -22,6 +22,7 @@ from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
 from pd_matcher.cli import _load_default_matching_config
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.index.codec import make_renewal_key
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
@@ -80,12 +81,15 @@ def _indexed_reg(
     *,
     was_renewed: bool = False,
     renewal_id: str | None = None,
+    regnum: str | None = None,
+    reg_year: int | None = 1953,
 ) -> IndexedNyplRegRecord:
     return IndexedNyplRegRecord(
         uuid=uuid,
         title="Reg Title",
         was_renewed=was_renewed,
-        reg_year=1953,
+        regnum=regnum,
+        reg_year=reg_year,
         renewal_id=renewal_id,
     )
 
@@ -285,22 +289,64 @@ def test_build_renewal_pair_insert_handles_renewal_without_odat_or_rdat() -> Non
 
 
 # --------------------------------------------------------------------------- #
-# _joined_renewal_ids
+# _build_join_filter / JoinFilter
 # --------------------------------------------------------------------------- #
 
 
-def test_joined_renewal_ids_collects_only_renewed_with_id() -> None:
-    """Only ``was_renewed`` registrations carrying a ``renewal_id`` join a renewal."""
+def test_build_join_filter_collects_projection_ids_and_registration_keys() -> None:
+    """The projection set takes only renewed+id regs; the key set takes every regnum."""
     lookup = _FakeLookup(
         {},
         registrations=(
-            _indexed_reg("u1", was_renewed=True, renewal_id="R1"),
-            _indexed_reg("u2", was_renewed=False, renewal_id="R2"),
-            _indexed_reg("u3", was_renewed=True, renewal_id=None),
+            _indexed_reg("u1", was_renewed=True, renewal_id="R1", regnum="A111111"),
+            _indexed_reg("u2", was_renewed=False, renewal_id="R2", regnum="A222222"),
+            _indexed_reg("u3", was_renewed=True, renewal_id=None, regnum="A333333"),
             _indexed_reg("u4", was_renewed=True, renewal_id="R4"),
         ),
     )
-    assert module._joined_renewal_ids(cast(NyplIndexLookup, lookup)) == frozenset({"R1", "R4"})
+    join_filter = module._build_join_filter(cast(NyplIndexLookup, lookup))
+    assert join_filter.renewal_ids == frozenset({"R1", "R4"})
+    assert join_filter.reg_keys == frozenset(
+        {
+            make_renewal_key("A111111", 1953),
+            make_renewal_key("A222222", 1953),
+            make_renewal_key("A333333", 1953),
+        }
+    )
+
+
+def test_join_filter_is_joined_via_projected_renewal_id() -> None:
+    """A renewal whose id is the registration's projection is joined."""
+    join_filter = module.JoinFilter(renewal_ids=frozenset({"RA"}), reg_keys=frozenset())
+    assert join_filter.is_joined(_renewal("ea", ren_id="RA")) is True
+
+
+def test_join_filter_is_joined_via_registration_key_for_sibling() -> None:
+    """A renewal not in the projection is joined when its oreg/odat key is held."""
+    key = make_renewal_key("A111111", 1953)
+    join_filter = module.JoinFilter(renewal_ids=frozenset(), reg_keys=frozenset({key}))
+    sibling = _renewal("eb", odat_year=1953, ren_id="RB")
+    assert sibling.oreg == "A111111"
+    assert join_filter.is_joined(sibling) is True
+
+
+def test_join_filter_not_joined_when_no_id_or_key_matches() -> None:
+    """A renewal with an unheld id and an unheld key is not joined."""
+    join_filter = module.JoinFilter(
+        renewal_ids=frozenset({"ROTHER"}),
+        reg_keys=frozenset({make_renewal_key("A999999", 1953)}),
+    )
+    assert join_filter.is_joined(_renewal("ea", ren_id="RUNJOINED")) is False
+
+
+def test_join_filter_not_joined_when_renewal_lacks_oreg_or_odat() -> None:
+    """A renewal missing oreg/odat cannot match a registration key set."""
+    join_filter = module.JoinFilter(
+        renewal_ids=frozenset(),
+        reg_keys=frozenset({make_renewal_key("A111111", 1953)}),
+    )
+    bare = NyplRenRecord(id="R", entry_id="e", title="T", claimants="C")
+    assert join_filter.is_joined(bare) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -487,6 +533,56 @@ def test_build_renewal_queue_join_set_built_from_was_renewed_registrations(
     assert summary.renewal_havers == 2
     assert summary.joined_excluded == 2
     assert summary.scenario4_written == 0
+
+
+def test_build_renewal_queue_excludes_sibling_renewals_via_registration_key(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Two renewals citing the same registration are both excluded (issue #112).
+
+    ``ren_by_oreg`` keeps only one renewal per join key, so the index projects a
+    single sibling (``RA``) onto the registration. The other sibling (``RB``)
+    cites the same ``oreg``/``odat`` and is therefore joined by the registration
+    key set even though it is not the projected renewal — the old projection-only
+    filter would have leaked it as a bogus scenario-4 candidate.
+    """
+    _write_pool(tmp_path / "pool", ("ctrl-a", "ctrl-b"))
+    lookup = _FakeLookup(
+        {
+            "ctrl-a": (_renewal("ea", ren_id="RA"),),
+            "ctrl-b": (_renewal("eb", ren_id="RB"),),
+        },
+        registrations=(
+            _indexed_reg("u1", was_renewed=True, renewal_id="RA", regnum="A111111", reg_year=1953),
+        ),
+    )
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    summary = _run(tmp_path)
+    assert summary.renewal_havers == 2
+    assert summary.joined_excluded == 2
+    assert summary.scenario4_written == 0
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        assert db.get_pair(1) is None
+
+
+def test_build_renewal_queue_emits_when_registration_key_does_not_match(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A renewal whose oreg/odat key is not held is still a scenario-4 candidate."""
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    lookup = _FakeLookup(
+        {"ctrl-a": (_renewal("ea", ren_id="RUNJOINED"),)},
+        registrations=(
+            _indexed_reg(
+                "u1", was_renewed=True, renewal_id="ROTHER", regnum="A999999", reg_year=1953
+            ),
+        ),
+    )
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    summary = _run(tmp_path)
+    assert summary.renewal_havers == 1
+    assert summary.joined_excluded == 0
+    assert summary.scenario4_written == 1
 
 
 def test_build_renewal_queue_skips_non_renewal_haver_and_builds_join_set_once(
