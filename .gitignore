@@ -49,5 +49,9 @@ data/*.db-wal
 data/*.db.bak
 data/disagreements.txt
 
+# Harvested renewal-matcher training set (derived, verified-by-transitivity;
+# regenerated from the vault + index, never hand-edited). Kept out of git.
+data/harvested_renewal_pairs.jsonl
+
 # Training bundle (jpstroop/cce-marc-linkage) is mounted as the data/training
 # submodule (vault + marc.xml), not gitignored.
