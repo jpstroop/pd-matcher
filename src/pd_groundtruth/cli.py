@@ -30,6 +30,9 @@ from pd_groundtruth.disk_guard import InsufficientDiskSpaceError
 from pd_groundtruth.dump_vault_marcs import dump_vault_marcs
 from pd_groundtruth.enrich_vault import run_enrich
 from pd_groundtruth.filter import filter_marcxml
+from pd_groundtruth.harvest_renewal_pairs import PROVENANCE_POSITIVE
+from pd_groundtruth.harvest_renewal_pairs import HarvestedPair
+from pd_groundtruth.harvest_renewal_pairs import run_harvest
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
@@ -69,6 +72,9 @@ _DEFAULT_ACTIVE_DB_PATH = Path("data/active_learning.db")
 _DEFAULT_ACTIVE_TARGET = 1000
 _DEFAULT_VAULT_PATH = Path("data/training/label_vault.jsonl")
 _DEFAULT_VAULT_MARCS_PATH = Path("data/training/marc.xml")
+_DEFAULT_HARVEST_OUT_PATH = Path("data/harvested_renewal_pairs.jsonl")
+_DEFAULT_HARVEST_NEGATIVES = 1
+_HARVEST_EXAMPLE_LIMIT = 5
 _LABELER = "jpstroop"
 _LOG_DIR_NAME = "logs"
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -1080,3 +1086,97 @@ def enrich_vault_command(
         f"{report.missing_in_pool} MARC records not found in pool; "
         f"{report.missing_in_index} CCE records not found in index"
     )
+
+
+def _echo_harvest_examples(pairs: list[HarvestedPair]) -> None:
+    """Print up to :data:`_HARVEST_EXAMPLE_LIMIT` positive MARC↔renewal titles."""
+    shown = 0
+    echo("examples (MARC title | renewal title):")
+    for pair in pairs:
+        if pair.provenance != PROVENANCE_POSITIVE:
+            continue
+        echo(f"  {pair.marc_title!r} | {pair.renewal_title!r}")
+        shown += 1
+        if shown >= _HARVEST_EXAMPLE_LIMIT:
+            break
+
+
+@app.command(name="harvest-renewal-pairs")
+def harvest_renewal_pairs_command(
+    vault: Annotated[
+        Path,
+        Option("--vault", help="JSONL label vault to harvest verified matches from (read-only)."),
+    ] = _DEFAULT_VAULT_PATH,
+    index: Annotated[
+        Path, Option("--index", help="LMDB env produced by `pd-matcher index build`.")
+    ] = _DEFAULT_INDEX_PATH,
+    out: Annotated[
+        Path,
+        Option(
+            "--out", help="Destination JSONL training set (overwritten); gitignored by default."
+        ),
+    ] = _DEFAULT_HARVEST_OUT_PATH,
+    negatives_per_positive: Annotated[
+        int,
+        Option(
+            "--negatives-per-positive",
+            help="Hard-negative look-alikes to emit per verified positive.",
+        ),
+    ] = _DEFAULT_HARVEST_NEGATIVES,
+    marc_collection: Annotated[
+        Path,
+        Option(
+            "--marc-collection",
+            help="Single MARCXML <collection> of vault MARCs (used when --pool is absent).",
+        ),
+    ] = _DEFAULT_VAULT_MARCS_PATH,
+    pool: Annotated[
+        Path | None,
+        Option(
+            "--pool",
+            help=(
+                "Root dir whose <lang>/*.xml shards form the candidate pool. "
+                "Mutually exclusive with --marc-collection."
+            ),
+        ),
+    ] = None,
+    log_file: Annotated[
+        Path | None,
+        Option("--log-file", help="Override the auto-generated log file path."),
+    ] = None,
+) -> None:
+    """Harvest verified MARC↔renewal training pairs from the vault and index.
+
+    Every verified registration-pathway match whose registration is joined to a
+    renewal in the index yields a free, human-verified MARC↔renewal POSITIVE
+    (no hand-labeling). Each positive's MARC is then retrieved against the
+    renewal index and scored to emit ``--negatives-per-positive`` hard-negative
+    look-alikes (the true renewal excluded). The result is written as a JSONL
+    training set, kept strictly separate from the hand-labeled vault — every row
+    carries a ``provenance`` marker. The vault is only ever read.
+
+    By default the MARCs are read from the committed training collection
+    (``--marc-collection``); pass ``--pool`` to read from a sharded acquired pool
+    instead.
+    """
+    _configure_logging("harvest-renewal-pairs", log_file)
+    pairs, summary = run_harvest(
+        vault_path=vault,
+        index_path=index,
+        out_path=out,
+        matching_config=_load_default_matching_config(),
+        negatives_per_positive=negatives_per_positive,
+        pool_path=pool,
+        marc_collection_path=None if pool is not None else marc_collection,
+    )
+    echo(
+        f"positives={summary.positives} negatives={summary.negatives} "
+        f"vault_matches_examined={summary.vault_matches_examined} "
+        f"joined={summary.joined} "
+        f"missing_marc={summary.missing_marc} "
+        f"missing_registration={summary.missing_registration} "
+        f"registration_not_joined={summary.registration_not_joined} "
+        f"renewal_missing={summary.renewal_missing}"
+    )
+    echo(f"wrote {len(pairs)} rows to {out}")
+    _echo_harvest_examples(pairs)

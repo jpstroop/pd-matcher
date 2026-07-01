@@ -17,6 +17,9 @@ from pd_groundtruth.cli import _configure_logging
 from pd_groundtruth.cli import app
 from pd_groundtruth.disk_guard import InsufficientDiskSpaceError
 from pd_groundtruth.filter import FilterReport
+from pd_groundtruth.harvest_renewal_pairs import PROVENANCE_POSITIVE
+from pd_groundtruth.harvest_renewal_pairs import HarvestedPair
+from pd_groundtruth.harvest_renewal_pairs import HarvestSummary
 from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import PairInsert
@@ -236,6 +239,115 @@ def test_build_renewal_queue_builds_fresh_on_missing_db(tmp_path: Path) -> None:
         )
     assert result.exit_code == 0
     mock_build.assert_called_once()
+
+
+def _harvest_pair(provenance: str, marc_title: str, renewal_title: str) -> HarvestedPair:
+    return HarvestedPair(
+        marc_control_id="marc-1",
+        marc_title=marc_title,
+        marc_author="An Author",
+        marc_publisher="A Publisher",
+        marc_year=1953,
+        renewal_id="R1",
+        renewal_entry_id="e1",
+        renewal_title=renewal_title,
+        renewal_author="Renewal Author",
+        renewal_claimants="Claimant",
+        renewal_oreg="A111111",
+        renewal_odat="1953-01-01",
+        label="match" if provenance == PROVENANCE_POSITIVE else "no_match",
+        provenance=provenance,
+        score=0.9,
+    )
+
+
+def _harvest_result() -> tuple[list[HarvestedPair], HarvestSummary]:
+    pairs = [
+        _harvest_pair(PROVENANCE_POSITIVE, "True Book", "True Renewal"),
+        _harvest_pair("harvested_hard_negative", "True Book", "Look-alike"),
+    ]
+    summary = HarvestSummary(
+        vault_matches_examined=9,
+        missing_marc=1,
+        missing_registration=2,
+        registration_not_joined=3,
+        renewal_missing=0,
+        joined=1,
+        positives=1,
+        negatives=1,
+    )
+    return pairs, summary
+
+
+def test_harvest_renewal_pairs_command_passes_arguments_and_reports(tmp_path: Path) -> None:
+    with patch("pd_groundtruth.cli.run_harvest", return_value=_harvest_result()) as mock_harvest:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "harvest-renewal-pairs",
+                "--vault",
+                str(tmp_path / "vault.jsonl"),
+                "--index",
+                str(tmp_path / "cce.lmdb"),
+                "--out",
+                str(tmp_path / "harvest.jsonl"),
+                "--negatives-per-positive",
+                "2",
+                "--marc-collection",
+                str(tmp_path / "marc.xml"),
+            ],
+        )
+    assert result.exit_code == 0, result.stdout
+    _, kwargs = mock_harvest.call_args
+    assert kwargs["vault_path"] == tmp_path / "vault.jsonl"
+    assert kwargs["out_path"] == tmp_path / "harvest.jsonl"
+    assert kwargs["negatives_per_positive"] == 2
+    assert kwargs["marc_collection_path"] == tmp_path / "marc.xml"
+    assert kwargs["pool_path"] is None
+    assert "positives=1" in result.stdout
+    assert "negatives=1" in result.stdout
+    assert "vault_matches_examined=9" in result.stdout
+    assert "joined=1" in result.stdout
+    assert "wrote 2 rows" in result.stdout
+    assert "'True Book' | 'True Renewal'" in result.stdout
+
+
+def test_harvest_renewal_pairs_command_pool_overrides_marc_collection(tmp_path: Path) -> None:
+    with patch("pd_groundtruth.cli.run_harvest", return_value=_harvest_result()) as mock_harvest:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "harvest-renewal-pairs",
+                "--pool",
+                str(tmp_path / "pool"),
+            ],
+        )
+    assert result.exit_code == 0, result.stdout
+    _, kwargs = mock_harvest.call_args
+    assert kwargs["pool_path"] == tmp_path / "pool"
+    assert kwargs["marc_collection_path"] is None
+
+
+def test_harvest_renewal_pairs_command_caps_examples_at_five(tmp_path: Path) -> None:
+    pairs = [
+        _harvest_pair(PROVENANCE_POSITIVE, f"Book {index}", f"Renewal {index}")
+        for index in range(6)
+    ]
+    summary = HarvestSummary(
+        vault_matches_examined=6,
+        missing_marc=0,
+        missing_registration=0,
+        registration_not_joined=0,
+        renewal_missing=0,
+        joined=6,
+        positives=6,
+        negatives=0,
+    )
+    with patch("pd_groundtruth.cli.run_harvest", return_value=(pairs, summary)):
+        result = _RUNNER.invoke(app, ["harvest-renewal-pairs", "--out", str(tmp_path / "h.jsonl")])
+    assert result.exit_code == 0, result.stdout
+    assert "'Book 4' | 'Renewal 4'" in result.stdout
+    assert "'Book 5' | 'Renewal 5'" not in result.stdout
 
 
 def test_configure_logging_with_explicit_path_writes_to_it(tmp_path: Path) -> None:
