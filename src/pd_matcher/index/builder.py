@@ -284,7 +284,7 @@ def _ingest_renewals(
                 entry_id_blob = record.entry_id.encode("utf-8")
                 store.ren_by_id.put(entry_id_blob, encode_ren(record))
                 if record.oreg is not None and record.odat is not None:
-                    for join_key in make_renewal_keys(record.oreg, record.odat):
+                    for join_key in make_renewal_keys(record.oreg, record.odat.year):
                         store.ren_by_oreg.put(join_key, entry_id_blob)
                 if record.odat is not None:
                     year_buckets.setdefault(record.odat.year, []).append(record.entry_id)
@@ -342,7 +342,7 @@ def _ingest_registrations(
                 was_renewed = False
                 renewal = None
                 if record.regnum is not None:
-                    for join_key in make_renewal_keys(record.regnum, record.reg_date):
+                    for join_key in make_renewal_keys(record.regnum, record.reg_year):
                         entry_id_blob = store.ren_by_oreg.get(join_key)
                         if entry_id_blob is not None:
                             was_renewed = True

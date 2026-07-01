@@ -142,62 +142,67 @@ def test_year_key_preserves_numeric_ordering() -> None:
     assert earlier < later
 
 
-def test_make_renewal_key_includes_iso_date() -> None:
-    key = make_renewal_key("A111111", date(1940, 5, 10))
-    assert key == b"A111111|1940-05-10"
+def test_make_renewal_key_includes_year() -> None:
+    key = make_renewal_key("A111111", 1940)
+    assert key == b"A111111|1940"
 
 
-def test_make_renewal_key_handles_missing_date() -> None:
+def test_make_renewal_key_handles_missing_year() -> None:
     key = make_renewal_key("A111111", None)
     assert key == b"A111111|"
 
 
 def test_make_renewal_key_normalises_regnum() -> None:
-    assert make_renewal_key("AI-9217", date(1927, 2, 25)) == b"AI9217|1927-02-25"
+    assert make_renewal_key("AI-9217", 1927) == b"AI9217|1927"
 
 
-def test_make_renewal_key_equal_for_format_variant_regnums_same_date() -> None:
-    odat = date(1927, 2, 25)
-    assert make_renewal_key("A 963122", odat) == make_renewal_key("A963122", odat)
-    assert make_renewal_key("AI-9217", odat) == make_renewal_key("AI9217", odat)
+def test_make_renewal_key_equal_for_format_variant_regnums_same_year() -> None:
+    year = 1927
+    assert make_renewal_key("A 963122", year) == make_renewal_key("A963122", year)
+    assert make_renewal_key("AI-9217", year) == make_renewal_key("AI9217", year)
 
 
-def test_make_renewal_key_differs_when_dates_differ_for_same_regnum() -> None:
-    assert make_renewal_key("AI9217", date(1927, 2, 25)) != make_renewal_key(
-        "AI9217", date(1930, 1, 1)
+def test_make_renewal_key_equal_when_dates_differ_within_same_year() -> None:
+    """Different exact dates in the same year now produce the same key.
+
+    This is the core recovery of the year-level join: a renewal whose ``odat``
+    is ``1940-05-10`` and a registration whose ``reg_date`` is ``1940-11-02``
+    both key on ``1940`` and join, where exact-date keying split them.
+    """
+    assert make_renewal_key("AI9217", date(1940, 5, 10).year) == make_renewal_key(
+        "AI9217", date(1940, 11, 2).year
     )
 
 
+def test_make_renewal_key_differs_when_years_differ_for_same_regnum() -> None:
+    assert make_renewal_key("AI9217", 1927) != make_renewal_key("AI9217", 1930)
+
+
 def test_make_renewal_keys_single_matches_make_renewal_key() -> None:
-    odat = date(1940, 5, 10)
-    assert make_renewal_keys("A111111", odat) == (make_renewal_key("A111111", odat),)
+    assert make_renewal_keys("A111111", 1940) == (make_renewal_key("A111111", 1940),)
 
 
-def test_make_renewal_keys_single_handles_missing_date() -> None:
+def test_make_renewal_keys_single_handles_missing_year() -> None:
     assert make_renewal_keys("A111111", None) == (make_renewal_key("A111111", None),)
 
 
 def test_make_renewal_keys_fans_multi_range_to_one_key_per_number() -> None:
-    odat = date(1950, 3, 15)
-    assert make_renewal_keys("A692774 A692775", odat) == (
-        b"A692774|1950-03-15",
-        b"A692775|1950-03-15",
+    assert make_renewal_keys("A692774 A692775", 1950) == (
+        b"A692774|1950",
+        b"A692775|1950",
     )
 
 
 def test_make_renewal_keys_lowercase_multi_range_normalises_each_number() -> None:
-    odat = date(1950, 3, 15)
-    assert make_renewal_keys("a692774 a692775", odat) == (
-        b"A692774|1950-03-15",
-        b"A692775|1950-03-15",
+    assert make_renewal_keys("a692774 a692775", 1950) == (
+        b"A692774|1950",
+        b"A692775|1950",
     )
 
 
 def test_make_renewal_keys_interior_space_single_stays_one_key() -> None:
-    odat = date(1927, 2, 25)
-    assert make_renewal_keys("A 963122", odat) == (make_renewal_key("A 963122", odat),)
+    assert make_renewal_keys("A 963122", 1927) == (make_renewal_key("A 963122", 1927),)
 
 
 def test_make_renewal_keys_verbose_class_phrase_stays_one_key() -> None:
-    odat = date(1927, 2, 25)
-    assert make_renewal_keys("A ad int. 8956", odat) == (make_renewal_key("A ad int. 8956", odat),)
+    assert make_renewal_keys("A ad int. 8956", 1927) == (make_renewal_key("A ad int. 8956", 1927),)

@@ -13,12 +13,12 @@ ordering matches the semantic ordering callers expect:
 
 * Year keys are 2-byte big-endian unsigned integers, which gives a 1923
   bucket that sorts before 1924 with no string padding.
-* Renewal-join keys are ``regnum|isoformat(odat)`` UTF-8 strings so they
-  collide cleanly with the same key constructed at lookup time from a
-  registration record.
+* Renewal-join keys are ``regnum|year`` UTF-8 strings so they collide
+  cleanly with the same key constructed at lookup time from a registration
+  record. The year (not the full date) is the join granularity because
+  registration numbers are reused across years but a renewal's ``odat`` and
+  its registration's ``reg_date`` routinely disagree by days.
 """
-
-from datetime import date
 
 from msgspec.msgpack import Decoder
 from msgspec.msgpack import Encoder
@@ -83,7 +83,7 @@ def decode_year_key(key: bytes) -> int:
     return int.from_bytes(key, "big")
 
 
-def make_renewal_key(regnum: str, regdate: date | None) -> bytes:
+def make_renewal_key(regnum: str, year: int | None) -> bytes:
     """Build the join key shared by ``ren_by_oreg`` writers and readers.
 
     The registration number is canonicalised with :func:`normalize_regnum`
@@ -91,25 +91,37 @@ def make_renewal_key(regnum: str, regdate: date | None) -> bytes:
     verbose foreign/interim class phrases) cannot split an otherwise-valid
     join. The same normalizer runs on the renewal ``oreg`` writer and the
     registration ``regnum`` reader, so both sides land on the identical key.
-    The date suffix is left untouched: registration id numbers are not unique
-    across the catalog's series, so the date remains part of the join key.
 
-    Both sides assemble ``f"{normalize_regnum(regnum)}|{isoformat(regdate) if
-    regdate else ''}"``. The ``|`` separator is reserved punctuation that does
-    not survive normalization, so it cannot collide with the regnum payload.
+    The suffix is the four-digit **registration year**, not the full ISO date.
+    Two-thirds of normalized regnums are reused across years, so the year is
+    required to disambiguate the join; but exact-date agreement is not — a
+    renewal's ``odat`` and its registration's ``reg_date`` routinely differ by
+    days while naming the same registration, and tens of thousands of
+    registrations carry a derived year with no ``<regDate>`` at all. Keying on
+    the year joins both. The registration side supplies ``reg_year`` (its
+    ``regDate → copyDate → pubDate`` fallback) and the renewal side supplies
+    ``odat.year``; the two align because ``reg_year`` equals ``reg_date.year``
+    whenever a ``<regDate>`` exists.
+
+    Both sides assemble ``f"{normalize_regnum(regnum)}|{year or ''}"``. The
+    ``|`` separator is reserved punctuation that does not survive
+    normalization, so it cannot collide with the regnum payload.
 
     Args:
         regnum: Copyright Office registration number.
-        regdate: Original registration date, or ``None`` when absent.
+        year: Registration year — ``odat.year`` on the renewal side,
+            ``reg_year`` on the registration side — or ``None`` when the record
+            carries neither a date nor a derivable year (it then keys to an
+            empty suffix and can never join a renewal).
 
     Returns:
         UTF-8 encoded composite key suitable for use as an LMDB key.
     """
-    suffix = regdate.isoformat() if regdate is not None else ""
+    suffix = str(year) if year is not None else ""
     return f"{normalize_regnum(regnum)}|{suffix}".encode()
 
 
-def make_renewal_keys(regnum: str, regdate: date | None) -> tuple[bytes, ...]:
+def make_renewal_keys(regnum: str, year: int | None) -> tuple[bytes, ...]:
     """Build every join key a registration or renewal contributes to the join.
 
     A registered multi-volume whole records several numbers in one ``regnum``
@@ -119,21 +131,22 @@ def make_renewal_keys(regnum: str, regdate: date | None) -> tuple[bytes, ...]:
     :func:`is_multi_regnum` recognises such a range, this fans it out into one
     normalized key per listed number so both the ``ren_by_oreg`` writer and the
     registration reader land on the same per-number key. Otherwise it returns a
-    one-tuple byte-identical to :func:`make_renewal_key`. The date suffix is
+    one-tuple byte-identical to :func:`make_renewal_key`. The year suffix is
     carried on every key exactly as the single-key path does.
 
     Args:
         regnum: Copyright Office registration number, possibly a
             space-separated multi-number range.
-        regdate: Original registration date, or ``None`` when absent.
+        year: Registration year, or ``None`` when the record carries neither a
+            date nor a derivable year.
 
     Returns:
         A tuple of UTF-8 encoded composite keys, one per listed number for a
         multi-number range and a single key otherwise.
     """
     if not is_multi_regnum(regnum):
-        return (make_renewal_key(regnum, regdate),)
-    suffix = regdate.isoformat() if regdate is not None else ""
+        return (make_renewal_key(regnum, year),)
+    suffix = str(year) if year is not None else ""
     return tuple(f"{normalize_regnum(token)}|{suffix}".encode() for token in regnum.split())
 
 
