@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<copyrightEntries>
+  <copyrightEntry regnum="A700001" id="UUID-Y001"><author><authorName>Yearman, Ada</authorName></author><title>Same year different day.</title><regDate date="1951-06-20">Jun. 20, 1951</regDate><publisher><pubName claimant="yes">Gamma Press</pubName><pubPlace>New York</pubPlace></publisher></copyrightEntry>
+  <copyrightEntry regnum="A700002" id="UUID-Y002"><author><authorName>Yearman, Ben</authorName></author><title>No regDate but a copyDate year.</title><copyDate date="1952-04-01">Apr. 1, 1952</copyDate><publisher><pubName claimant="yes">Delta Press</pubName><pubPlace>Boston</pubPlace></publisher></copyrightEntry>
+  <copyrightEntry regnum="A700003" id="UUID-Y003"><author><authorName>Yearman, Cal</authorName></author><title>No date and no derivable year.</title><publisher><pubName claimant="yes">Epsilon Press</pubName><pubPlace>Chicago</pubPlace></publisher></copyrightEntry>
+</copyrightEntries>

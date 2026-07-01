@@ -54,6 +54,17 @@ def _seed_range_regnum_sources(root: Path) -> tuple[Path, Path]:
     return reg_dir, ren_dir
 
 
+def _seed_year_join_sources(root: Path) -> tuple[Path, Path]:
+    """Copy the year-join recovery reg/ren fixtures into isolated source dirs."""
+    reg_dir = root / "reg"
+    ren_dir = root / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "year_join_reg.xml").write_bytes((_FIXTURES / "year_join_reg.xml").read_bytes())
+    (ren_dir / "year_join_ren.tsv").write_bytes((_FIXTURES / "year_join_ren.tsv").read_bytes())
+    return reg_dir, ren_dir
+
+
 def test_build_index_writes_records_year_buckets_and_meta(tmp_path: Path) -> None:
     reg_dir, ren_dir = _seed_sources(tmp_path)
     out_path = tmp_path / "idx.lmdb"
@@ -82,7 +93,7 @@ def test_build_index_writes_records_year_buckets_and_meta(tmp_path: Path) -> Non
         assert bucket_1940 is not None
         assert decode_uuid_list(bucket_1940) == ("UUID-0001",)
 
-        join_key = make_renewal_key("A111111", date(1940, 5, 10))
+        join_key = make_renewal_key("A111111", 1940)
         assert store.ren_by_oreg.get(join_key) == b"entry-001"
 
 
@@ -350,11 +361,11 @@ def test_build_index_joins_format_variant_regnum_against_renewal(tmp_path: Path)
     """A registration whose regnum is a format-variant of a renewal's oreg joins.
 
     The renewal carries the canonical ``AI9217``; UUID-V001's ``regnum`` is the
-    hyphenated ``AI-9217`` at the same original date, so it joins only because
-    :func:`make_renewal_key` normalizes both sides identically — under the raw
-    key (``AI-9217|…`` vs ``AI9217|…``) it would not. UUID-V002 shares the
-    normalized regnum but registers under a different date, so it must not join,
-    proving the date stays part of the key.
+    hyphenated ``AI-9217`` in the same registration year (1927), so it joins
+    only because :func:`make_renewal_key` normalizes both sides identically —
+    under the raw key (``AI-9217|…`` vs ``AI9217|…``) it would not. UUID-V002
+    shares the normalized regnum but registers in a different year (1930), so it
+    must not join, proving the year stays part of the key.
     """
     reg_dir, ren_dir = _seed_regnum_variant_sources(tmp_path)
     out_path = tmp_path / "idx.lmdb"
@@ -392,7 +403,7 @@ def test_build_index_joins_multi_number_range_registration_on_interior_number(
     report = build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
     assert report.renewal_joins == 1
 
-    odat = date(1950, 3, 15)
+    odat_year = date(1950, 3, 15).year
     with NyplIndexStore(out_path, readonly=True) as store:
         blob = store.reg_by_id.get(b"UUID-R001")
         assert blob is not None
@@ -403,8 +414,58 @@ def test_build_index_joins_multi_number_range_registration_on_interior_number(
         assert record.renewal_oreg == "A692775"
 
         # The mashed whole-string key never resolves; the interior number does.
-        assert store.ren_by_oreg.get(make_renewal_key("A692774 A692775", odat)) is None
-        assert store.ren_by_oreg.get(make_renewal_key("A692775", odat)) == b"entry-200"
+        assert store.ren_by_oreg.get(make_renewal_key("A692774 A692775", odat_year)) is None
+        assert store.ren_by_oreg.get(make_renewal_key("A692775", odat_year)) == b"entry-200"
+
+
+def test_build_index_year_join_recovers_same_year_and_dateless_registrations(
+    tmp_path: Path,
+) -> None:
+    """Year-level keying joins where exact-date keying could not.
+
+    Three registrations exercise the year-based join:
+
+    * UUID-Y001 registers ``A700001`` on ``1951-06-20`` while its renewal's
+      ``odat`` is ``1951-11-05`` — the same year, a different day. Exact-date
+      keying would split them; the year key ``A700001|1951`` joins them.
+    * UUID-Y002 carries no ``<regDate>`` at all, only a ``<copyDate>`` of
+      ``1952-04-01`` from which ``reg_year`` is derived. It keys on
+      ``A700002|1952`` and joins its 1952 renewal — a registration exact-date
+      keying could never reach.
+    * UUID-Y003 has neither a date nor a derivable year, so ``reg_year`` is
+      ``None``; it produces no year suffix, matches no renewal, and stays
+      unrenewed.
+    """
+    reg_dir, ren_dir = _seed_year_join_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+
+    report = build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    assert report.renewal_joins == 2
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        same_year_blob = store.reg_by_id.get(b"UUID-Y001")
+        assert same_year_blob is not None
+        same_year = decode_reg(same_year_blob)
+        assert same_year.reg_date == date(1951, 6, 20)
+        assert same_year.was_renewed is True
+        assert same_year.renewal_id == "R400300"
+
+        dateless_blob = store.reg_by_id.get(b"UUID-Y002")
+        assert dateless_blob is not None
+        dateless = decode_reg(dateless_blob)
+        assert dateless.reg_date is None
+        assert dateless.reg_year == 1952
+        assert dateless.was_renewed is True
+        assert dateless.renewal_id == "R400301"
+
+        no_year_blob = store.reg_by_id.get(b"UUID-Y003")
+        assert no_year_blob is not None
+        no_year = decode_reg(no_year_blob)
+        assert no_year.reg_year is None
+        assert no_year.was_renewed is False
+
+        assert store.ren_by_oreg.get(make_renewal_key("A700001", 1951)) == b"entry-300"
+        assert store.ren_by_oreg.get(make_renewal_key("A700002", 1952)) == b"entry-301"
 
 
 def test_cache_mismatch_reason_reports_each_field_in_declaration_order() -> None:
