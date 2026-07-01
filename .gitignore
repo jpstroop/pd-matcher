@@ -36,6 +36,7 @@ scripts/*
 !scripts/renewal_gate_measure.py
 !scripts/nypl_join_analysis.py
 !scripts/additional_entry_join_measure.py
+!scripts/renewal_matcher_eval.py
 
 # Groundtruth labeling artifacts (the vault itself IS tracked at data/label_vault.jsonl;
 # it is *.jsonl, so the *.db rules below never touch it). Review/queue SQLite DBs
