@@ -12,16 +12,27 @@ renewal alone needs human review. A renewal whose original-registration the
 index already carries is *joined*: its work is already determined and it must
 never reach this queue.
 
-The reliable join signal is baked into the index at build time. Each
-:class:`pd_matcher.models.IndexedNyplRegRecord` carries ``was_renewed`` and, when
-renewed, the ``renewal_id`` of the :class:`pd_matcher.models.NyplRenRecord` it
-joined. The set of joined renewal ids is therefore::
+The join signal is a :class:`JoinFilter` built once at queue startup from a
+single scan of the registration store
+(:meth:`pd_matcher.index.lookup.NyplIndexLookup.iter_registrations`). It carries
+two complementary sets:
 
-    {reg.renewal_id for reg in registrations if reg.was_renewed and reg.renewal_id is not None}
+* the projected ``renewal_id`` of every ``was_renewed`` registration — the
+  one-renewal-per-registration projection baked into the index at build time,
+  which (with issue #111) also covers renewals cited through an
+  ``<additionalEntry>`` interior number; and
+* the complete set of top-level registration join keys, each registration's
+  ``regnum``/``reg_year`` expanded through
+  :func:`pd_matcher.index.codec.make_renewal_keys`.
 
-This set is computed once at queue startup by scanning the registration store
-(:meth:`pd_matcher.index.lookup.NyplIndexLookup.iter_registrations`) and held as
-a ``frozenset[str]``; it requires no index schema change or rebuild.
+A candidate renewal is *joined* when its id is in the projection set OR one of
+its own join keys is in the registration key set. The key-set arm is what
+recovers **sibling** renewals: ``ren_by_oreg`` stores only one renewal per join
+key (last writer wins), so when several renewals cite the same registration the
+projection names a single sibling while the others would wrongly surface as
+scenario-4; matching on the registration key set instead recognises every
+sibling as joined (issue #112). The filter is computed from data already in the
+index and requires no schema change or rebuild.
 
 For every in-scope MARC record in the pool:
 
@@ -32,9 +43,11 @@ For every in-scope MARC record in the pool:
    renewal ``R`` is kept; if none clears ``min_score`` the MARC is *not* a
    renewal-haver and is skipped immediately (the join set is never consulted for
    it). This filter is what makes the build fast.
-2. **Join check (O(1)):** the best renewal ``R`` is emitted only when ``R.id``
-   is *not* in the joined-renewal-id set; a joined ``R`` is skipped because its
-   work is already determined by a registration we hold.
+2. **Join check (O(1)):** the best renewal ``R`` is emitted only when
+   :meth:`JoinFilter.is_joined` is ``False`` — neither ``R.id`` is a projected
+   renewal nor any of ``R``'s join keys names a registration we hold; a joined
+   ``R`` is skipped because its work is already determined by a registration we
+   hold.
 3. **Scenario 4 (renewal-only):** the surviving unjoined renewal ``R`` is
    emitted as a ``pairing_type="renewal"`` pair carrying a scenario-4
    ``audit_note``. This is the labeling candidate.
@@ -78,6 +91,7 @@ from pd_groundtruth.vault_pair_resolver import (
     PUBLISHER_IDF_CACHE_NAME as _SHARED_PUBLISHER_IDF_CACHE_NAME,
 )
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.index.codec import make_renewal_keys
 from pd_matcher.index.lookup import NyplIndexLookup
 from pd_matcher.match.combiners import build_combiner
 from pd_matcher.match.combiners.base import CombinedScore
@@ -320,21 +334,68 @@ def _make_score_fn(
     return score_fn
 
 
-def _joined_renewal_ids(lookup: NyplIndexLookup) -> frozenset[str]:
-    """Return every renewal id that a registration in the index joins to.
+class JoinFilter(Struct, frozen=True, forbid_unknown_fields=True):
+    """The joined-renewal signal a queue build uses to reject non-scenario-4 renewals.
 
-    Scans the registration store once and collects the ``renewal_id`` of every
-    :class:`pd_matcher.models.IndexedNyplRegRecord` that ``was_renewed`` and
-    carries a non-``None`` ``renewal_id``. A renewal whose id is in this set is
-    *joined* — a registration we hold already links to it — so it is not a
-    scenario-4 (renewal-only) candidate. This is computed at runtime from data
-    already in the index; no schema change or rebuild is required.
+    Two complementary sets, both harvested in a single registration scan:
+
+    * ``renewal_ids`` — the projected ``renewal_id`` of every ``was_renewed``
+      registration. This is the one-renewal-per-registration projection baked
+      into the index at build time; with issue #111 it also covers renewals
+      cited through an ``<additionalEntry>`` interior number, because such a
+      renewal becomes the projected renewal on the parent registration.
+    * ``reg_keys`` — every top-level registration join key, built by expanding
+      each registration's ``regnum``/``reg_year`` through
+      :func:`pd_matcher.index.codec.make_renewal_keys`. A candidate renewal is
+      joined when any of *its* join keys is in this set, independent of the
+      projection. This is what recovers **sibling** renewals: when several
+      renewals cite the same registration, ``ren_by_oreg`` stores only the last
+      writer, so the projection names a single sibling; the key set names the
+      registration itself and therefore matches every sibling (issue #112).
+
+    A renewal is joined iff its id is in ``renewal_ids`` *or* one of its join
+    keys is in ``reg_keys`` (:meth:`is_joined`). Both sets come from data already
+    in the index — no schema change or rebuild is required.
     """
-    return frozenset(
-        reg.renewal_id
-        for reg in lookup.iter_registrations()
-        if reg.was_renewed and reg.renewal_id is not None
-    )
+
+    renewal_ids: frozenset[str]
+    reg_keys: frozenset[bytes]
+
+    def is_joined(self, renewal: NyplRenRecord) -> bool:
+        """Return ``True`` when a registration in the index links to ``renewal``.
+
+        The projection set is checked first (an O(1) id membership); the key set
+        is consulted only when the renewal carries both an ``oreg`` and an
+        ``odat`` — the exact condition under which the builder writes a
+        ``ren_by_oreg`` join — so the renewal's keys align byte-for-byte with the
+        registration keys collected in :func:`_build_join_filter`.
+        """
+        if renewal.id in self.renewal_ids:
+            return True
+        if renewal.oreg is None or renewal.odat is None:
+            return False
+        return any(
+            key in self.reg_keys for key in make_renewal_keys(renewal.oreg, renewal.odat.year)
+        )
+
+
+def _build_join_filter(lookup: NyplIndexLookup) -> JoinFilter:
+    """Build the :class:`JoinFilter` from a single scan of the registration store.
+
+    One pass over :meth:`pd_matcher.index.lookup.NyplIndexLookup.iter_registrations`
+    collects both the projected joined-renewal ids (from ``was_renewed`` +
+    ``renewal_id``) and the complete set of top-level registration join keys
+    (from ``regnum``/``reg_year`` via :func:`make_renewal_keys`). Iterating once
+    keeps the startup cost of the full-corpus scan to a single walk.
+    """
+    renewal_ids: set[str] = set()
+    reg_keys: set[bytes] = set()
+    for reg in lookup.iter_registrations():
+        if reg.was_renewed and reg.renewal_id is not None:
+            renewal_ids.add(reg.renewal_id)
+        if reg.regnum is not None:
+            reg_keys.update(make_renewal_keys(reg.regnum, reg.reg_year))
+    return JoinFilter(renewal_ids=frozenset(renewal_ids), reg_keys=frozenset(reg_keys))
 
 
 def _iter_pool_records(pool: Path) -> Iterator[MarcRecord]:
@@ -404,8 +465,12 @@ def build_renewal_queue(
     joined_excluded = 0
     scenario4_written = 0
     with NyplIndexLookup(index_path) as lookup, ReviewDb.connect(out_path) as db:
-        joined_ids = _joined_renewal_ids(lookup)
-        _LOGGER.info("renewal queue: %d joined renewal ids in index", len(joined_ids))
+        join_filter = _build_join_filter(lookup)
+        _LOGGER.info(
+            "renewal queue: %d joined renewal ids, %d registration join keys in index",
+            len(join_filter.renewal_ids),
+            len(join_filter.reg_keys),
+        )
         seen = {marc_id for marc_id, _uuid in db.pair_keys()}
         # Commit incrementally so an interrupted long build keeps its progress:
         # insert_pair does not commit, and ReviewDb.__exit__ only commits on a
@@ -434,7 +499,7 @@ def build_renewal_queue(
                 if score.calibrated < min_calibrated:
                     continue
                 renewal_havers += 1
-                if renewal.id in joined_ids:
+                if join_filter.is_joined(renewal):
                     joined_excluded += 1
                     continue
                 pair = _build_renewal_pair_insert(
@@ -469,6 +534,7 @@ def build_renewal_queue(
 
 __all__ = [
     "SOURCE_RENEWAL",
+    "JoinFilter",
     "RenewalBuildSummary",
     "RenewalScore",
     "RenewalScoreFn",
