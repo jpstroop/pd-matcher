@@ -41,6 +41,7 @@ from pd_matcher.models import NyplRegRecord
 from pd_matcher.normalize.encoding import clean_text
 
 _ENTRY_TAG = "copyrightEntry"
+_ADDITIONAL_ENTRY_TAG = "additionalEntry"
 _YEAR_RE = re_compile(r"(\d{4})")
 
 _MIN_PLAUSIBLE_YEAR = 1700
@@ -287,6 +288,42 @@ def _collect_prev_regnums(entry: _Element, stats: NyplRegParseStats) -> tuple[st
     return tuple(out)
 
 
+def _collect_additional_join_keys(
+    entry: _Element, stats: NyplRegParseStats
+) -> tuple[tuple[str, int], ...]:
+    """Return one ``(regnum, year)`` join key per ``<additionalEntry>`` child.
+
+    A single ``<copyrightEntry>`` can bundle several separate registrations as
+    ``<additionalEntry>`` children (guide: "Multiple claims in a single entry"),
+    each carrying its own ``<regNum>`` and ``<regDate>``. Those interior numbers
+    are dropped by :func:`_build_record`, so a renewal citing one cannot join.
+    This harvests just enough — the regnum and its year — to add each as an
+    extra join key on the parent registration.
+
+    The regnum is read attribute-first (``regnum``) then inline ``<regNum>``
+    text, mirroring the top-level convention. The year is **strict**: it is
+    derived solely from the additionalEntry's own ``<regDate>``; an
+    additionalEntry with no own ``<regDate>`` (or an implausible one) is skipped
+    rather than inheriting the parent entry's date, because the parent date is a
+    different registration event and would manufacture spurious joins. An
+    additionalEntry with no usable regnum is likewise skipped.
+
+    ``<renewalEntry>`` blocks (standalone renewals transcribed in the
+    registration XML) are a separate follow-up and are intentionally not
+    handled here; see the additionalEntry join-yield finding for the split.
+    """
+    out: list[tuple[str, int]] = []
+    for additional in entry.iterfind(_ADDITIONAL_ENTRY_TAG):
+        regnum = additional.get("regnum") or _text(additional.find("regNum"), stats)
+        if regnum is None:
+            continue
+        year = _year_from_date_element(additional.find("regDate"), stats)
+        if year is None:
+            continue
+        out.append((regnum, year))
+    return tuple(out)
+
+
 def _build_record(entry: _Element, stats: NyplRegParseStats) -> NyplRegRecord | None:
     """Translate one ``<copyrightEntry>`` into a :class:`NyplRegRecord`.
 
@@ -329,6 +366,7 @@ def _build_record(entry: _Element, stats: NyplRegParseStats) -> NyplRegRecord | 
     notice_date = _extract_date_attr(entry, "noticeDate")
     lccn = _extract_lccn(entry, stats)
     prev_regnums = _collect_prev_regnums(entry, stats)
+    additional_join_keys = _collect_additional_join_keys(entry, stats)
 
     stats.emitted += 1
     return NyplRegRecord(
@@ -353,6 +391,7 @@ def _build_record(entry: _Element, stats: NyplRegParseStats) -> NyplRegRecord | 
         notice_date=notice_date,
         lccn=lccn,
         prev_regnums=prev_regnums,
+        additional_join_keys=additional_join_keys,
     )
 
 

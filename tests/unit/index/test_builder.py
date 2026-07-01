@@ -468,6 +468,78 @@ def test_build_index_year_join_recovers_same_year_and_dateless_registrations(
         assert store.ren_by_oreg.get(make_renewal_key("A700002", 1952)) == b"entry-301"
 
 
+def _seed_additional_entry_sources(root: Path) -> tuple[Path, Path]:
+    """Copy the additionalEntry reg/ren fixtures into isolated source dirs."""
+    reg_dir = root / "reg"
+    ren_dir = root / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "additional_reg.xml").write_bytes(
+        (_FIXTURES / "additional_entry_reg.xml").read_bytes()
+    )
+    (ren_dir / "additional_ren.tsv").write_bytes(
+        (_FIXTURES / "additional_entry_ren.tsv").read_bytes()
+    )
+    return reg_dir, ren_dir
+
+
+def test_build_index_joins_additional_entry_interior_number(tmp_path: Path) -> None:
+    """A renewal citing an interior ``<additionalEntry>`` number joins the parent.
+
+    UUID-AE001's top-level regnum is ``BB21264`` and no renewal cites it, but a
+    renewal cites the interior additionalEntry number ``BB21524`` (own regDate
+    year 1962). The join lands only because the interior number is indexed as an
+    extra key on the parent, flipping ``was_renewed`` and projecting the
+    renewal. The other interior number ``BB21695`` has no renewal, and the
+    ``BB99999`` additionalEntry (no own ``<regDate>``) is strictly skipped, so
+    it never produces a join key.
+    """
+    reg_dir, ren_dir = _seed_additional_entry_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+
+    report = build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    assert report.renewal_joins == 2
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        parent_blob = store.reg_by_id.get(b"UUID-AE001")
+        assert parent_blob is not None
+        parent = decode_reg(parent_blob)
+        assert parent.was_renewed is True
+        assert parent.renewal_id == "R500524"
+        assert parent.renewal_oreg == "BB21524"
+
+        # The top-level number never joins; the interior additionalEntry does.
+        assert store.ren_by_oreg.get(make_renewal_key("BB21264", 1962)) is None
+        assert store.ren_by_oreg.get(make_renewal_key("BB21524", 1962)) == b"entry-500"
+        # The dateless additionalEntry (BB99999) is strictly skipped.
+        assert store.ren_by_oreg.get(make_renewal_key("BB99999", 1962)) is None
+
+
+def test_build_index_joins_additional_entry_range_interior_number(tmp_path: Path) -> None:
+    """Range fan-out and normalization apply to additionalEntry regnums too.
+
+    UUID-AE002's additionalEntry regnum is the space-separated range
+    ``"A160078 A160079"`` (own regDate year 1941); the renewal cites the
+    interior number ``A160079``. The join lands only because
+    :func:`make_renewal_keys` fans the range out per number for the interior
+    additionalEntry exactly as it does for a top-level range.
+    """
+    reg_dir, ren_dir = _seed_additional_entry_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        parent_blob = store.reg_by_id.get(b"UUID-AE002")
+        assert parent_blob is not None
+        parent = decode_reg(parent_blob)
+        assert parent.was_renewed is True
+        assert parent.renewal_id == "R500079"
+
+        assert store.ren_by_oreg.get(make_renewal_key("A160000", 1941)) is None
+        assert store.ren_by_oreg.get(make_renewal_key("A160079", 1941)) == b"entry-501"
+
+
 def test_cache_mismatch_reason_reports_each_field_in_declaration_order() -> None:
     """Each missing/mismatched cache key resolves to its named reason.
 

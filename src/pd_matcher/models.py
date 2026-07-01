@@ -80,6 +80,15 @@ class NyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     """Every ``<prev-regNum>`` text under the entry, in document order. These
     are back-references to earlier registrations (revised editions, second
     printings, etc.); the DTD permits multiple per entry."""
+    additional_join_keys: tuple[tuple[str, int], ...] = ()
+    """One ``(regnum, year)`` pair per ``<additionalEntry>`` child that carries
+    its own regnum and its own strict ``<regDate>`` year (guide: "Multiple
+    claims in a single entry"). A ``<copyrightEntry>`` can bundle several
+    separate registrations as ``<additionalEntry>`` children, each with its own
+    number; these interior numbers are indexed as extra renewal-join keys on
+    this registration so a renewal citing one marks the parent renewed. The
+    year is strict (own ``<regDate>`` only, never the parent's); additionalEntry
+    children lacking a usable regnum or own ``<regDate>`` are omitted."""
 
 
 class NyplRenRecord(Struct, frozen=True, forbid_unknown_fields=True):

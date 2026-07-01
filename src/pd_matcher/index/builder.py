@@ -21,6 +21,7 @@ LMDB codec, or in this module itself invalidates the cache automatically so
 nobody has to remember to bump ``schema_version`` for a code-only change.
 """
 
+from collections.abc import Iterator
 from datetime import UTC
 from datetime import datetime
 from hashlib import sha256
@@ -44,6 +45,7 @@ from pd_matcher.index.keys import publisher_keys
 from pd_matcher.index.keys import title_keys
 from pd_matcher.index.store import NyplIndexStore
 from pd_matcher.index.store import _SubDb
+from pd_matcher.models import NyplRegRecord
 from pd_matcher.models import index_reg
 from pd_matcher.parsers.nypl_reg import NyplRegParseStats
 from pd_matcher.parsers.nypl_reg import iter_nypl_reg_directory
@@ -246,6 +248,23 @@ def _check_cache(
     )
 
 
+def _registration_join_keys(record: NyplRegRecord) -> Iterator[bytes]:
+    """Yield every renewal-join key a registration contributes, in priority order.
+
+    The top-level ``regnum``/``reg_year`` keys come first, then one set per
+    ``<additionalEntry>`` ``(regnum, year)`` pair the parser harvested. Each
+    regnum is expanded through :func:`make_renewal_keys` so multi-number ranges
+    and normalization apply uniformly on both the top-level and interior
+    numbers. A renewal citing an interior additionalEntry number therefore marks
+    the parent registration ``was_renewed`` even when the top-level number never
+    joins (issue #111).
+    """
+    if record.regnum is not None:
+        yield from make_renewal_keys(record.regnum, record.reg_year)
+    for additional_regnum, additional_year in record.additional_join_keys:
+        yield from make_renewal_keys(additional_regnum, additional_year)
+
+
 def _accumulate_postings(
     postings: dict[str, list[str]],
     tokens: frozenset[str],
@@ -326,7 +345,10 @@ def _ingest_registrations(
     index but still written to ``reg_by_id`` so they can be looked up by uuid.
     Publisher postings draw tokens from both ``publisher_names`` and
     ``claimants`` so either side of a registration's publisher signal can
-    retrieve the record.
+    retrieve the record. The renewal join tries the top-level regnum first and
+    then every ``<additionalEntry>`` interior number
+    (:func:`_registration_join_keys`), so a renewal citing an interior number
+    still flips the parent's ``was_renewed`` flag.
     """
     bind_contextvars(phase="registrations")
     try:
@@ -341,17 +363,16 @@ def _ingest_registrations(
             for record in iter_nypl_reg_directory(reg_dir, stats=parser_stats):
                 was_renewed = False
                 renewal = None
-                if record.regnum is not None:
-                    for join_key in make_renewal_keys(record.regnum, record.reg_year):
-                        entry_id_blob = store.ren_by_oreg.get(join_key)
-                        if entry_id_blob is not None:
-                            was_renewed = True
-                            ren_blob = store.ren_by_id.get(entry_id_blob)
-                            if ren_blob is not None:  # pragma: no branch
-                                renewal = decode_ren(ren_blob)
-                            # Phase 1 projects the first matched renewal only;
-                            # per-volume renewal projection is deferred.
-                            break
+                for join_key in _registration_join_keys(record):
+                    entry_id_blob = store.ren_by_oreg.get(join_key)
+                    if entry_id_blob is not None:
+                        was_renewed = True
+                        ren_blob = store.ren_by_id.get(entry_id_blob)
+                        if ren_blob is not None:  # pragma: no branch
+                            renewal = decode_ren(ren_blob)
+                        # Phase 1 projects the first matched renewal only;
+                        # per-volume renewal projection is deferred.
+                        break
                 if was_renewed:
                     joins += 1
                 indexed = index_reg(record, was_renewed=was_renewed, renewal=renewal)

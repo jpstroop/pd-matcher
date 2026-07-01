@@ -522,6 +522,84 @@ def test_prev_regnums_skips_empty_elements(tmp_path: Path) -> None:
     assert record.prev_regnums == ("A200000",)
 
 
+def test_additional_entry_join_keys_captured_with_strict_own_regdate(tmp_path: Path) -> None:
+    """Each ``<additionalEntry>`` contributes its own ``(regnum, year)`` pair."""
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry regnum="BB21264" id="AE1"><title>Bundled claims.</title>'
+        '<regDate date="1962-07-12">Jul. 12, 1962</regDate>'
+        '<additionalEntry regnum="BB21524">'
+        '<regDate date="1962-08-15">Aug. 15, 1962</regDate>'
+        "<regNum>BB21524</regNum></additionalEntry>"
+        '<additionalEntry regnum="BB21695">'
+        '<regDate date="1962-09-11">Sept. 11, 1962</regDate>'
+        "<regNum>BB21695</regNum></additionalEntry></copyrightEntry>",
+    )
+    assert record.additional_join_keys == (("BB21524", 1962), ("BB21695", 1962))
+
+
+def test_additional_entry_without_own_regdate_is_skipped(tmp_path: Path) -> None:
+    """Strict: an additionalEntry lacking its own ``<regDate>`` is dropped, not inherited."""
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry regnum="BB21264" id="AE2"><title>Missing interior date.</title>'
+        '<regDate date="1962-07-12">Jul. 12, 1962</regDate>'
+        '<additionalEntry regnum="BB99999">'
+        '<pubDate date="1962-11">Nov62</pubDate>'
+        "<regNum>BB99999</regNum></additionalEntry></copyrightEntry>",
+    )
+    assert record.additional_join_keys == ()
+
+
+def test_additional_entry_without_regnum_is_skipped(tmp_path: Path) -> None:
+    """An additionalEntry with a date but no usable regnum yields no key."""
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry regnum="BB21264" id="AE3"><title>No interior regnum.</title>'
+        '<regDate date="1962-07-12">Jul. 12, 1962</regDate>'
+        "<additionalEntry>"
+        '<regDate date="1962-08-15">Aug. 15, 1962</regDate>'
+        "</additionalEntry></copyrightEntry>",
+    )
+    assert record.additional_join_keys == ()
+
+
+def test_additional_entry_regnum_prefers_attribute_over_regnum_text(tmp_path: Path) -> None:
+    """The ``regnum`` attribute wins over inline ``<regNum>`` text (spacing variance)."""
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry regnum="BB21264" id="AE4"><title>Attribute preferred.</title>'
+        '<regDate date="1962-07-12">Jul. 12, 1962</regDate>'
+        '<additionalEntry regnum="BB21524">'
+        '<regDate date="1962-08-15">Aug. 15, 1962</regDate>'
+        "<regNum>BB 21524</regNum></additionalEntry></copyrightEntry>",
+    )
+    assert record.additional_join_keys == (("BB21524", 1962),)
+
+
+def test_additional_entry_regnum_falls_back_to_regnum_text(tmp_path: Path) -> None:
+    """With no ``regnum`` attribute the inline ``<regNum>`` text supplies the number."""
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry regnum="A160000" id="AE5"><title>Range interior number.</title>'
+        '<regDate date="1941-12-15">Dec. 15, 1941</regDate>'
+        "<additionalEntry>"
+        '<regDate date="1941-12-20">Dec. 20, 1941</regDate>'
+        "<regNum>A160078 A160079</regNum></additionalEntry></copyrightEntry>",
+    )
+    assert record.additional_join_keys == (("A160078 A160079", 1941),)
+
+
+def test_no_additional_entry_yields_empty_tuple(tmp_path: Path) -> None:
+    """A registration with no ``<additionalEntry>`` carries an empty tuple."""
+    record = _only_record(
+        tmp_path,
+        '<copyrightEntry regnum="A111111" id="AE6"><title>No bundled claims.</title>'
+        '<regDate date="1940-05-10">May 10, 1940</regDate></copyrightEntry>',
+    )
+    assert record.additional_join_keys == ()
+
+
 def test_year_rejected_when_below_plausible_floor(tmp_path: Path) -> None:
     """A regDate with year ``0159`` is rejected and the year falls back."""
     stats = NyplRegParseStats()
