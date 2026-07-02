@@ -28,7 +28,9 @@ from pd_groundtruth.review_db import ReviewPairRow
 from pd_matcher.match.signals.multipart import is_series_level
 from pd_matcher.match.signals.translation import any_value_matches
 from pd_matcher.models import MarcRecord
+from pd_matcher.normalize.claimants import claimant_renewal_label
 from pd_matcher.normalize.lccn import canonical as canonical_lccn
+from pd_matcher.normalize.registration_numbers import reg_format
 
 _TITLE_TRUNCATE: int = 60
 _ELLIPSIS: str = "…"
@@ -125,10 +127,12 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
 
     cce_renewal_id: str | None
     cce_renewal_oreg: str | None
+    cce_renewal_format: str
     cce_renewal_rdat: date | None
     cce_renewal_author: str | None
     cce_renewal_title: str | None
     cce_renewal_claimants: str | None
+    cce_renewal_renewed_by: str
     cce_renewal_new_matter: str | None
     cce_renewal_claimants_differ: bool
     cce_has_renewal_details: bool
@@ -431,10 +435,12 @@ def build_card(
         cce_prev_regnums=_split_prev_regnums(row.cce_prev_regnums),
         cce_renewal_id=row.cce_renewal_id,
         cce_renewal_oreg=row.cce_renewal_oreg,
+        cce_renewal_format=reg_format(row.cce_renewal_oreg),
         cce_renewal_rdat=_parse_iso_date(row.cce_renewal_rdat),
         cce_renewal_author=row.cce_renewal_author,
         cce_renewal_title=row.cce_renewal_title,
         cce_renewal_claimants=row.cce_renewal_claimants,
+        cce_renewal_renewed_by=claimant_renewal_label(row.cce_renewal_claimants),
         cce_renewal_new_matter=row.cce_renewal_new_matter,
         cce_renewal_claimants_differ=_renewal_claimants_differ(
             row.cce_claimants, row.cce_renewal_claimants

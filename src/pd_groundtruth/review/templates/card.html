@@ -146,6 +146,7 @@
       </div>
       <div class="row">
         {%- if card.cce_renewal_claimants %}<div class="field"><div class="k">renewal claimants</div><div class="v">{{ card.cce_renewal_claimants }}</div></div>{% endif -%}
+        <div class="field"><div class="k">renewed by</div><div class="v">{{ card.cce_renewal_renewed_by }}</div></div>
       </div>
       <div class="row">
         {%- if card.cce_reg_year is not none %}<div class="field"><div class="k">original reg year</div><div class="v">{{ card.cce_reg_year }}</div></div>{% endif -%}
@@ -155,6 +156,7 @@
         {%- if card.cce_renewal_new_matter %}<div class="field"><div class="k">new matter (renewal)</div><div class="v cce-new-matter">{{ card.cce_renewal_new_matter }}</div></div>{% endif -%}
       </div>
       <div class="row">
+        <div class="field"><div class="k">format</div><div class="v">{{ card.cce_renewal_format }}</div></div>
         {%- if card.cce_renewal_id or card.cce_renewal_oreg %}<div class="renewal-meta">
           {%- if card.cce_renewal_id %}<span>renewal id <code>{{ card.cce_renewal_id }}</code></span>{% endif -%}
           {%- if card.cce_renewal_oreg %}<span>oreg <code>{{ card.cce_renewal_oreg }}</code></span>{% endif -%}

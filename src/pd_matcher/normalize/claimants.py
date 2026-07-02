@@ -67,6 +67,47 @@ def parse_claimants(claimants: str | None) -> tuple[tuple[str, str], ...]:
     return tuple(pairs)
 
 
+_CLAIMANT_RENEWAL_LABELS: dict[str, str] = {
+    "A": "author",
+    "W": "widow/widower (estate)",
+    "C": "child (estate)",
+    "E": "executor (estate)",
+    "NK": "next of kin (estate)",
+    "PWH": "proprietor (work for hire)",
+    "PPW": "proprietor (posthumous work)",
+    "PCW": "proprietor (composite work)",
+}
+
+_CLAIMANT_RENEWAL_UNKNOWN: str = "Unknown"
+
+
+def claimant_renewal_label(claimants: str | None) -> str:
+    """Describe who exercised the statutory renewal right, in human terms.
+
+    Maps each claimant's statutory code to the relationship it encodes — the
+    author renewing in person, an estate class (widow/widower, child, executor,
+    next of kin), or a proprietor class (work for hire, posthumous, composite) —
+    so a labeler sees who renewed without decoding the raw codes. When a renewal
+    carries more than one distinct relationship the labels are joined with
+    ``"; "`` in source order, de-duplicated.
+
+    Args:
+        claimants: The renewal's raw claimants transcription, or ``None``.
+
+    Returns:
+        A concise renewal-right label; :data:`_CLAIMANT_RENEWAL_UNKNOWN`
+        (``"Unknown"``) when no recognized code is present.
+    """
+    labels: list[str] = []
+    for _name, code in parse_claimants(claimants):
+        label = _CLAIMANT_RENEWAL_LABELS.get(code)
+        if label is not None and label not in labels:
+            labels.append(label)
+    if not labels:
+        return _CLAIMANT_RENEWAL_UNKNOWN
+    return "; ".join(labels)
+
+
 def claimant_class_indicators(pairs: tuple[tuple[str, str], ...]) -> tuple[bool, bool, bool]:
     """Return ``(is_author, is_estate, is_proprietor)`` over parsed claimants.
 
@@ -114,5 +155,6 @@ __all__ = [
     "CLAIMANT_PROPRIETOR_CODES",
     "author_claimant_name",
     "claimant_class_indicators",
+    "claimant_renewal_label",
     "parse_claimants",
 ]

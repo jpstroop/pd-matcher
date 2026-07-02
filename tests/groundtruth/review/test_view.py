@@ -290,6 +290,49 @@ def test_build_card_passes_pairing_type_renewal_through() -> None:
     assert tuple(bar.scorer for bar in card.evidence) == ("title", "claimants")
 
 
+def test_build_card_renewal_format_book_from_oreg() -> None:
+    row = _row(_marc(), evidence_json="{}", pairing_type="renewal", cce_renewal_oreg="A123")
+    assert build_card(row).cce_renewal_format == "Book"
+
+
+def test_build_card_renewal_format_periodical_contribution_from_oreg() -> None:
+    row = _row(_marc(), evidence_json="{}", pairing_type="renewal", cce_renewal_oreg="BB99")
+    assert build_card(row).cce_renewal_format == "Periodical contribution"
+
+
+def test_build_card_registration_renewal_format_unknown_without_oreg() -> None:
+    assert build_card(_row(_marc(), evidence_json="{}")).cce_renewal_format == "Unknown"
+
+
+def test_build_card_renewed_by_estate_child_from_claimants() -> None:
+    row = _row(
+        _marc(),
+        evidence_json="{}",
+        pairing_type="renewal",
+        cce_renewal_claimants="Rhoda F. Haynes|C",
+    )
+    assert build_card(row).cce_renewal_renewed_by == "child (estate)"
+
+
+def test_build_card_renewed_by_author_from_claimants() -> None:
+    row = _row(_marc(), evidence_json="{}", pairing_type="renewal", cce_renewal_claimants="Foo|A")
+    assert build_card(row).cce_renewal_renewed_by == "author"
+
+
+def test_build_card_renewed_by_proprietor_work_for_hire_from_claimants() -> None:
+    row = _row(
+        _marc(),
+        evidence_json="{}",
+        pairing_type="renewal",
+        cce_renewal_claimants="Gainsborough Pictures|PWH",
+    )
+    assert build_card(row).cce_renewal_renewed_by == "proprietor (work for hire)"
+
+
+def test_build_card_registration_renewed_by_unknown() -> None:
+    assert build_card(_row(_marc(), evidence_json="{}")).cce_renewal_renewed_by == "Unknown"
+
+
 def test_build_card_carries_evidence_bars() -> None:
     card = build_card(_row(_marc(), evidence_json='{"title.token_set": 1.0, "name.author": 0.25}'))
     assert [(bar.scorer, bar.normalized) for bar in card.evidence] == [
