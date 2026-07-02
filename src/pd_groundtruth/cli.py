@@ -589,6 +589,7 @@ def build_renewal_queue_command(
         f"records_scanned={summary.records_scanned} "
         f"renewal_havers={summary.renewal_havers} "
         f"joined_excluded={summary.joined_excluded} "
+        f"class_filtered={summary.class_filtered} "
         f"scenario4_written={summary.scenario4_written}"
     )
 

@@ -48,8 +48,18 @@ For every in-scope MARC record in the pool:
    renewal nor any of ``R``'s join keys names a registration we hold; a joined
    ``R`` is skipped because its work is already determined by a registration we
    hold.
-3. **Scenario 4 (renewal-only):** the surviving unjoined renewal ``R`` is
-   emitted as a ``pairing_type="renewal"`` pair carrying a scenario-4
+3. **Class-scope check (O(1)):** the original-registration class of ``R``
+   (:func:`pd_matcher.normalize.registration_numbers.reg_class` of ``R.oreg``)
+   must be one NYPL actually transcribed at scale. NYPL-reg encoded only certain
+   classes (~98% the book family ``A``/``AA``/``AF``/``AFO``/``AI``/``AIO``, plus
+   ``BB``/``B`` periodical and a sliver of ``DP``/``DF``/``D`` drama); a renewal
+   whose ``oreg`` class is one NYPL never encoded (``E`` music, ``F`` maps, ``TX``
+   post-1978, ...) can never join a registration we hold and is dropped. The
+   allowed class set is derived from the same registration scan that builds the
+   join filter (:class:`RegistrationScan`). A renewal with a missing or
+   unparseable ``oreg`` is kept — the filter never drops on absent data.
+4. **Scenario 4 (renewal-only):** the surviving unjoined, in-scope-class renewal
+   ``R`` is emitted as a ``pairing_type="renewal"`` pair carrying a scenario-4
    ``audit_note``. This is the labeling candidate.
 
 The renewal arm uses the weighted-mean combiner because the renewal pathway is
@@ -67,6 +77,7 @@ MARC records already present in the target review DB — registration or renewal
 registration queue without duplicating a MARC.
 """
 
+from collections import Counter
 from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Iterator
@@ -112,6 +123,7 @@ from pd_matcher.match.scorers.title import score_title
 from pd_matcher.match.scorers.year import score_year
 from pd_matcher.models import MarcRecord
 from pd_matcher.models import NyplRenRecord
+from pd_matcher.normalize.registration_numbers import reg_class
 from pd_matcher.parsers.marc import iter_marc_records
 
 _LOGGER = getLogger(__name__)
@@ -119,6 +131,15 @@ _LOGGER = getLogger(__name__)
 _CALIBRATOR_NAME: str = "calibrator.msgpack"
 _FILL_LOG_INTERVAL: int = 250
 _SCANNED_LOG_INTERVAL: int = 5000
+
+# NYPL transcribed only registration classes that reach a threshold count in the
+# index: ~98% are the book family (A/AA/AF/AFO/AI/AIO), with BB/B periodical and
+# a sliver of DP/DF/D drama registrations. Classes NYPL never encoded (E music,
+# F maps, G/H art, J photos, K prints, L/M film, TX/PA/VA/SR post-1978, UCCWORK,
+# ...) appear at negligible counts, so a renewal citing such an original-
+# registration class can never join a registration we hold and is out of scope.
+# The allowed set is derived per-build as the classes clearing this floor.
+_CLASS_MIN_REGS: int = 100
 
 SOURCE_RENEWAL: str = "renewal"
 
@@ -288,14 +309,17 @@ class RenewalBuildSummary(Struct, frozen=True, forbid_unknown_fields=True):
     those already in the target DB); ``renewal_havers`` counts those whose best
     renewal cleared ``min_score`` and therefore reached the join check;
     ``joined_excluded`` counts renewal-havers dropped because the best renewal is
-    joined to a registration in our index; ``scenario4_written`` counts the
-    renewal-only pairs emitted (``renewal_havers == joined_excluded +
-    scenario4_written``).
+    joined to a registration in our index; ``class_filtered`` counts survivors of
+    the join check dropped because the best renewal's original-registration class
+    is one NYPL never encoded (so it can never join a registration we hold);
+    ``scenario4_written`` counts the renewal-only pairs emitted (``renewal_havers
+    == joined_excluded + class_filtered + scenario4_written``).
     """
 
     records_scanned: int
     renewal_havers: int
     joined_excluded: int
+    class_filtered: int
     scenario4_written: int
 
 
@@ -368,7 +392,7 @@ class JoinFilter(Struct, frozen=True, forbid_unknown_fields=True):
         is consulted only when the renewal carries both an ``oreg`` and an
         ``odat`` — the exact condition under which the builder writes a
         ``ren_by_oreg`` join — so the renewal's keys align byte-for-byte with the
-        registration keys collected in :func:`_build_join_filter`.
+        registration keys collected in :func:`_scan_registrations`.
         """
         if renewal.id in self.renewal_ids:
             return True
@@ -379,23 +403,50 @@ class JoinFilter(Struct, frozen=True, forbid_unknown_fields=True):
         )
 
 
-def _build_join_filter(lookup: NyplIndexLookup) -> JoinFilter:
-    """Build the :class:`JoinFilter` from a single scan of the registration store.
+class RegistrationScan(Struct, frozen=True, forbid_unknown_fields=True):
+    """Both products of the single registration scan the queue build runs at startup.
 
-    One pass over :meth:`pd_matcher.index.lookup.NyplIndexLookup.iter_registrations`
-    collects both the projected joined-renewal ids (from ``was_renewed`` +
-    ``renewal_id``) and the complete set of top-level registration join keys
-    (from ``regnum``/``reg_year`` via :func:`make_renewal_keys`). Iterating once
-    keeps the startup cost of the full-corpus scan to a single walk.
+    ``join_filter`` is the joined-renewal signal (see :class:`JoinFilter`);
+    ``allowed_classes`` is the set of registration classes NYPL actually
+    transcribed at scale — every class whose in-index registration count clears
+    :data:`_CLASS_MIN_REGS`. Both are harvested in the *same* pass over
+    :meth:`pd_matcher.index.lookup.NyplIndexLookup.iter_registrations`, so the
+    class-scope filter costs no extra walk of the corpus.
+    """
+
+    join_filter: JoinFilter
+    allowed_classes: frozenset[str]
+
+
+def _scan_registrations(lookup: NyplIndexLookup) -> RegistrationScan:
+    """Harvest the join filter and the allowed-class set in one registration scan.
+
+    A single pass over
+    :meth:`pd_matcher.index.lookup.NyplIndexLookup.iter_registrations` collects:
+
+    * the projected joined-renewal ids (from ``was_renewed`` + ``renewal_id``);
+    * the complete set of top-level registration join keys (from
+      ``regnum``/``reg_year`` via :func:`make_renewal_keys`); and
+    * a tally of every registration's :func:`reg_class`, from which the allowed
+      class set is derived as those clearing :data:`_CLASS_MIN_REGS`.
+
+    Folding the class tally into this pass keeps the full-corpus scan to a single
+    walk — no second iteration of the registration store is performed.
     """
     renewal_ids: set[str] = set()
     reg_keys: set[bytes] = set()
+    class_counts: Counter[str] = Counter()
     for reg in lookup.iter_registrations():
         if reg.was_renewed and reg.renewal_id is not None:
             renewal_ids.add(reg.renewal_id)
         if reg.regnum is not None:
             reg_keys.update(make_renewal_keys(reg.regnum, reg.reg_year))
-    return JoinFilter(renewal_ids=frozenset(renewal_ids), reg_keys=frozenset(reg_keys))
+        class_counts[reg_class(reg.regnum)] += 1
+    join_filter = JoinFilter(renewal_ids=frozenset(renewal_ids), reg_keys=frozenset(reg_keys))
+    allowed_classes = frozenset(
+        cls for cls, count in class_counts.items() if cls and count >= _CLASS_MIN_REGS
+    )
+    return RegistrationScan(join_filter=join_filter, allowed_classes=allowed_classes)
 
 
 def _iter_pool_records(pool: Path) -> Iterator[MarcRecord]:
@@ -416,12 +467,14 @@ def build_renewal_queue(
     """Build (or append) scenario-4 renewal-only pairs into ``out_path``.
 
     Loads the IDF caches and calibrator beside ``index_path``, opens the CCE
-    index and the review DB, computes the joined-renewal-id set once, and runs
-    the renewal-first pipeline over every pool MARC not already queued: the cheap
-    renewal search filters to renewal-havers, then the O(1) join check excludes
-    any book whose best renewal is already joined to a registration in the index.
-    Survivors are emitted as ``pairing_type="renewal"`` pairs with a scenario-4
-    ``audit_note``.
+    index and the review DB, derives the joined-renewal-id set and the allowed
+    original-registration class set from one registration scan, and runs the
+    renewal-first pipeline over every pool MARC not already queued: the cheap
+    renewal search filters to renewal-havers, the O(1) join check excludes any
+    book whose best renewal is already joined to a registration in the index, and
+    the O(1) class-scope check excludes any whose best renewal's ``oreg`` class is
+    one NYPL never transcribed. Survivors are emitted as ``pairing_type="renewal"``
+    pairs with a scenario-4 ``audit_note``.
 
     Args:
         pool: Root directory whose ``<lang>/*.xml`` shards form the pool.
@@ -463,13 +516,18 @@ def build_renewal_queue(
     scanned = 0
     renewal_havers = 0
     joined_excluded = 0
+    class_filtered = 0
     scenario4_written = 0
     with NyplIndexLookup(index_path) as lookup, ReviewDb.connect(out_path) as db:
-        join_filter = _build_join_filter(lookup)
+        scan = _scan_registrations(lookup)
+        join_filter = scan.join_filter
+        allowed_classes = scan.allowed_classes
         _LOGGER.info(
-            "renewal queue: %d joined renewal ids, %d registration join keys in index",
+            "renewal queue: %d joined renewal ids, %d registration join keys, "
+            "allowed oreg classes=%s",
             len(join_filter.renewal_ids),
             len(join_filter.reg_keys),
+            ",".join(sorted(allowed_classes)) or "(none)",
         )
         seen = {marc_id for marc_id, _uuid in db.pair_keys()}
         # Commit incrementally so an interrupted long build keeps its progress:
@@ -486,10 +544,11 @@ def build_renewal_queue(
                     db.commit()
                     _LOGGER.info(
                         "renewal queue: scanned=%d renewal_havers=%d "
-                        "joined_excluded=%d scenario4_written=%d",
+                        "joined_excluded=%d class_filtered=%d scenario4_written=%d",
                         scanned,
                         renewal_havers,
                         joined_excluded,
+                        class_filtered,
                         scenario4_written,
                     )
                 best = best_renewal(marc, lookup.candidates_for_renewal(marc, window), score_fn)
@@ -501,6 +560,10 @@ def build_renewal_queue(
                 renewal_havers += 1
                 if join_filter.is_joined(renewal):
                     joined_excluded += 1
+                    continue
+                oreg_class = reg_class(renewal.oreg)
+                if oreg_class and oreg_class not in allowed_classes:
+                    class_filtered += 1
                     continue
                 pair = _build_renewal_pair_insert(
                     marc,
@@ -518,16 +581,18 @@ def build_renewal_queue(
             db.commit()
     _LOGGER.info(
         "renewal queue complete: scanned=%d renewal_havers=%d "
-        "joined_excluded=%d scenario4_written=%d",
+        "joined_excluded=%d class_filtered=%d scenario4_written=%d",
         scanned,
         renewal_havers,
         joined_excluded,
+        class_filtered,
         scenario4_written,
     )
     return RenewalBuildSummary(
         records_scanned=scanned,
         renewal_havers=renewal_havers,
         joined_excluded=joined_excluded,
+        class_filtered=class_filtered,
         scenario4_written=scenario4_written,
     )
 
@@ -535,6 +600,7 @@ def build_renewal_queue(
 __all__ = [
     "SOURCE_RENEWAL",
     "JoinFilter",
+    "RegistrationScan",
     "RenewalBuildSummary",
     "RenewalScore",
     "RenewalScoreFn",
