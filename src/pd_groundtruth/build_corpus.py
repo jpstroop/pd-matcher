@@ -30,7 +30,6 @@ from pd_groundtruth.acquire import stream_dump_records
 from pd_groundtruth.disk_guard import DiskSpaceGuard
 from pd_groundtruth.disk_guard import InsufficientDiskSpaceError
 from pd_groundtruth.filter import _drop_reason
-from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.manifest import DumpEntry
 from pd_groundtruth.manifest import fetch_manifest
 from pd_groundtruth.writer import MarcxmlCollectionWriter
@@ -53,7 +52,7 @@ def build_corpus(
     output_path: Path,
     min_year: int,
     languages: frozenset[str] | None = None,
-    manifest_url: str = DEFAULT_MANIFEST_URL,
+    manifest_url: str | None = None,
     max_dumps: int | None = None,
     min_free_space_mb: int = _DEFAULT_MIN_FREE_SPACE_MB,
 ) -> CorpusReport:
@@ -71,7 +70,8 @@ def build_corpus(
             a set is given, an otherwise-eligible record is dropped unless its
             008 language code is in the set; this narrows within, and never
             widens, the language check.
-        manifest_url: Absolute URL of the dump manifest JSON.
+        manifest_url: Absolute URL of the dump manifest JSON. ``None`` (the
+            default) discovers Princeton's latest successful full dump.
         max_dumps: Optional cap on the number of dumps processed (for testing or
             partial runs).
         min_free_space_mb: Minimum free space, in MB, required on both the temp

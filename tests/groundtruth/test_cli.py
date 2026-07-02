@@ -20,7 +20,6 @@ from pd_groundtruth.filter import FilterReport
 from pd_groundtruth.harvest_renewal_pairs import PROVENANCE_POSITIVE
 from pd_groundtruth.harvest_renewal_pairs import HarvestedPair
 from pd_groundtruth.harvest_renewal_pairs import HarvestSummary
-from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
@@ -895,7 +894,7 @@ def test_build_corpus_command_defaults_to_moving_wall_and_all_languages(tmp_path
     assert kwargs["min_year"] == date.today().year - 95
     assert kwargs["languages"] is None
     assert kwargs["max_dumps"] is None
-    assert kwargs["manifest_url"] == DEFAULT_MANIFEST_URL
+    assert kwargs["manifest_url"] is None
     assert kwargs["min_free_space_mb"] == 2048
 
 
