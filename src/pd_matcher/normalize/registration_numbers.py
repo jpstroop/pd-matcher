@@ -34,6 +34,7 @@ _NON_ALNUM: Pattern[str] = re_compile(r"[^A-Z0-9]")
 
 _INTERNAL_WS: Pattern[str] = re_compile(r"\S+\s+\S+")
 _RANGE_TOKEN: Pattern[str] = re_compile(r"^[A-Z]*[0-9]+$")
+_CLASS_PREFIX: Pattern[str] = re_compile(r"^[A-Z]+")
 
 _SEP = "[\\s\\u2014\\u2013\\-]*"
 
@@ -57,6 +58,32 @@ def normalize_regnum(raw: str) -> str:
     for pattern, replacement in _CLASS_PREFIX_EXPANSIONS:
         upper = pattern.sub(replacement, upper)
     return _NON_ALNUM.sub("", upper)
+
+
+def reg_class(raw: str | None) -> str:
+    """Return the leading alpha class prefix of a normalized registration number.
+
+    A CCE registration number opens with an alphabetic class token (``A`` book,
+    ``BB`` periodical, ``DP`` dramatic composition published, ``E`` music, ``F``
+    map, ``TX`` post-1978, ...) followed by its serial digits. The class is what
+    determines whether NYPL ever transcribed the registration at all, so callers
+    scope on it. :func:`normalize_regnum` is applied first so verbose class
+    phrases (``A--Foreign`` -> ``AF``) and surface noise collapse before the
+    prefix is read.
+
+    Args:
+        raw: The registration number as transcribed (``regnum`` or ``oreg``), or
+            ``None`` when the record carries none.
+
+    Returns:
+        The uppercase leading alpha class token (``"A"``, ``"BB"``, ``"TX"``,
+        ``"UCCWORK"``), or ``""`` when ``raw`` is ``None`` or normalizes to a
+        value with no leading alphabetic character.
+    """
+    if raw is None:
+        return ""
+    match = _CLASS_PREFIX.match(normalize_regnum(raw))
+    return match.group(0) if match is not None else ""
 
 
 def is_multi_regnum(raw: str) -> bool:
@@ -91,4 +118,5 @@ def is_multi_regnum(raw: str) -> bool:
 __all__ = [
     "is_multi_regnum",
     "normalize_regnum",
+    "reg_class",
 ]

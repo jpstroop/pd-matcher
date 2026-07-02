@@ -130,6 +130,7 @@ def test_build_renewal_queue_command_passes_arguments_and_reports(tmp_path: Path
         records_scanned=12,
         renewal_havers=5,
         joined_excluded=3,
+        class_filtered=1,
         scenario4_written=2,
     )
     with patch("pd_groundtruth.cli.build_renewal_queue", return_value=summary) as mock_build:
@@ -158,6 +159,7 @@ def test_build_renewal_queue_command_passes_arguments_and_reports(tmp_path: Path
     assert "records_scanned=12" in result.stdout
     assert "renewal_havers=5" in result.stdout
     assert "joined_excluded=3" in result.stdout
+    assert "class_filtered=1" in result.stdout
     assert "scenario4_written=2" in result.stdout
 
 
@@ -166,6 +168,7 @@ def _renewal_summary() -> RenewalBuildSummary:
         records_scanned=1,
         renewal_havers=1,
         joined_excluded=0,
+        class_filtered=0,
         scenario4_written=1,
     )
 

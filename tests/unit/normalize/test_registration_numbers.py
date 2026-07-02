@@ -6,6 +6,7 @@ from pytest import mark
 
 from pd_matcher.normalize.registration_numbers import is_multi_regnum
 from pd_matcher.normalize.registration_numbers import normalize_regnum
+from pd_matcher.normalize.registration_numbers import reg_class
 
 
 def test_already_canonical_passes_through() -> None:
@@ -73,6 +74,39 @@ def test_variant_pair_canonicalises_to_same_token() -> None:
     assert normalize_regnum("AI-9217") == normalize_regnum("AI9217")
     assert normalize_regnum("A—Foreign 32851") == normalize_regnum("AF32851")
     assert normalize_regnum("A ad int. 8956") == normalize_regnum("AI8956")
+
+
+@mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("A160078", "A"),
+        ("AA12345", "AA"),
+        ("AF32851", "AF"),
+        ("AI9217", "AI"),
+        ("AFO123", "AFO"),
+        ("AIO456", "AIO"),
+        ("BB21524", "BB"),
+        ("B573742", "B"),
+        ("DP123", "DP"),
+        ("TX7654321", "TX"),
+        ("F12345", "F"),
+        ("UCCWORK123", "UCCWORK"),
+        ("A--Foreign 32851", "AF"),
+        ("A ad int. 8956", "AI"),
+        ("a163122", "A"),
+    ],
+)
+def test_reg_class_reads_leading_alpha_class(raw: str, expected: str) -> None:
+    assert reg_class(raw) == expected
+
+
+@mark.parametrize("raw", ["963122", " -.— ", "", "0123"])
+def test_reg_class_returns_sentinel_for_unparseable(raw: str) -> None:
+    assert reg_class(raw) == ""
+
+
+def test_reg_class_returns_sentinel_for_none() -> None:
+    assert reg_class(None) == ""
 
 
 @given(value=st.text(alphabet=st.characters(min_codepoint=32, max_codepoint=126), max_size=40))

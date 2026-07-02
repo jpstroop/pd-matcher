@@ -61,12 +61,16 @@ def _marc(control_id: str = "ctrl-1", year: int | None = 1953) -> MarcRecord:
 
 
 def _renewal(
-    entry_id: str = "ren-entry-1", odat_year: int = 1953, *, ren_id: str = "R200001"
+    entry_id: str = "ren-entry-1",
+    odat_year: int = 1953,
+    *,
+    ren_id: str = "R200001",
+    oreg: str = "A111111",
 ) -> NyplRenRecord:
     return NyplRenRecord(
         id=ren_id,
         entry_id=entry_id,
-        oreg="A111111",
+        oreg=oreg,
         odat=date(odat_year, 1, 1),
         rdat=date(1981, 4, 1),
         author="Renewal Author",
@@ -289,11 +293,11 @@ def test_build_renewal_pair_insert_handles_renewal_without_odat_or_rdat() -> Non
 
 
 # --------------------------------------------------------------------------- #
-# _build_join_filter / JoinFilter
+# _scan_registrations / JoinFilter / RegistrationScan
 # --------------------------------------------------------------------------- #
 
 
-def test_build_join_filter_collects_projection_ids_and_registration_keys() -> None:
+def test_scan_registrations_collects_projection_ids_and_registration_keys() -> None:
     """The projection set takes only renewed+id regs; the key set takes every regnum."""
     lookup = _FakeLookup(
         {},
@@ -304,7 +308,7 @@ def test_build_join_filter_collects_projection_ids_and_registration_keys() -> No
             _indexed_reg("u4", was_renewed=True, renewal_id="R4"),
         ),
     )
-    join_filter = module._build_join_filter(cast(NyplIndexLookup, lookup))
+    join_filter = module._scan_registrations(cast(NyplIndexLookup, lookup)).join_filter
     assert join_filter.renewal_ids == frozenset({"R1", "R4"})
     assert join_filter.reg_keys == frozenset(
         {
@@ -313,6 +317,27 @@ def test_build_join_filter_collects_projection_ids_and_registration_keys() -> No
             make_renewal_key("A333333", 1953),
         }
     )
+
+
+def test_scan_registrations_allows_only_classes_clearing_the_floor(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A class at/above the reg-count floor is allowed; a stray class below it is not."""
+    monkeypatch.setattr(module, "_CLASS_MIN_REGS", 2)
+    lookup = _FakeLookup(
+        {},
+        registrations=(
+            _indexed_reg("u1", regnum="A111111"),
+            _indexed_reg("u2", regnum="A222222"),
+            _indexed_reg("u3", regnum="A333333"),
+            _indexed_reg("u4", regnum="F444444"),
+            _indexed_reg("u5", regnum=None),
+        ),
+    )
+    allowed = module._scan_registrations(cast(NyplIndexLookup, lookup)).allowed_classes
+    assert allowed == frozenset({"A"})
+    assert "F" not in allowed
+    assert "" not in allowed
 
 
 def test_join_filter_is_joined_via_projected_renewal_id() -> None:
@@ -447,6 +472,7 @@ def _patch_wiring(
         module, "build_combiner", lambda _c, **_k: _FakeCombiner(renewal_calibrated)
     )
     monkeypatch.setattr(module, "NyplIndexLookup", lambda _path: lookup)
+    monkeypatch.setattr(module, "_CLASS_MIN_REGS", 1)
     monkeypatch.setattr(
         module,
         "_make_score_fn",
@@ -473,13 +499,16 @@ def test_build_renewal_queue_emits_scenario_4_for_unjoined_renewal(
     _write_pool(tmp_path / "pool", ("ctrl-a",))
     lookup = _FakeLookup(
         {"ctrl-a": (_renewal("ea", ren_id="RUNJOINED"),)},
-        registrations=(_indexed_reg("u1", was_renewed=True, renewal_id="ROTHER"),),
+        registrations=(
+            _indexed_reg("u1", was_renewed=True, renewal_id="ROTHER", regnum="A555555"),
+        ),
     )
     _patch_wiring(monkeypatch, lookup, 0.9)
     summary = _run(tmp_path)
     assert summary.records_scanned == 1
     assert summary.renewal_havers == 1
     assert summary.joined_excluded == 0
+    assert summary.class_filtered == 0
     assert summary.scenario4_written == 1
     with ReviewDb.connect(tmp_path / "review.db") as db:
         pair = db.get_pair(1)
@@ -585,6 +614,58 @@ def test_build_renewal_queue_emits_when_registration_key_does_not_match(
     assert summary.scenario4_written == 1
 
 
+def test_build_renewal_queue_class_filters_out_of_scope_oreg_class(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """An unjoined renewal whose oreg class NYPL never encoded is class-filtered."""
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    lookup = _FakeLookup(
+        {"ctrl-a": (_renewal("ea", ren_id="RUNJOINED", oreg="F444444"),)},
+        registrations=(_indexed_reg("u1", regnum="A555555"),),
+    )
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    summary = _run(tmp_path)
+    assert summary.renewal_havers == 1
+    assert summary.joined_excluded == 0
+    assert summary.class_filtered == 1
+    assert summary.scenario4_written == 0
+    with ReviewDb.connect(tmp_path / "review.db") as db:
+        assert db.get_pair(1) is None
+
+
+def test_build_renewal_queue_emits_in_scope_periodical_oreg_class(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """An unjoined renewal whose oreg class (BB) NYPL encoded is emitted."""
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    lookup = _FakeLookup(
+        {"ctrl-a": (_renewal("ea", ren_id="RUNJOINED", oreg="BB222222"),)},
+        registrations=(_indexed_reg("u1", regnum="BB999999"),),
+    )
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    summary = _run(tmp_path)
+    assert summary.renewal_havers == 1
+    assert summary.class_filtered == 0
+    assert summary.scenario4_written == 1
+
+
+def test_build_renewal_queue_keeps_renewal_without_oreg(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A renewal with no oreg is never class-filtered — the filter ignores missing data."""
+    _write_pool(tmp_path / "pool", ("ctrl-a",))
+    bare = NyplRenRecord(id="RUNJOINED", entry_id="ea", title="T", claimants="C")
+    lookup = _FakeLookup(
+        {"ctrl-a": (bare,)},
+        registrations=(_indexed_reg("u1", regnum="A555555"),),
+    )
+    _patch_wiring(monkeypatch, lookup, 0.9)
+    summary = _run(tmp_path)
+    assert summary.renewal_havers == 1
+    assert summary.class_filtered == 0
+    assert summary.scenario4_written == 1
+
+
 def test_build_renewal_queue_skips_non_renewal_haver_and_builds_join_set_once(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -627,7 +708,8 @@ def test_build_renewal_queue_writes_multiple_pairs_and_commits(
         {
             "ctrl-a": (_renewal("ea", ren_id="RA"),),
             "ctrl-b": (_renewal("eb", ren_id="RB"),),
-        }
+        },
+        registrations=(_indexed_reg("u1", regnum="A555555"),),
     )
     _patch_wiring(monkeypatch, lookup, 0.9)
     monkeypatch.setattr(module, "_FILL_LOG_INTERVAL", 1)
@@ -650,7 +732,8 @@ def test_build_renewal_queue_skips_marcs_already_in_db(
         {
             "ctrl-a": (_renewal("ea", ren_id="RA"),),
             "ctrl-b": (_renewal("eb", ren_id="RB"),),
-        }
+        },
+        registrations=(_indexed_reg("u1", regnum="A555555"),),
     )
     _patch_wiring(monkeypatch, lookup, 0.9)
     summary = _run(tmp_path)
@@ -673,7 +756,8 @@ def test_build_renewal_queue_persists_rows_on_interrupt(
         {
             "ctrl-a": (_renewal("ea", ren_id="RA"),),
             "ctrl-b": (_renewal("eb", ren_id="RB"),),
-        }
+        },
+        registrations=(_indexed_reg("u1", regnum="A555555"),),
     )
     _patch_wiring(monkeypatch, lookup, 0.9)
 
