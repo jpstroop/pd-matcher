@@ -32,7 +32,6 @@ from pd_groundtruth.filters import _CCE_MAX_YEAR
 from pd_groundtruth.filters import is_eligible
 from pd_groundtruth.filters import language_of
 from pd_groundtruth.filters import year_of
-from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.manifest import DumpEntry
 from pd_groundtruth.manifest import fetch_manifest
 from pd_groundtruth.writer import MarcxmlShardWriter
@@ -86,7 +85,7 @@ def acquire(
     out_dir: Path,
     per_decade_cap: int,
     min_year: int,
-    manifest_url: str = DEFAULT_MANIFEST_URL,
+    manifest_url: str | None = None,
     max_dumps: int | None = None,
     min_free_space_mb: int = _DEFAULT_MIN_FREE_SPACE_MB,
 ) -> AcquireReport:
@@ -99,7 +98,8 @@ def acquire(
             is below this quota.
         min_year: Inclusive lower bound for the publication year (the moving
             wall). Also fixes the set of decade buckets (``min_year``..1977).
-        manifest_url: Absolute URL of the dump manifest JSON.
+        manifest_url: Absolute URL of the dump manifest JSON. ``None`` (the
+            default) discovers Princeton's latest successful full dump.
         max_dumps: Optional cap on the number of dumps processed.
         min_free_space_mb: Minimum free space, in MB, required on both the temp
             download directory and ``out_dir`` before each download begins and

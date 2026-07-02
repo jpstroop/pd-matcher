@@ -38,7 +38,6 @@ from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import extract_marc_identifiers
 from pd_groundtruth.label_vault import upsert_entry
-from pd_groundtruth.manifest import DEFAULT_MANIFEST_URL
 from pd_groundtruth.review.server import serve
 from pd_groundtruth.review_db import VERDICT_MATCH
 from pd_groundtruth.review_db import VERDICT_NO_MATCH
@@ -129,8 +128,12 @@ def acquire_command(
         Path, Option("--out-dir", help="Root directory; shards written to <out-dir>/<lang>/.")
     ],
     manifest_url: Annotated[
-        str, Option("--manifest-url", help="Dump manifest JSON URL.")
-    ] = DEFAULT_MANIFEST_URL,
+        str | None,
+        Option(
+            "--manifest-url",
+            help="Full-dump manifest JSON URL; omit to auto-discover the latest full dump.",
+        ),
+    ] = None,
     per_decade_cap: Annotated[
         int,
         Option(
@@ -302,8 +305,12 @@ def build_corpus_command(
         ),
     ] = None,
     manifest_url: Annotated[
-        str, Option("--manifest-url", help="Dump manifest JSON URL.")
-    ] = DEFAULT_MANIFEST_URL,
+        str | None,
+        Option(
+            "--manifest-url",
+            help="Full-dump manifest JSON URL; omit to auto-discover the latest full dump.",
+        ),
+    ] = None,
     max_dumps: Annotated[
         int | None, Option("--max-dumps", help="Cap the number of dumps processed.")
     ] = None,
