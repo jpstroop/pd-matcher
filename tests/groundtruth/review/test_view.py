@@ -290,6 +290,20 @@ def test_build_card_passes_pairing_type_renewal_through() -> None:
     assert tuple(bar.scorer for bar in card.evidence) == ("title", "claimants")
 
 
+def test_build_card_renewal_format_book_from_oreg() -> None:
+    row = _row(_marc(), evidence_json="{}", pairing_type="renewal", cce_renewal_oreg="A123")
+    assert build_card(row).cce_renewal_format == "Book"
+
+
+def test_build_card_renewal_format_periodical_contribution_from_oreg() -> None:
+    row = _row(_marc(), evidence_json="{}", pairing_type="renewal", cce_renewal_oreg="BB99")
+    assert build_card(row).cce_renewal_format == "Periodical contribution"
+
+
+def test_build_card_registration_renewal_format_unknown_without_oreg() -> None:
+    assert build_card(_row(_marc(), evidence_json="{}")).cce_renewal_format == "Unknown"
+
+
 def test_build_card_carries_evidence_bars() -> None:
     card = build_card(_row(_marc(), evidence_json='{"title.token_set": 1.0, "name.author": 0.25}'))
     assert [(bar.scorer, bar.normalized) for bar in card.evidence] == [

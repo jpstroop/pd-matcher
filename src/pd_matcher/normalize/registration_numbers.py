@@ -86,6 +86,60 @@ def reg_class(raw: str | None) -> str:
     return match.group(0) if match is not None else ""
 
 
+_CLASS_FORMATS: dict[str, str] = {
+    "A": "Book",
+    "AA": "Book (pamphlet)",
+    "AF": "Book (foreign)",
+    "AFO": "Book (foreign)",
+    "AI": "Book (ad interim)",
+    "AIO": "Book (ad interim)",
+    "B": "Periodical",
+    "BB": "Periodical contribution",
+    "B5": "Periodical contribution",
+    "C": "Lecture/sermon",
+    "D": "Drama",
+    "DP": "Drama",
+    "DF": "Drama",
+    "DU": "Drama",
+    "DFO": "Drama",
+    "E": "Music",
+    "F": "Map",
+    "G": "Art",
+    "H": "Art reproduction",
+    "J": "Photograph",
+    "K": "Print/label",
+    "L": "Motion picture",
+    "M": "Motion picture",
+    "N": "Sound recording",
+    "TX": "Nondramatic literary (post-1978)",
+    "PA": "Performing arts (post-1978)",
+    "VA": "Visual arts (post-1978)",
+    "SR": "Sound recording (post-1978)",
+}
+
+_UNKNOWN_FORMAT: str = "Unknown"
+
+
+def reg_format(raw: str | None) -> str:
+    """Return a human-readable format label for a registration number's class.
+
+    Maps the leading alphabetic class token (as read by :func:`reg_class`) to a
+    reader-friendly work type so a labeler sees at a glance whether the CCE
+    record is a Book, a Periodical, Drama, etc., rather than inferring it from
+    the raw class letters.
+
+    Args:
+        raw: The registration number as transcribed (``regnum`` or ``oreg``), or
+            ``None`` when the record carries none.
+
+    Returns:
+        The mapped format label (``"Book"``, ``"Periodical contribution"``,
+        ``"Drama"``, ...), or ``"Unknown"`` when ``raw`` is ``None``, empty,
+        unparseable, or carries an unmapped class.
+    """
+    return _CLASS_FORMATS.get(reg_class(raw), _UNKNOWN_FORMAT)
+
+
 def is_multi_regnum(raw: str) -> bool:
     """Report whether ``raw`` is a space-separated multi-number regnum range.
 
@@ -119,4 +173,5 @@ __all__ = [
     "is_multi_regnum",
     "normalize_regnum",
     "reg_class",
+    "reg_format",
 ]

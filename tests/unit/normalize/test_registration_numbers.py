@@ -7,6 +7,7 @@ from pytest import mark
 from pd_matcher.normalize.registration_numbers import is_multi_regnum
 from pd_matcher.normalize.registration_numbers import normalize_regnum
 from pd_matcher.normalize.registration_numbers import reg_class
+from pd_matcher.normalize.registration_numbers import reg_format
 
 
 def test_already_canonical_passes_through() -> None:
@@ -107,6 +108,34 @@ def test_reg_class_returns_sentinel_for_unparseable(raw: str) -> None:
 
 def test_reg_class_returns_sentinel_for_none() -> None:
     assert reg_class(None) == ""
+
+
+@mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("A123", "Book"),
+        ("AA12345", "Book (pamphlet)"),
+        ("AF32851", "Book (foreign)"),
+        ("AI9217", "Book (ad interim)"),
+        ("BB99", "Periodical contribution"),
+        ("B573742", "Periodical"),
+        ("DP123", "Drama"),
+        ("E4567", "Music"),
+        ("F12345", "Map"),
+        ("TX7654321", "Nondramatic literary (post-1978)"),
+    ],
+)
+def test_reg_format_maps_class_to_label(raw: str, expected: str) -> None:
+    assert reg_format(raw) == expected
+
+
+@mark.parametrize("raw", ["963122", "UCCWORK123", "", " -.— "])
+def test_reg_format_unknown_for_unmapped_or_unparseable(raw: str) -> None:
+    assert reg_format(raw) == "Unknown"
+
+
+def test_reg_format_unknown_for_none() -> None:
+    assert reg_format(None) == "Unknown"
 
 
 @given(value=st.text(alphabet=st.characters(min_codepoint=32, max_codepoint=126), max_size=40))
