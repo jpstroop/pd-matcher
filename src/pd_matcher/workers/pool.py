@@ -15,6 +15,7 @@ sticking to ``spawn`` and we gain identical behaviour on macOS and Linux.
 
 from collections.abc import Callable
 from collections.abc import Iterator
+from collections.abc import Sequence
 from functools import partial
 from multiprocessing import get_context
 from multiprocessing.context import SpawnContext
@@ -23,6 +24,7 @@ from multiprocessing.queues import Queue as MpQueue
 from multiprocessing.synchronize import Event as EventType
 from os import cpu_count
 from pathlib import Path
+from queue import Full
 from time import monotonic
 from typing import Protocol
 
@@ -53,6 +55,19 @@ _LOGGER = get_logger(__name__)
 _DEFAULT_BATCH_SIZE: int = 32
 _DEFAULT_REPORT_INTERVAL_SECONDS: float = 5.0
 _WORKER_JOIN_TIMEOUT_SECONDS: float = 30.0
+_PRODUCER_PUT_TIMEOUT_SECONDS: float = 5.0
+_DEFAULT_STALL_TICKS: int = 60
+
+
+class WorkerDiedError(RuntimeError):
+    """Raised when a worker process exits unexpectedly while still being fed.
+
+    The producer detects this while blocked filling the bounded input queue:
+    if the queue stays full and a worker has a non-``None`` ``exitcode`` (and
+    shutdown was not requested), that worker died and nothing is draining the
+    queue any more, so the pool must fail fast instead of blocking forever on
+    ``input_queue.put``.
+    """
 
 
 class RunReport(Struct, frozen=True, forbid_unknown_fields=True):
@@ -94,6 +109,93 @@ def _terminate_if_alive(process: _TerminableProcess, timeout: float) -> None:
         return
     process.kill()
     process.join()
+
+
+class _LivenessProcess(Protocol):
+    """Subset of :class:`SpawnProcess` used to detect unexpected worker exits."""
+
+    @property
+    def name(self) -> str: ...  # pragma: no cover
+
+    @property
+    def exitcode(self) -> int | None: ...  # pragma: no cover
+
+
+class _InputQueuePut(Protocol):
+    """Subset of the bounded input queue used by the guarded producer put."""
+
+    def put(  # pragma: no cover
+        self,
+        obj: bytes | None,
+        block: bool = ...,
+        timeout: float | None = ...,
+    ) -> None: ...
+
+
+def _dead_workers(processes: Sequence[_LivenessProcess]) -> list[str]:
+    """Return the names of worker processes that have already exited.
+
+    During production any terminated worker is unexpected — the pool keeps
+    feeding until every record is enqueued — so a non-``None`` ``exitcode``
+    means that worker died and can no longer drain the input queue.
+    """
+    return [process.name for process in processes if process.exitcode is not None]
+
+
+def _make_guarded_put(
+    input_queue: _InputQueuePut,
+    processes: Sequence[_LivenessProcess],
+    *,
+    timeout: float,
+    is_shutdown: Callable[[], bool],
+) -> Callable[[bytes], None]:
+    """Build a producer ``put`` that fails fast when a worker has died.
+
+    The returned callable retries a bounded ``put`` until it succeeds. On
+    each :class:`queue.Full` it checks worker liveness: if any worker has
+    exited it raises :class:`WorkerDiedError` instead of blocking forever on
+    a queue nothing is draining. The ``is_shutdown`` guard makes a clean
+    SIGINT — where workers exit with code ``0`` — bail out of the retry loop
+    before liveness is checked, so orderly shutdown is never misread as a crash.
+    """
+
+    def put(blob: bytes) -> None:
+        while True:
+            if is_shutdown():
+                return
+            try:
+                input_queue.put(blob, timeout=timeout)
+                return
+            except Full:
+                if is_shutdown():
+                    return
+                dead = _dead_workers(processes)
+                if dead:
+                    raise WorkerDiedError(
+                        f"worker(s) exited unexpectedly during production: {', '.join(dead)}"
+                    ) from None
+
+    return put
+
+
+def _drain_sentinels(
+    input_queue: _InputQueuePut,
+    worker_count: int,
+    *,
+    timeout: float,
+) -> None:
+    """Push one stop sentinel per worker, bounded so a wedged pool can't deadlock.
+
+    A stalled worker no longer draining the input queue would make an
+    unbounded ``put(None)`` block forever; the bounded put returns early on
+    :class:`queue.Full`, leaving the subsequent join/terminate to reap any
+    wedged workers.
+    """
+    for _ in range(worker_count):
+        try:
+            input_queue.put(None, timeout=timeout)
+        except Full:
+            return
 
 
 def _default_workers() -> int:
@@ -282,6 +384,7 @@ def run_match(
     writer_factory: WriterFactory | None = None,
     matches_only: bool = False,
     report_interval_seconds: float = _DEFAULT_REPORT_INTERVAL_SECONDS,
+    stall_ticks: int = _DEFAULT_STALL_TICKS,
     verbosity: int = 0,
     log_level: str = "INFO",
     json_logs: bool = False,
@@ -325,6 +428,11 @@ def run_match(
             and emits rows only for genuine matched pairs. Ignored when an
             explicit ``writer_factory`` is supplied.
         report_interval_seconds: Reporter cadence.
+        stall_ticks: Consecutive reporter ticks with input outstanding and
+            zero forward progress that trigger a stall abort (the reporter
+            requests shutdown so the run fails fast instead of logging a
+            frozen count forever). Defaults to ``60`` (~5 min at the default
+            5s cadence). Small values are for tests.
         verbosity: ``0`` aggregate-only; ``1`` adds per-worker heartbeats;
             ``2`` adds per-record hit lines. Forwarded to each worker.
         log_level: Log level reconfigured inside each spawned worker (which
@@ -358,6 +466,8 @@ def run_match(
             queue=stats_queue,
             report_interval_seconds=report_interval_seconds,
             expected_total=expected_total,
+            stall_ticks=stall_ticks,
+            on_stall=coord.request_shutdown,
         ) as reporter,
     ):
         worker_processes = _spawn_workers(
@@ -399,22 +509,35 @@ def run_match(
             queue_maxsize=input_capacity,
             output_path=str(output_path),
         )
-        records_enqueued = run_producer(
-            records,
-            input_put=input_queue.put,
-            stats_put=stats_queue.put,
-            is_shutdown=coord.event.is_set,
-            batch_size=batch_size,
-        )
-        for _ in range(worker_count):
-            input_queue.put(None)
-        for process in worker_processes:
-            process.join(timeout=_WORKER_JOIN_TIMEOUT_SECONDS)
-            _terminate_if_alive(process, _WORKER_JOIN_TIMEOUT_SECONDS)
-        output_queue.put(None)
-        writer_process.join(timeout=_WORKER_JOIN_TIMEOUT_SECONDS)
-        _terminate_if_alive(writer_process, _WORKER_JOIN_TIMEOUT_SECONDS)
-        stats_queue.put(encode_stats_event(ShutdownEvent(reason="completed")))
+        try:
+            records_enqueued = run_producer(
+                records,
+                input_put=_make_guarded_put(
+                    input_queue,
+                    worker_processes,
+                    timeout=_PRODUCER_PUT_TIMEOUT_SECONDS,
+                    is_shutdown=coord.event.is_set,
+                ),
+                stats_put=stats_queue.put,
+                is_shutdown=coord.event.is_set,
+                batch_size=batch_size,
+            )
+            _drain_sentinels(input_queue, worker_count, timeout=_PRODUCER_PUT_TIMEOUT_SECONDS)
+            for process in worker_processes:
+                process.join(timeout=_WORKER_JOIN_TIMEOUT_SECONDS)
+                _terminate_if_alive(process, _WORKER_JOIN_TIMEOUT_SECONDS)
+            output_queue.put(None)
+            writer_process.join(timeout=_WORKER_JOIN_TIMEOUT_SECONDS)
+            _terminate_if_alive(writer_process, _WORKER_JOIN_TIMEOUT_SECONDS)
+            stats_queue.put(encode_stats_event(ShutdownEvent(reason="completed")))
+        except WorkerDiedError:
+            coord.request_shutdown()
+            for process in worker_processes:
+                _terminate_if_alive(process, _WORKER_JOIN_TIMEOUT_SECONDS)
+            _terminate_if_alive(writer_process, _WORKER_JOIN_TIMEOUT_SECONDS)
+            stats_queue.put(encode_stats_event(ShutdownEvent(reason="worker_died")))
+            _LOGGER.error("match.pool.worker_died", workers=worker_count)
+            raise
     snapshot = reporter.totals.snapshot()
     duration = monotonic() - started_at
     interrupted = coord.is_set
@@ -439,5 +562,6 @@ def run_match(
 
 __all__ = [
     "RunReport",
+    "WorkerDiedError",
     "run_match",
 ]

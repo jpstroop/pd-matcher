@@ -272,25 +272,35 @@ def worker_main(
     The learned combiner's artifact is loaded once per worker inside the loop
     via ``learned_model_dir``. Returns the :class:`WorkerResult` tally of
     processed and skipped records.
+
+    Any exception that escapes the consume loop (e.g. index open failure)
+    is logged as ``worker.crashed`` to the configured log file before being
+    re-raised, so a fatal worker death leaves a traceback on disk and still
+    exits nonzero for the pool to detect. Per-record failures never reach
+    here — :func:`run_worker_loop` catches and skips them.
     """
-    pairings = compile_pairings(pairing_config)
-    with NyplIndexLookup(index_path) as lookup:
-        return run_worker_loop(
-            lookup=lookup,
-            config=matching_config,
-            idf=idf,
-            author_idf=author_idf,
-            publisher_idf=publisher_idf,
-            calibrator=calibrator,
-            pairings=pairings,
-            learned_model_dir=learned_model_dir,
-            input_get=input_get,
-            output_put=output_put,
-            stats_put=stats_put,
-            is_shutdown=is_shutdown,
-            worker_id=worker_id,
-            verbosity=verbosity,
-        )
+    try:
+        pairings = compile_pairings(pairing_config)
+        with NyplIndexLookup(index_path) as lookup:
+            return run_worker_loop(
+                lookup=lookup,
+                config=matching_config,
+                idf=idf,
+                author_idf=author_idf,
+                publisher_idf=publisher_idf,
+                calibrator=calibrator,
+                pairings=pairings,
+                learned_model_dir=learned_model_dir,
+                input_get=input_get,
+                output_put=output_put,
+                stats_put=stats_put,
+                is_shutdown=is_shutdown,
+                worker_id=worker_id,
+                verbosity=verbosity,
+            )
+    except Exception:
+        _LOGGER.exception("worker.crashed", worker=worker_id)
+        raise
 
 
 __all__ = [
