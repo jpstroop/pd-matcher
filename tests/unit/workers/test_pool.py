@@ -5,6 +5,7 @@ from multiprocessing import get_context
 from multiprocessing.queues import Queue as MpQueue
 from os import environ
 from pathlib import Path
+from queue import Full
 
 from msgspec.json import decode as json_decode
 from pytest import MonkeyPatch
@@ -26,8 +27,12 @@ from pd_matcher.workers.events import decode_stats_event
 from pd_matcher.workers.messages import WorkerOutput
 from pd_matcher.workers.messages import encode_worker_output
 from pd_matcher.workers.pool import RunReport
+from pd_matcher.workers.pool import WorkerDiedError
 from pd_matcher.workers.pool import _build_jsonl_writer
+from pd_matcher.workers.pool import _dead_workers
 from pd_matcher.workers.pool import _default_workers
+from pd_matcher.workers.pool import _drain_sentinels
+from pd_matcher.workers.pool import _make_guarded_put
 from pd_matcher.workers.pool import _resolve_source
 from pd_matcher.workers.pool import _shutdown_predicate
 from pd_matcher.workers.pool import _terminate_if_alive
@@ -372,18 +377,27 @@ def test_resolve_source_returns_prepared_iterator(tmp_path: Path) -> None:
 
 
 class _FakeProcess:
-    """Stand-in for :class:`SpawnProcess` used by ``_terminate_if_alive`` tests.
+    """Stand-in for :class:`SpawnProcess` used by pool helper tests.
 
     ``alive_sequence`` drives successive ``is_alive`` answers so a single
-    test can model the live → terminate → dead transitions deterministically.
+    test can model the live → terminate → dead transitions deterministically;
+    ``name`` and ``exitcode`` back the liveness checks in ``_dead_workers``.
     """
 
-    __slots__ = ("_index", "alive_sequence", "calls")
+    __slots__ = ("_index", "alive_sequence", "calls", "exitcode", "name")
 
-    def __init__(self, alive_sequence: list[bool]) -> None:
-        self.alive_sequence: list[bool] = alive_sequence
+    def __init__(
+        self,
+        alive_sequence: list[bool] | None = None,
+        *,
+        name: str = "worker",
+        exitcode: int | None = None,
+    ) -> None:
+        self.alive_sequence: list[bool] = alive_sequence if alive_sequence is not None else []
         self.calls: list[tuple[str, float | None]] = []
         self._index: int = 0
+        self.name: str = name
+        self.exitcode: int | None = exitcode
 
     def is_alive(self) -> bool:
         value = self.alive_sequence[self._index]
@@ -398,6 +412,28 @@ class _FakeProcess:
 
     def join(self, timeout: float | None = None) -> None:
         self.calls.append(("join", timeout))
+
+
+class _FakePutQueue:
+    """Input-queue stand-in whose bounded ``put`` raises ``Full`` on cue.
+
+    The first ``full_before_success`` calls raise :class:`queue.Full`; every
+    subsequent call records the payload. ``put`` mirrors the real
+    :class:`multiprocessing.Queue` signature so it satisfies the pool's
+    ``_InputQueuePut`` protocol.
+    """
+
+    __slots__ = ("_full_remaining", "puts")
+
+    def __init__(self, full_before_success: int = 0) -> None:
+        self._full_remaining: int = full_before_success
+        self.puts: list[bytes | None] = []
+
+    def put(self, obj: bytes | None, block: bool = True, timeout: float | None = None) -> None:
+        if self._full_remaining > 0:
+            self._full_remaining -= 1
+            raise Full
+        self.puts.append(obj)
 
 
 def test_terminate_if_alive_noop_when_already_exited() -> None:
@@ -477,3 +513,105 @@ def test_run_match_consumes_prepared_chunks(
     assert report.records_processed == prepare_report.total_records
     assert report.records_written == report.records_processed
     assert output_path.exists()
+
+
+def _never_shutdown() -> bool:
+    return False
+
+
+def test_dead_workers_reports_only_exited() -> None:
+    alive = _FakeProcess(name="w0", exitcode=None)
+    dead = _FakeProcess(name="w1", exitcode=1)
+    assert _dead_workers([alive, dead]) == ["w1"]
+
+
+def test_dead_workers_empty_when_all_alive() -> None:
+    procs = [_FakeProcess(name="w0"), _FakeProcess(name="w1")]
+    assert _dead_workers(procs) == []
+
+
+def test_guarded_put_succeeds_immediately() -> None:
+    queue = _FakePutQueue(full_before_success=0)
+    put = _make_guarded_put(queue, [], timeout=0.01, is_shutdown=_never_shutdown)
+    put(b"blob")
+    assert queue.puts == [b"blob"]
+
+
+def test_guarded_put_retries_after_full_while_worker_alive() -> None:
+    queue = _FakePutQueue(full_before_success=1)
+    worker = _FakeProcess(name="w0", exitcode=None)
+    put = _make_guarded_put(queue, [worker], timeout=0.01, is_shutdown=_never_shutdown)
+    put(b"blob")
+    assert queue.puts == [b"blob"]
+
+
+def test_guarded_put_raises_when_worker_dead() -> None:
+    queue = _FakePutQueue(full_before_success=1)
+    worker = _FakeProcess(name="pd_matcher.worker.0", exitcode=1)
+    put = _make_guarded_put(queue, [worker], timeout=0.01, is_shutdown=_never_shutdown)
+    with raises(WorkerDiedError, match="exited unexpectedly") as excinfo:
+        put(b"blob")
+    assert "pd_matcher.worker.0" in str(excinfo.value)
+
+
+def test_guarded_put_short_circuits_before_put_on_shutdown() -> None:
+    queue = _FakePutQueue(full_before_success=0)
+    put = _make_guarded_put(queue, [], timeout=0.01, is_shutdown=lambda: True)
+    put(b"blob")
+    assert queue.puts == []
+
+
+def test_guarded_put_returns_on_shutdown_after_full() -> None:
+    queue = _FakePutQueue(full_before_success=1)
+    flags = iter([False, True])
+    put = _make_guarded_put(
+        queue, [_FakeProcess(name="w0")], timeout=0.01, is_shutdown=lambda: next(flags)
+    )
+    put(b"blob")
+    assert queue.puts == []
+
+
+def test_drain_sentinels_puts_one_none_per_worker() -> None:
+    queue = _FakePutQueue(full_before_success=0)
+    _drain_sentinels(queue, 3, timeout=0.01)
+    assert queue.puts == [None, None, None]
+
+
+def test_drain_sentinels_returns_early_on_full() -> None:
+    queue = _FakePutQueue(full_before_success=1)
+    _drain_sentinels(queue, 3, timeout=0.01)
+    assert queue.puts == []
+
+
+def test_run_match_worker_died_tears_down_and_reraises(
+    pairing_config: PairingConfig,
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A ``WorkerDiedError`` from the producer drains the pool and propagates.
+
+    The teardown must emit a ``worker_died`` shutdown event so the reporter
+    thread stops (otherwise ``Reporter.__exit__`` would hang), terminate every
+    child, and re-raise so the CLI exits nonzero.
+    """
+    index_path, idf, author_idf, publisher_idf = _build_tiny_index(tmp_path)
+
+    def boom(*_args: object, **_kwargs: object) -> int:
+        raise WorkerDiedError("worker(s) exited unexpectedly during production: w0")
+
+    monkeypatch.setattr("pd_matcher.workers.pool.run_producer", boom)
+    with raises(WorkerDiedError, match="exited unexpectedly"):
+        run_match(
+            marc_path=_FIXTURES / "tiny.marcxml",
+            index_path=index_path,
+            output_path=tmp_path / "results.jsonl",
+            matching_config=_tiny_match_config(),
+            pairing_config=pairing_config,
+            idf=idf,
+            author_idf=author_idf,
+            publisher_idf=publisher_idf,
+            workers=1,
+            batch_size=2,
+            queue_maxsize=4,
+            report_interval_seconds=0.05,
+        )

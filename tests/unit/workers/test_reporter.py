@@ -1,5 +1,6 @@
 """Tests for :class:`pd_matcher.workers.reporter.Reporter`."""
 
+from queue import Empty
 from queue import Queue
 from time import sleep
 
@@ -11,6 +12,26 @@ from pd_matcher.workers.events import encode_stats_event
 from pd_matcher.workers.reporter import Reporter
 from pd_matcher.workers.reporter import RunningTotals
 from pd_matcher.workers.reporter import _format_progress_line
+
+
+class _ScriptedQueue:
+    """Queue stand-in yielding a fixed blob sequence, then raising ``Empty``.
+
+    Lets ``Reporter._run`` be driven synchronously with a deterministic tick
+    sequence; every scripted run ends in a :class:`ShutdownEvent` so the loop
+    breaks before the sequence is exhausted.
+    """
+
+    __slots__ = ("_blobs",)
+
+    def __init__(self, blobs: list[bytes]) -> None:
+        self._blobs = iter(blobs)
+
+    def get(self, block: bool = True, timeout: float | None = None) -> bytes:
+        try:
+            return next(self._blobs)
+        except StopIteration:
+            raise Empty from None
 
 
 def test_reporter_aggregates_and_stops_on_shutdown() -> None:
@@ -86,3 +107,80 @@ def test_format_progress_line_without_total_omits_percent_and_eta() -> None:
     assert "ETA" not in line
     assert "25 done" in line
     assert "rec/s" in line
+
+
+def test_reporter_warns_and_fires_on_stall_after_n_ticks() -> None:
+    """N consecutive zero-progress ticks with input outstanding fire ``on_stall``."""
+    calls: list[int] = []
+    blobs = [
+        encode_stats_event(ProducerHeartbeat(records_enqueued=5)),
+        encode_stats_event(ProducerHeartbeat(records_enqueued=5)),
+        encode_stats_event(ProducerHeartbeat(records_enqueued=5)),
+        encode_stats_event(ShutdownEvent(reason="worker_died")),
+    ]
+    reporter = Reporter(
+        _ScriptedQueue(blobs),
+        report_interval_seconds=0.0,
+        stall_ticks=3,
+        on_stall=lambda: calls.append(1),
+        clock=lambda: 0.0,
+    )
+    reporter._run()
+    assert calls == [1]
+
+
+def test_reporter_warns_on_stall_without_callback() -> None:
+    """A stall with no ``on_stall`` logs the warning and does not raise."""
+    blobs = [
+        encode_stats_event(ProducerHeartbeat(records_enqueued=5)),
+        encode_stats_event(ProducerHeartbeat(records_enqueued=5)),
+        encode_stats_event(ShutdownEvent(reason="worker_died")),
+    ]
+    reporter = Reporter(
+        _ScriptedQueue(blobs),
+        report_interval_seconds=0.0,
+        stall_ticks=2,
+        clock=lambda: 0.0,
+    )
+    reporter._run()
+
+
+def test_reporter_resets_stall_when_progress_advances() -> None:
+    """Forward progress each tick keeps the stall counter from ever tripping."""
+    calls: list[int] = []
+    blobs = [
+        encode_stats_event(ProducerHeartbeat(records_enqueued=5)),
+        encode_stats_event(RecordProcessed(confidence=0.5, candidates_considered=1)),
+        encode_stats_event(RecordProcessed(confidence=0.5, candidates_considered=1)),
+        encode_stats_event(RecordProcessed(confidence=0.5, candidates_considered=1)),
+        encode_stats_event(ShutdownEvent(reason="completed")),
+    ]
+    reporter = Reporter(
+        _ScriptedQueue(blobs),
+        report_interval_seconds=0.0,
+        stall_ticks=2,
+        on_stall=lambda: calls.append(1),
+        clock=lambda: 0.0,
+    )
+    reporter._run()
+    assert calls == []
+
+
+def test_reporter_no_stall_when_all_input_done() -> None:
+    """With ``done >= enqueued`` there is no outstanding input, so no stall."""
+    calls: list[int] = []
+    blobs = [
+        encode_stats_event(RecordProcessed(confidence=0.5, candidates_considered=1)),
+        encode_stats_event(ProducerHeartbeat(records_enqueued=1)),
+        encode_stats_event(WriterHeartbeat(records_written=1)),
+        encode_stats_event(ShutdownEvent(reason="completed")),
+    ]
+    reporter = Reporter(
+        _ScriptedQueue(blobs),
+        report_interval_seconds=0.0,
+        stall_ticks=1,
+        on_stall=lambda: calls.append(1),
+        clock=lambda: 0.0,
+    )
+    reporter._run()
+    assert calls == []

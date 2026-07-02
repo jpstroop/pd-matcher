@@ -7,6 +7,8 @@ from pathlib import Path
 
 from _pytest.capture import CaptureFixture
 from _pytest.monkeypatch import MonkeyPatch
+from lmdb import Error as LmdbError
+from pytest import raises
 
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.config.schemas import PairingConfig
@@ -605,6 +607,38 @@ def test_worker_loop_skips_failing_record_and_continues(
     ]
     assert len(skip_events) == 1
     assert skip_events[0].control_id == "boom"
+
+
+def test_worker_main_logs_and_reraises_on_fatal_crash(
+    tmp_path: Path,
+    tiny_idf: IdfTable,
+    tiny_author_idf: IdfTable,
+    tiny_publisher_idf: IdfTable,
+    matching_config: MatchingConfig,
+    pairing_config: PairingConfig,
+    capsys: CaptureFixture[str],
+) -> None:
+    """A fatal crash (bad index path) logs ``worker.crashed`` and re-raises."""
+    configure_logging(level="INFO", json_output=False)
+    with raises(LmdbError):
+        worker_main(
+            index_path=tmp_path / "does-not-exist.lmdb",
+            matching_config=matching_config,
+            pairing_config=pairing_config,
+            idf=tiny_idf,
+            author_idf=tiny_author_idf,
+            publisher_idf=tiny_publisher_idf,
+            calibrator=None,
+            learned_model_dir=None,
+            input_get=_build_input_get([None]),
+            output_put=_sink(),
+            stats_put=_sink(),
+            is_shutdown=lambda: False,
+            worker_id=7,
+        )
+    err = capsys.readouterr().err
+    assert "worker.crashed" in err
+    assert "worker=7" in err
 
 
 def test_worker_loop_logs_failing_record_with_worker_and_marc_id(

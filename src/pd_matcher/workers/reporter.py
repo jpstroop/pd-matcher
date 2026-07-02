@@ -200,7 +200,19 @@ class Reporter:
     snapshot (``records_processed``, ``records_written``, etc.).
     """
 
-    __slots__ = ("_expected_total", "_interval", "_logger", "_queue", "_thread", "_totals")
+    __slots__ = (
+        "_clock",
+        "_expected_total",
+        "_interval",
+        "_last_done",
+        "_logger",
+        "_on_stall",
+        "_queue",
+        "_stall_count",
+        "_stall_ticks",
+        "_thread",
+        "_totals",
+    )
 
     def __init__(
         self,
@@ -208,6 +220,8 @@ class Reporter:
         *,
         report_interval_seconds: float,
         expected_total: int | None = None,
+        stall_ticks: int | None = None,
+        on_stall: Callable[[], None] | None = None,
         clock: Callable[[], float] = monotonic,
     ) -> None:
         """Construct a reporter bound to ``queue``.
@@ -221,12 +235,24 @@ class Reporter:
             expected_total: Total records the run will process when known
                 (e.g. a prepared-chunk manifest's count). Enables percent
                 and ETA in the progress line; ``None`` omits both gracefully.
+            stall_ticks: Number of consecutive progress ticks with input
+                still outstanding and zero forward progress that constitutes
+                a stall. ``None`` disables stall detection.
+            on_stall: Zero-arg callback invoked when a stall is detected
+                (e.g. ``ShutdownCoordinator.request_shutdown`` to fail the
+                run fast instead of logging a frozen count forever). ``None``
+                logs the ``match.stall`` warning without any side effect.
             clock: Monotonic clock for unit tests that need to advance
                 time deterministically.
         """
         self._queue = queue
         self._interval = report_interval_seconds
         self._expected_total = expected_total
+        self._stall_ticks = stall_ticks
+        self._on_stall = on_stall
+        self._stall_count = 0
+        self._last_done = 0
+        self._clock = clock
         self._totals = RunningTotals(started_at=clock())
         self._thread = Thread(target=self._run, name="pd_matcher.reporter", daemon=True)
         self._logger = _LOGGER
@@ -252,35 +278,66 @@ class Reporter:
 
     def _run(self) -> None:
         """Main loop: drain the queue, aggregate, log on a fixed cadence."""
-        last_log = monotonic()
+        last_log = self._clock()
         while True:
             try:
                 blob = self._queue.get(timeout=_POLL_TIMEOUT_SECONDS)
             except Empty:
-                if monotonic() - last_log >= self._interval:
-                    self._logger.info(
-                        "match.progress",
-                        progress=_format_progress_line(
-                            self._totals, monotonic(), self._expected_total
-                        ),
-                    )
-                    last_log = monotonic()
+                last_log = self._maybe_report(last_log, self._clock())
                 continue
             event = decode_stats_event(blob)
             should_stop = self._totals.apply(event)
-            now = monotonic()
-            if now - last_log >= self._interval:
-                self._logger.info(
-                    "match.progress",
-                    progress=_format_progress_line(self._totals, now, self._expected_total),
-                )
-                last_log = now
+            now = self._clock()
+            last_log = self._maybe_report(last_log, now)
             if should_stop:
                 self._logger.info(
                     "match.progress.final",
                     progress=_format_progress_line(self._totals, now, self._expected_total),
                 )
                 break
+
+    def _maybe_report(self, last_log: float, now: float) -> float:
+        """Log a progress line and run stall detection when the interval elapsed.
+
+        Returns:
+            The ``now`` timestamp when a line was logged (the new
+            ``last_log``); the unchanged ``last_log`` otherwise.
+        """
+        if now - last_log < self._interval:
+            return last_log
+        self._logger.info(
+            "match.progress",
+            progress=_format_progress_line(self._totals, now, self._expected_total),
+        )
+        self._check_stall()
+        return now
+
+    def _check_stall(self) -> None:
+        """Warn (and optionally fire ``on_stall``) after N zero-progress ticks.
+
+        A tick counts toward a stall only when input is still outstanding
+        (``records_enqueued > records_done``) and ``records_done`` has not
+        advanced since the previous tick. Any forward progress, and both the
+        startup (nothing enqueued) and completion (all done) states, reset the
+        counter so neither is ever misread as a stall.
+        """
+        done = self._totals.records_done
+        input_remains = self._totals.records_enqueued > done
+        if input_remains and done == self._last_done:
+            self._stall_count += 1
+        else:
+            self._stall_count = 0
+        self._last_done = done
+        if self._stall_ticks is not None and self._stall_count >= self._stall_ticks:
+            self._logger.warning(
+                "match.stall",
+                stalled_ticks=self._stall_count,
+                done=done,
+                enqueued=self._totals.records_enqueued,
+            )
+            if self._on_stall is not None:
+                self._on_stall()
+            self._stall_count = 0
 
 
 __all__ = [
