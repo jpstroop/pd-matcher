@@ -15,6 +15,7 @@ from logging import getLogger
 
 from msgspec import DecodeError
 from msgspec import Struct
+from msgspec import field
 from msgspec.json import decode
 from requests import get
 
@@ -36,16 +37,24 @@ class DumpEntry(Struct, frozen=True, forbid_unknown_fields=False):
 def parse_manifest(payload: bytes) -> tuple[DumpEntry, ...]:
     """Parse manifest JSON bytes into an ordered tuple of dump entries.
 
+    Each bibdata dump type carries its MARC record files under a different key
+    (``bib_records`` for a full dump, ``updated_records`` for a changed-records
+    dump, ``recap_records`` / ``recap_records_full`` for the ReCAP dumps), all
+    sharing the same ``dump_file``/``md5`` entry shape. The record group is
+    auto-detected from whichever of those keys the manifest populates, so any
+    dump type works without a caller-supplied hint. Non-record groups
+    (metadata, id lists, logs) are ignored.
+
     Args:
         payload: Raw JSON body of the manifest document.
 
     Returns:
-        Dump entries in manifest order, each with a download URL and md5.
+        Dump entries, each with a download URL and md5, in group order.
 
     Raises:
         ValueError: If the body is not valid manifest JSON (e.g. an HTML error
-            page from an expired URL), or if it declares no
-            ``files.bib_records`` entries.
+            page from an expired URL), or if it populates none of the known
+            record groups.
     """
     try:
         document = decode(payload, type=_ManifestDocument)
@@ -54,10 +63,22 @@ def parse_manifest(payload: bytes) -> tuple[DumpEntry, ...]:
             f"manifest body is not valid manifest JSON ({len(payload)} bytes); "
             "pass --manifest-url with a current full-dump URL"
         ) from error
-    entries = document.files.bib_records
+    files = document.files
+    record_groups = (
+        files.bib_records,
+        files.updated_records,
+        files.recap_records,
+        files.recap_records_full,
+    )
+    entries = tuple(
+        DumpEntry(url=entry.dump_file, md5=entry.md5) for group in record_groups for entry in group
+    )
     if not entries:
-        raise ValueError("manifest contains no files.bib_records entries")
-    return tuple(DumpEntry(url=entry.dump_file, md5=entry.md5) for entry in entries)
+        raise ValueError(
+            "manifest populates no known record group "
+            "(bib_records / updated_records / recap_records / recap_records_full)"
+        )
+    return entries
 
 
 def discover_full_dump_url(events_url: str = DEFAULT_EVENTS_URL) -> str:
@@ -135,9 +156,17 @@ class _ManifestEntry(Struct, forbid_unknown_fields=False):
 
 
 class _ManifestFiles(Struct, forbid_unknown_fields=False):
-    """The ``files`` object of the manifest JSON."""
+    """The ``files`` object; each dump type populates one record group.
 
-    bib_records: list[_ManifestEntry]
+    Every field defaults to empty so a manifest that carries its records under
+    a different key (a changed-records or ReCAP dump) still decodes; the
+    populated group is selected in :func:`parse_manifest`.
+    """
+
+    bib_records: list[_ManifestEntry] = field(default_factory=list)
+    updated_records: list[_ManifestEntry] = field(default_factory=list)
+    recap_records: list[_ManifestEntry] = field(default_factory=list)
+    recap_records_full: list[_ManifestEntry] = field(default_factory=list)
 
 
 class _ManifestDocument(Struct, forbid_unknown_fields=False):
