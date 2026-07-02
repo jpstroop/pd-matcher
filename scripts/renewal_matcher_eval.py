@@ -18,6 +18,14 @@ and P/R for the baseline, trained-A, and trained-B arms, plus trained-B's
 coefficients — the test of whether the domain features let a trained arm beat
 the untrained weighted-mean where it counts.
 
+**Measure-gate.** Independently of the trained arms, the eval also folds the
+three domain signals into the *weighted mean itself* — via the production
+:func:`pd_matcher.match.scorers.renewal.renewal_domain_evidence` and the
+renewal-domain weights the combiner now carries — and reports the vault AUC and
+reject rate of the weighted-mean WITH vs WITHOUT them. That delta is the gate on
+whether the signals may enter the production weighted mean (they are exposed as
+evidence for the learned arm regardless).
+
 The eval is STANDALONE. It does not touch the production combiner
 (``match/combiners/features.py``); it only *reuses* the production renewal
 scorers to turn each ``(MARC, renewal)`` pair into a per-scorer feature vector,
@@ -56,7 +64,6 @@ from logging import INFO
 from logging import basicConfig
 from logging import getLogger
 from pathlib import Path
-from re import split as re_split
 from statistics import mean
 from statistics import pstdev
 
@@ -90,10 +97,15 @@ from pd_matcher.match.pipeline import _build_context
 from pd_matcher.match.scorers.context import ScorerContext
 from pd_matcher.match.scorers.name import score_author
 from pd_matcher.match.scorers.name import score_publisher
+from pd_matcher.match.scorers.renewal import renewal_domain_evidence
 from pd_matcher.match.scorers.title import score_title
 from pd_matcher.match.scorers.year import score_year
 from pd_matcher.models import MarcRecord
 from pd_matcher.models import NyplRenRecord
+from pd_matcher.normalize.claimants import CLAIMANT_AUTHOR_CODES
+from pd_matcher.normalize.claimants import CLAIMANT_ESTATE_CODES
+from pd_matcher.normalize.claimants import CLAIMANT_PROPRIETOR_CODES
+from pd_matcher.normalize.claimants import parse_claimants
 from pd_matcher.normalize.registration_numbers import reg_class
 
 _LOGGER = getLogger("renewal_matcher_eval")
@@ -136,10 +148,6 @@ _OREG_BOOK: frozenset[str] = frozenset({"A", "AA", "AF", "AI", "AFO", "AIO"})
 _OREG_PERIODICAL: frozenset[str] = frozenset({"B", "BB"})
 _OREG_DRAMA: frozenset[str] = frozenset({"D", "DF", "DP"})
 
-_CODE_AUTHOR: frozenset[str] = frozenset({"A"})
-_CODE_ESTATE: frozenset[str] = frozenset({"W", "C", "E", "NK"})
-_CODE_PROPRIETOR: frozenset[str] = frozenset({"PWH", "PPW", "PCW"})
-
 _CV_SPLITS: int = 5
 _LOGREG_C: float = 1.0
 _RANDOM_STATE: int = 0
@@ -156,11 +164,19 @@ class Sample:
     on the same side of a CV split.
     """
 
-    __slots__ = ("baseline", "features", "group", "label")
+    __slots__ = ("baseline", "baseline_with", "features", "group", "label")
 
-    def __init__(self, features: list[float], baseline: float, label: int, group: str) -> None:
+    def __init__(
+        self,
+        features: list[float],
+        baseline: float,
+        baseline_with: float,
+        label: int,
+        group: str,
+    ) -> None:
         self.features = features
         self.baseline = baseline
+        self.baseline_with = baseline_with
         self.label = label
         self.group = group
 
@@ -219,38 +235,6 @@ def _feature_vector(evidence: tuple[Evidence, Evidence, Evidence, Evidence]) -> 
     return vector
 
 
-def _parse_claimants(claimants: str | None) -> tuple[tuple[str, str], ...]:
-    """Return ``(name, statutory_code)`` pairs parsed from a claimants string.
-
-    NYPL transcribes each renewal claimant as ``Name|CODE``, joining multiple
-    claimants with ``||``; a minority use ``;`` separators or a trailing
-    ``Name (CODE)``. The statutory code names the renewal-right class — ``A``
-    author, ``W`` widow/er, ``C`` child, ``E`` executor, ``NK`` next-of-kin,
-    ``PWH``/``PPW``/``PCW`` proprietor / work-for-hire. Parts without a
-    recognizable trailing code yield an empty code.
-    """
-    if not claimants:
-        return ()
-    pairs: list[tuple[str, str]] = []
-    for raw_part in re_split(r"\|\||;", claimants):
-        part = raw_part.strip()
-        if not part:
-            continue
-        head, _, tail = part.rpartition("|")
-        code = tail.strip()
-        if head and code.isalpha() and code.isupper():
-            pairs.append((head.strip(), code))
-            continue
-        if part.endswith(")") and "(" in part:
-            name, _, bracket = part.rpartition("(")
-            inner = bracket[:-1].strip()
-            if inner.isalpha() and inner.isupper():
-                pairs.append((name.strip(), inner))
-                continue
-        pairs.append((part, ""))
-    return tuple(pairs)
-
-
 def _oreg_indicators(oreg: str | None) -> tuple[float, float, float]:
     """Return ``(is_book, is_periodical, is_drama)`` for a renewal ``oreg``.
 
@@ -276,9 +260,9 @@ def _claimant_indicators(pairs: tuple[tuple[str, str], ...]) -> tuple[float, flo
     """
     codes = {code for _, code in pairs}
     return (
-        1.0 if codes & _CODE_AUTHOR else 0.0,
-        1.0 if codes & _CODE_ESTATE else 0.0,
-        1.0 if codes & _CODE_PROPRIETOR else 0.0,
+        1.0 if codes & CLAIMANT_AUTHOR_CODES else 0.0,
+        1.0 if codes & CLAIMANT_ESTATE_CODES else 0.0,
+        1.0 if codes & CLAIMANT_PROPRIETOR_CODES else 0.0,
     )
 
 
@@ -299,7 +283,7 @@ def _name_match_features(
     """
     author_name: str | None = None
     for name, code in pairs:
-        if code in _CODE_AUTHOR:
+        if code in CLAIMANT_AUTHOR_CODES:
             author_name = name
             break
     if author_name is None:
@@ -310,7 +294,7 @@ def _name_match_features(
 
 def _extra_features(marc: MarcRecord, renewal: NyplRenRecord, ctx: ScorerContext) -> list[float]:
     """Return the 8-dim domain feature block appended for feature set B."""
-    pairs = _parse_claimants(renewal.claimants)
+    pairs = parse_claimants(renewal.claimants)
     oreg_book, oreg_periodical, oreg_drama = _oreg_indicators(renewal.oreg)
     claim_author, claim_estate, claim_proprietor = _claimant_indicators(pairs)
     name_match_cond, name_expected = _name_match_features(marc, pairs, ctx)
@@ -333,6 +317,25 @@ def _baseline_score(
 ) -> float:
     """Return the weighted-mean combiner's calibrated score for the pairing."""
     combined = combiner.combine(evidence)
+    if calibrator is not None:
+        return calibrate(combined.raw, calibrator)
+    return combined.calibrated
+
+
+def _baseline_with_domain_score(
+    evidence: tuple[Evidence, Evidence, Evidence, Evidence],
+    domain: tuple[Evidence, Evidence, Evidence],
+    combiner: Combiner,
+    calibrator: PlattCalibrator | None,
+) -> float:
+    """Return the weighted-mean score with the three renewal-domain Evidence folded in.
+
+    This is the measure-gate's WITH arm: the same production combiner and
+    calibrator, given the four base Evidence plus the ``(oreg_class,
+    claimant_class, name_conditioned)`` domain Evidence, whose renewal-domain
+    weights the combiner already carries. WITHOUT is :func:`_baseline_score`.
+    """
+    combined = combiner.combine(evidence + domain)
     if calibrator is not None:
         return calibrate(combined.raw, calibrator)
     return combined.calibrated
@@ -445,10 +448,12 @@ def build_harvested_samples(
         renewal = _renewal_from_harvest(row)
         ctx = context_cache.context_for(marc)
         evidence = _renewal_evidence(marc, renewal, ctx)
+        domain = renewal_domain_evidence(marc, renewal, ctx)
         features = _feature_vector(evidence) + _extra_features(marc, renewal, ctx)
         baseline = _baseline_score(evidence, combiner, calibrator)
+        baseline_with = _baseline_with_domain_score(evidence, domain, combiner, calibrator)
         label = 1 if row["label"] == "match" else 0
-        samples.append(Sample(features, baseline, label, marc.control_id))
+        samples.append(Sample(features, baseline, baseline_with, label, marc.control_id))
         stored.append(_as_float(row["score"]))
     return samples, stored
 
@@ -491,10 +496,14 @@ def build_vault_samples(
                 continue
             ctx = context_cache.context_for(marc)
             evidence = _renewal_evidence(marc, renewal, ctx)
+            domain = renewal_domain_evidence(marc, renewal, ctx)
             features = _feature_vector(evidence) + _extra_features(marc, renewal, ctx)
             baseline = _baseline_score(evidence, combiner, calibrator)
+            baseline_with = _baseline_with_domain_score(evidence, domain, combiner, calibrator)
             label = 1 if entry.verdict == "match" else 0
-            samples.append(Sample(features, baseline, label, entry.marc_control_id))
+            samples.append(
+                Sample(features, baseline, baseline_with, label, entry.marc_control_id)
+            )
     counts = {
         "renewal_entries": len(entries),
         "dropped_unsure": dropped_unsure,
@@ -520,6 +529,11 @@ def _matrix(samples: list[Sample], n_features: int) -> tuple[ndarray, ndarray, l
     groups = [s.group for s in samples]
     baseline = asarray([s.baseline for s in samples], dtype=float)
     return features, labels, groups, baseline
+
+
+def _baseline_with_array(samples: list[Sample]) -> ndarray:
+    """Return the WITH-domain weighted-mean scores for a sample list."""
+    return asarray([s.baseline_with for s in samples], dtype=float)
 
 
 def _new_model() -> Pipeline:
@@ -585,10 +599,12 @@ def _pr(scores: ndarray, labels: ndarray, threshold: float) -> dict[str, float]:
     tn, fp, fn, tp = confusion_matrix(labels, predicted, labels=[0, 1]).ravel()
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    reject_rate = tn / (tn + fp) if (tn + fp) > 0 else 0.0
     return {
         "threshold": float(threshold),
         "precision": float(precision),
         "recall": float(recall),
+        "reject_rate": float(reject_rate),
         "tp": float(tp),
         "fp": float(fp),
         "fn": float(fn),
@@ -679,7 +695,7 @@ def _print_pr(label: str, pr: dict[str, float]) -> None:
     """Print a labeled precision/recall/confusion line at its threshold."""
     print(
         f"{label} P/R @ thr={pr['threshold']:.3f}  "
-        f"P={pr['precision']:.3f} R={pr['recall']:.3f} "
+        f"P={pr['precision']:.3f} R={pr['recall']:.3f} reject={pr['reject_rate']:.3f} "
         f"tp={int(pr['tp'])} fp={int(pr['fp'])} fn={int(pr['fn'])} tn={int(pr['tn'])}"
     )
 
@@ -726,6 +742,14 @@ def main() -> None:
     baseline_threshold = _best_f1_threshold(h_baseline, h_labels)
     vault_baseline_pr = _pr(v_baseline, v_labels, baseline_threshold)
 
+    # Measure-gate: the SAME weighted-mean with the three renewal-domain Evidence
+    # folded in. Threshold chosen on the harvested WITH-scores, applied to vault.
+    h_baseline_with = _baseline_with_array(harvested)
+    v_baseline_with = _baseline_with_array(vault)
+    vault_with_auc = float(roc_auc_score(v_labels, v_baseline_with))
+    with_threshold = _best_f1_threshold(h_baseline_with, h_labels)
+    vault_with_pr = _pr(v_baseline_with, v_labels, with_threshold)
+
     _progress("running arm A")
     arm_a = _run_arm(_N_FEATURES_A, _FEATURE_NAMES_A, harvested, vault)
     _progress("running arm B")
@@ -761,6 +785,23 @@ def main() -> None:
     print(f"  vault baseline AUC        = {vault_baseline_auc:.4f}")
     _print_pr("  vault baseline", vault_baseline_pr)
 
+    print("\n--- MEASURE-GATE: weighted-mean WITH renewal-domain signals ---")
+    print(f"  vault WITHOUT AUC         = {vault_baseline_auc:.4f}")
+    print(f"  vault WITH    AUC         = {vault_with_auc:.4f}")
+    print(f"  AUC delta (WITH-WITHOUT)  = {vault_with_auc - vault_baseline_auc:+.4f}")
+    _print_pr("  vault WITHOUT", vault_baseline_pr)
+    _print_pr("  vault WITH   ", vault_with_pr)
+    gate_pass = vault_with_auc >= vault_baseline_auc
+    print(f"  GATE (WITH >= WITHOUT)    = {gate_pass}")
+    print(
+        "  DECISION                  = "
+        + (
+            "wire signals into production weighted mean"
+            if gate_pass
+            else "leave available-only; keep weighted mean as-is"
+        )
+    )
+
     _print_arm("A (prior: title/author/claimant/year)", arm_a)
     _print_arm("B (A + oreg-class + claimant-class + name-cond)", arm_b)
 
@@ -772,7 +813,8 @@ def main() -> None:
     print(f"  B beats A on vault        = {arm_b.vault_auc > arm_a.vault_auc}")
     print("===============================================================\n")
     _progress(
-        f"done: vault baseline={vault_baseline_auc:.3f} "
+        f"done: vault WITHOUT={vault_baseline_auc:.3f} WITH={vault_with_auc:.3f} "
+        f"gate={'PASS' if gate_pass else 'FAIL'} "
         f"trainedA={arm_a.vault_auc:.3f} trainedB={arm_b.vault_auc:.3f}"
     )
 

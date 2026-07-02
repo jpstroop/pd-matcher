@@ -44,6 +44,22 @@ _RAW_MAX: float = 100.0
 # higher cap is gentler.
 _WHOLE_PART_PENALTY_CAP: float = 0.30
 
+# Renewal-domain scorer weights (issue #45). These are fixed constants rather
+# than :class:`MatchingConfig` fields because they are renewal-pathway-only —
+# the eight config weights must sum to 1.0 and describe the registration match,
+# which never emits ``renewal.*`` Evidence. A registration pair carries none of
+# these scorers, so ``_weights().get(...)`` misses and the entries are inert
+# there; only the renewal scoring path feeds the matching Evidence. The values
+# are subordinate to the primary title / author signals: the ``oreg`` class is
+# the strongest of the three (trained coefs +1.16 / -0.92) and the claimant
+# class the weakest, so they nudge the mean without overriding a strong
+# title+author agreement. Whether the renewal path *feeds* these Evidence at all
+# is gated separately (measure-gate, see the eval); when it does not, the
+# entries are simply never queried.
+_RENEWAL_OREG_WEIGHT: float = 0.10
+_RENEWAL_NAME_WEIGHT: float = 0.06
+_RENEWAL_CLAIMANT_WEIGHT: float = 0.04
+
 
 class WeightedMeanCombiner(Struct, frozen=True, forbid_unknown_fields=True):
     """Weighted-mean combiner parameterised by a :class:`MatchingConfig`."""
@@ -61,6 +77,9 @@ class WeightedMeanCombiner(Struct, frozen=True, forbid_unknown_fields=True):
             "isbn.exact": cfg.isbn_weight,
             "extent.page_count": cfg.extent_weight,
             "volume.compat": cfg.volume_weight,
+            "renewal.oreg_class": _RENEWAL_OREG_WEIGHT,
+            "renewal.claimant_class": _RENEWAL_CLAIMANT_WEIGHT,
+            "renewal.name_conditioned": _RENEWAL_NAME_WEIGHT,
         }
 
     def combine(self, evidence: Sequence[Evidence]) -> CombinedScore:

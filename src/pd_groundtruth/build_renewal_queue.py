@@ -119,6 +119,7 @@ from pd_matcher.match.pipeline import _build_context
 from pd_matcher.match.scorers.context import ScorerContext
 from pd_matcher.match.scorers.name import score_author
 from pd_matcher.match.scorers.name import score_publisher
+from pd_matcher.match.scorers.renewal import renewal_domain_evidence
 from pd_matcher.match.scorers.title import score_title
 from pd_matcher.match.scorers.year import score_year
 from pd_matcher.models import MarcRecord
@@ -149,6 +150,21 @@ _SCORER_TITLE: str = "title"
 _SCORER_AUTHOR: str = "author"
 _SCORER_CLAIMANTS: str = "claimants"
 _SCORER_YEAR: str = "year"
+_SCORER_OREG_CLASS: str = "oreg_class"
+_SCORER_CLAIMANT_CLASS: str = "claimant_class"
+_SCORER_NAME_CONDITIONED: str = "name_conditioned"
+
+# Measure-gate outcome (issue #45). The three validated renewal-domain signals
+# (oreg class, claimant class, class-conditioned author name-match) are always
+# computed and always exposed in the RenewalScore payload so a future learned
+# arm can read them, but they enter the *weighted-mean* only when this flag is
+# True. The measure-gate (scripts/renewal_matcher_eval.py on the human-labeled
+# vault external test, 148 match / 50 no_match) compared the weighted mean WITH
+# vs WITHOUT the signals and PASSED: vault AUC 0.820 -> 0.847 (+0.027) and the
+# no_match reject rate 0.000 -> 0.200 at the F1 operating point, for a 0.993 ->
+# 0.980 recall cost. The signals are therefore wired into production. When False
+# the evidence is fed as available-only and the mean is the pre-#45 score.
+_INCORPORATE_DOMAIN_SIGNALS: bool = True
 
 
 class RenewalScore(Struct, frozen=True, forbid_unknown_fields=True):
@@ -185,6 +201,8 @@ def score_renewal(
     ctx: ScorerContext,
     combiner: Combiner,
     calibrator: PlattCalibrator | None,
+    *,
+    incorporate_domain: bool = _INCORPORATE_DOMAIN_SIGNALS,
 ) -> RenewalScore:
     """Score one MARC↔renewal pairing with the production scorers and combiner.
 
@@ -195,6 +213,14 @@ def score_renewal(
     weighted-mean combiner is applied to the four Evidence readings and the
     calibrator (when present) maps the raw score exactly as the registration
     pipeline does.
+
+    The three validated renewal-domain signals (issue #45) — the ``oreg`` class,
+    the statutory claimant class, and the class-conditioned author name-match —
+    are always computed and surfaced in the returned ``evidence`` payload so a
+    learned arm can consume them. They are averaged into the weighted mean only
+    when ``incorporate_domain`` is set (the measure-gated production default is
+    :data:`_INCORPORATE_DOMAIN_SIGNALS`); otherwise the combined score is
+    identical to the pre-#45 four-scorer mean.
     """
     title_evidence = _best_evidence(
         tuple(
@@ -215,9 +241,12 @@ def score_renewal(
     claimants_evidence = score_publisher(marc.publisher, renewal.claimants, ctx)
     renewal_year = renewal.odat.year if renewal.odat is not None else None
     year_evidence = score_year(marc.publication_year, renewal_year, ctx)
-    combined = combiner.combine(
-        (title_evidence, author_evidence, claimants_evidence, year_evidence)
+    oreg_evidence, claimant_class_evidence, name_conditioned_evidence = renewal_domain_evidence(
+        marc, renewal, ctx
     )
+    base = (title_evidence, author_evidence, claimants_evidence, year_evidence)
+    domain = (oreg_evidence, claimant_class_evidence, name_conditioned_evidence)
+    combined = combiner.combine(base + domain if incorporate_domain else base)
     if calibrator is not None:
         combined = CombinedScore(raw=combined.raw, calibrated=calibrate(combined.raw, calibrator))
     payload: dict[str, float] = {}
@@ -226,6 +255,9 @@ def score_renewal(
         (_SCORER_AUTHOR, author_evidence),
         (_SCORER_CLAIMANTS, claimants_evidence),
         (_SCORER_YEAR, year_evidence),
+        (_SCORER_OREG_CLASS, oreg_evidence),
+        (_SCORER_CLAIMANT_CLASS, claimant_class_evidence),
+        (_SCORER_NAME_CONDITIONED, name_conditioned_evidence),
     ):
         if not evidence.skipped:
             payload[name] = evidence.normalized

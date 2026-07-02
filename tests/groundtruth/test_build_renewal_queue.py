@@ -120,6 +120,17 @@ class _FakeCombiner:
         return CombinedScore(raw=self._calibrated * 100.0, calibrated=self._calibrated)
 
 
+class _RecordingCombiner:
+    """A combiner that records how many Evidence it was handed."""
+
+    def __init__(self) -> None:
+        self.count = -1
+
+    def combine(self, evidence: Sequence[Evidence]) -> CombinedScore:
+        self.count = len(evidence)
+        return CombinedScore(raw=50.0, calibrated=0.5)
+
+
 def _idf() -> IdfTable:
     return IdfTable(document_count=1, default_idf=1.0, source_hash="x", language="eng", idf={})
 
@@ -153,7 +164,15 @@ def test_score_renewal_builds_payload_from_fired_scorers(monkeypatch: MonkeyPatc
     monkeypatch.setattr(module, "score_year", lambda *_a: _evidence("year", 1.0))
     result = score_renewal(_marc(), _renewal(), _ctx(), _FakeCombiner(0.77), None)
     assert result.calibrated == 0.77
-    assert result.evidence == {"title": 0.9, "author": 0.4, "year": 1.0}
+    # The book-family oreg (A111111) fires the always-computed oreg_class signal;
+    # the generic claimant carries no statutory code so the claimant-class and
+    # class-conditioned name signals stay skipped.
+    assert result.evidence == {
+        "title": 0.9,
+        "author": 0.4,
+        "year": 1.0,
+        "oreg_class": 1.0,
+    }
 
 
 def test_score_renewal_applies_calibrator(monkeypatch: MonkeyPatch) -> None:
@@ -184,7 +203,7 @@ def test_score_renewal_falls_back_when_no_marc_title_or_author(
         language_code="eng",
     )
     result = score_renewal(bare, _renewal(), _ctx(bare), _FakeCombiner(0.1), None)
-    assert result.evidence == {"claimants": 0.0, "year": 0.0}
+    assert result.evidence == {"claimants": 0.0, "year": 0.0, "oreg_class": 1.0}
 
 
 def test_score_renewal_handles_renewal_without_odat(monkeypatch: MonkeyPatch) -> None:
@@ -202,6 +221,21 @@ def test_score_renewal_handles_renewal_without_odat(monkeypatch: MonkeyPatch) ->
     renewal = NyplRenRecord(id="R", entry_id="e", title="T", claimants="C")
     score_renewal(_marc(), renewal, _ctx(), _FakeCombiner(0.5), None)
     assert captured["renewal_year"] is None
+
+
+def test_score_renewal_feeds_domain_evidence_when_incorporating() -> None:
+    """With incorporation on, the four base plus three domain Evidence reach the combiner."""
+    combiner = _RecordingCombiner()
+    score_renewal(_marc(), _renewal(), _ctx(), combiner, None, incorporate_domain=True)
+    assert combiner.count == 7
+
+
+def test_score_renewal_keeps_domain_out_of_mean_but_in_payload_when_disabled() -> None:
+    """With incorporation off only the base Evidence are combined, yet signals stay exposed."""
+    combiner = _RecordingCombiner()
+    result = score_renewal(_marc(), _renewal(), _ctx(), combiner, None, incorporate_domain=False)
+    assert combiner.count == 4
+    assert result.evidence["oreg_class"] == 1.0
 
 
 # --------------------------------------------------------------------------- #
