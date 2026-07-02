@@ -7,6 +7,9 @@ weighted mean over present Evidence, end of story.
 """
 
 from pd_matcher.config.schemas import MatchingConfig
+from pd_matcher.match.combiners.weighted_mean import _RENEWAL_CLAIMANT_WEIGHT
+from pd_matcher.match.combiners.weighted_mean import _RENEWAL_NAME_WEIGHT
+from pd_matcher.match.combiners.weighted_mean import _RENEWAL_OREG_WEIGHT
 from pd_matcher.match.combiners.weighted_mean import _WHOLE_PART_PENALTY_CAP
 from pd_matcher.match.combiners.weighted_mean import WeightedMeanCombiner
 from pd_matcher.match.evidence import Evidence
@@ -247,6 +250,33 @@ def test_weight_multiplier_zero_drops_evidence(matching_config: MatchingConfig) 
     )
     # The author Evidence is dropped, so the mean is title alone -> 100.
     assert combined.raw == 100.0
+
+
+def test_weighted_mean_incorporates_renewal_domain_scorers(
+    matching_config: MatchingConfig,
+) -> None:
+    """The three renewal-domain scorers contribute with their fixed weights.
+
+    A perfect title alone is 100; adding the three domain scorers all reading
+    0.0 pulls the mean down by exactly their combined weight share, proving the
+    combiner carries a weight for each of the three ``renewal.*`` scorers.
+    """
+    combiner = WeightedMeanCombiner(config=matching_config)
+    combined = combiner.combine(
+        (
+            _ev("title.token_set", 100.0),
+            _ev("renewal.oreg_class", 0.0),
+            _ev("renewal.claimant_class", 0.0),
+            _ev("renewal.name_conditioned", 0.0),
+        )
+    )
+    cfg = matching_config
+    denom = (
+        cfg.title_weight + _RENEWAL_OREG_WEIGHT + _RENEWAL_CLAIMANT_WEIGHT + _RENEWAL_NAME_WEIGHT
+    )
+    expected = (cfg.title_weight * 1.0) / denom * 100.0
+    assert combined.raw == expected
+    assert combined.raw < 100.0
 
 
 def test_whole_part_penalty_caps_uncorroborated_incompatibility(
