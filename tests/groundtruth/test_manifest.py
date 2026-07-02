@@ -12,9 +12,9 @@ from pd_groundtruth.manifest import fetch_manifest
 from pd_groundtruth.manifest import parse_manifest
 
 
-def _manifest_payload(entries: list[tuple[str, str]]) -> bytes:
-    """Encode a manifest JSON document for the given ``(dump_file, md5)`` pairs."""
-    return encode({"files": {"bib_records": [{"dump_file": u, "md5": m} for u, m in entries]}})
+def _manifest_payload(entries: list[tuple[str, str]], *, group: str = "bib_records") -> bytes:
+    """Encode a manifest JSON document placing entries under ``group``."""
+    return encode({"files": {group: [{"dump_file": u, "md5": m} for u, m in entries]}})
 
 
 def _event(dump_type: str, success: bool, dump_url: str, finish: str | None) -> dict[str, object]:
@@ -36,9 +36,25 @@ def test_parse_manifest_returns_ordered_entries() -> None:
     )
 
 
+def test_parse_manifest_reads_recap_records_full_group() -> None:
+    payload = _manifest_payload([("https://x/r.tar.gz", "rrr")], group="recap_records_full")
+    assert parse_manifest(payload) == (DumpEntry(url="https://x/r.tar.gz", md5="rrr"),)
+
+
+def test_parse_manifest_reads_updated_records_group() -> None:
+    payload = _manifest_payload([("https://x/u.tar.gz", "uuu")], group="updated_records")
+    assert parse_manifest(payload) == (DumpEntry(url="https://x/u.tar.gz", md5="uuu"),)
+
+
+def test_parse_manifest_ignores_non_record_groups() -> None:
+    payload = encode({"files": {"recap_records_full_metadata": [{"dump_file": "m", "md5": "0"}]}})
+    with raises(ValueError, match=r"no known record group"):
+        parse_manifest(payload)
+
+
 def test_parse_manifest_empty_entries_raises() -> None:
     payload = encode({"files": {"bib_records": []}})
-    with raises(ValueError, match=r"no files\.bib_records"):
+    with raises(ValueError, match=r"no known record group"):
         parse_manifest(payload)
 
 
