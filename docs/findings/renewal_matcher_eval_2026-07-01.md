@@ -149,3 +149,130 @@ stronger renewal matcher on real labels, so there is no reason to add model comp
 3. **Re-open the model question only after** the vault renewal set is materially larger and more
    balanced; at that point re-measure with this same grouped-CV + external-vault protocol before any
    integration.
+
+---
+
+# v2 (2026-07-01): three domain features — do they let a trained arm beat the weighted-mean?
+
+**Gates:** issue [#45](https://github.com/jpstroop/pd-matcher/issues/45) — the v1 finding was that a trained
+logistic regression over the four per-scorer readings (title/author/claimant/year) loses to the untrained
+weighted-mean on the honest vault test because it over-relies on title. v2 asks whether **three domain
+features read straight off the renewal record** close that gap.
+**Scope:** STANDALONE, directional. No production code changed. Read-only; nothing under `data/` written.
+**Proof:** `scripts/renewal_matcher_eval.py` (extended in place; same honest protocol, now comparing feature
+set A vs B).
+
+## What changed since v1
+
+**Two feature sets.** **A** = the v1 8-dim per-scorer vector (title/author/claimant/year, each a normalized
+reading + a present flag). **B** = A + an 8-dim domain block:
+
+1. **`oreg`-class** (`reg_class(oreg)` → `oreg_book` / `oreg_periodical` / `oreg_drama` indicators; else all
+   zero). Book = A/AA/AF/AI/AFO/AIO, periodical = B/BB, drama = D/DF/DP.
+2. **claimant-class** — the statutory renewal-right code parsed from the `claimants` string (`Name|CODE`,
+   `||`-joined; `;` / `Name (CODE)` also handled) → `claim_author` (A), `claim_estate` (W/C/E/NK),
+   `claim_proprietor` (PWH/PPW/PCW ← the mismatch-risk flag).
+3. **class-conditioned author name-match** — the production author scorer run between the renewal's
+   author-coded claimant name and the MARC author, **gated to zero unless the renewal is claimed as author**
+   (`name_match_cond`), plus a `name_expected` indicator. An estate/proprietor renews under a *different*
+   name, so a name mismatch there is deliberately **not** penalized (the owner's key insight).
+
+**Bigger, more balanced vault test.** The human-labeled renewal set grew from 117 match / 14 no_match to
+**148 match / 50 no_match** (203 entries → 5 `unsure` dropped → 198 considered → 198 resolved, 0 missing in
+pool, 0 missing in index). The baseline's vault AUC is *higher here (0.82) than the v1 0.77* purely because
+the test set changed — do not read that as a code effect.
+
+## Results
+
+Harvested set unchanged: 440 rows (220/220) over 220 MARC groups; baseline-fidelity r=0.917.
+
+### Harvested — grouped 5-fold CV (group = MARC), mean ± sd
+
+| Arm | AUC mean ± sd | resubstitution |
+|---|---|---|
+| Baseline (weighted-mean) | 0.8790 ± 0.0395 | — |
+| Trained **A** | 0.9465 ± 0.0281 | 0.9500 |
+| Trained **B** | 0.9489 ± 0.0253 | 0.9645 |
+
+In-distribution the domain features barely move CV AUC (+0.002) — expected, since the harvested hard-negatives
+are already separable on title/author. The features earn their keep only out-of-distribution.
+
+### Vault external test — human-labeled, never trained on (148 match / 50 no_match)
+
+| Arm | vault AUC | P/R at held-out threshold |
+|---|---|---|
+| Baseline (weighted-mean) | **0.8197** | thr 0.318 → P 0.746 / R 0.993 (tp 147, fp **50**, fn 1, **tn 0**) |
+| Trained **A** | **0.6758** | thr 0.365 → P 0.755 / R 1.000 (tp 148, fp 48, fn 0, **tn 2**) |
+| Trained **B** | **0.8036** | thr 0.471 → P 0.864 / R 0.899 (tp 133, fp 21, fn 15, **tn 29**) |
+
+**The domain features recover almost the entire v1 gap.** Trained-A still loses badly (0.68), reproducing v1.
+Trained-**B jumps to 0.80** — up +0.128 over A, and now within **0.016** of the untrained baseline (v1 gap was
+−0.15). On pure AUC, **B does not beat the baseline** — it *narrows to a statistical tie*.
+
+**But the operating point tells the more useful story.** At the F1-optimal threshold chosen on the harvested
+set, the baseline and trained-A reject essentially **none** of the 50 vault negatives (tn 0 and 2) — they call
+almost everything a match. **Trained-B rejects 29 of 50 negatives at 86% precision / 90% recall.** For a
+candidate-surfacing matcher whose every output row is human-verified, an arm that actually separates the
+classes at a usable threshold is worth more than a marginally higher AUC that only ranks well but cannot be
+thresholded to reject anything.
+
+### Trained-B coefficients (standardized)
+
+| feature | coef | feature | coef |
+|---|---|---|---|
+| title_norm | **+2.6027** | oreg_book | **+1.1582** |
+| title_present | −0.4488 | oreg_periodical | **−0.9164** |
+| author_norm | +1.1024 | oreg_drama | +0.3862 |
+| author_present | −1.1233 | claim_author | −0.2338 |
+| claimants_norm | −0.2159 | claim_estate | −0.4864 |
+| claimants_present | −0.0566 | claim_proprietor | −0.3071 |
+| year_norm | +0.0713 | name_match_cond | **+0.2952** |
+| year_present | 0.0000 | name_expected | −0.2338 |
+| intercept | +0.1227 | | |
+
+The new features carry real weight. The dominant new levers are **`oreg_book` (+1.16)** and
+**`oreg_periodical` (−0.92)**: the model learned that periodical-class renewals are systematically the
+mismatches (e.g. the harvested hard-negative `B5-21779` "A Desperate moment"), while book-class renewals are
+the in-scope true matches. `claim_estate` (−0.49) and `claim_proprietor` (−0.31) both pull negative — a
+proprietor/estate renewal is a weaker match signal than an author renewal, consistent with the labels. The
+**class-conditioned `name_match_cond` (+0.30)** is a genuine positive contributor, confirming the gated
+name-match adds signal without the estate/proprietor false-penalty that a naive name-match would incur.
+
+## Honest caveats (unchanged from v1 plus one)
+
+- **Still small, though better.** 50 negatives (was 14). AUC against 50 negatives has a real confidence
+  interval; the −0.016 baseline-vs-B gap is **inside the noise** — treat B and the baseline as tied on AUC,
+  not one clearly ahead.
+- **Harvested positives are easy** (transitivity) and the harvested negatives are same-MARC look-alikes, so
+  the 0.95 harvested AUC overstates difficulty for both arms and the harvested CV cannot see the domain
+  features' real value.
+- **Class-conditioned name-match is coarse** — a single token/fuzzy ratio gated on the parsed author code,
+  first author-coded claimant only; no disambiguation of multi-claimant names.
+- **Field-reconstruction shortcut** on the harvested side (r=0.917), symmetric across arms.
+- **Distribution shift is still the whole game** — the eval's value is exposing it; the domain features are
+  the first change that meaningfully survives it.
+
+## VERDICT
+
+**The three domain features help — substantially — but on the headline AUC metric a trained arm still does
+not *beat* the untrained weighted-mean; it draws level.** Trained-B closes ~89% of the v1 gap (vault AUC
+0.68 → 0.80 vs baseline 0.82) and is the **only** arm that yields a usable operating point (rejects 58% of
+negatives at 86% precision, vs 0% for the baseline at its own F1 threshold). The owner's hypotheses are
+validated: `oreg`-class (book vs periodical) is the strongest new signal, and the class-conditioned
+name-match adds real, correctly-signed weight without penalizing estates/proprietors.
+
+**Recommendation:**
+
+1. **Wire the three domain features into the renewal feature pipeline** (they feed *both* a future trained
+   arm and, as new scorers, the weighted-mean). They are cheap, interpretable, and clearly informative —
+   `oreg`-class and class-conditioned name-match especially. This is worth doing now.
+2. **Do NOT yet flip the renewal pathway from the weighted-mean to a trained model.** On AUC the two are a
+   statistical tie (−0.016, well inside the 50-negative noise band). B's better *operating point* is
+   encouraging but should be confirmed at larger N before switching the production arm.
+3. **The bottleneck is still labeled negatives.** Going from 14 → 50 negatives is exactly what turned the
+   trained arm from a clear loser into a tie; another 50–100 human `no_match` verdicts would likely resolve
+   whether trained-B genuinely surpasses the baseline. Re-run this same A-vs-B protocol at that point before
+   any production integration decision.
+
+**Bottom line: the features are a real, keep-them win for the trained arm and worth adding to the pipeline;
+more labeled data (not model choice) remains the deciding factor for whether to replace the weighted-mean.**

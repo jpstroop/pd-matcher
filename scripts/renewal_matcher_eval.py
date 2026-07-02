@@ -1,8 +1,22 @@
-"""First-cut renewal-matcher training + HONEST held-out evaluation (GitHub #45).
+"""Renewal-matcher training + HONEST held-out evaluation (GitHub #45).
 
 Answers one question: does the harvested MARC↔renewal training data produce a
 working renewal matcher, and does a *trained* model beat the untrained
 weighted-mean baseline on an honest, leakage-controlled test?
+
+**v2 (A vs B).** Two feature sets are compared. Feature set **A** is the prior
+8-dim per-scorer vector (title / author / claimant / year, each a normalized
+reading plus a present flag). Feature set **B** appends three domain features
+read straight off the renewal record: (1) the ``oreg`` registration class as
+book / periodical / drama indicators; (2) the statutory claimant-class as
+author / estate / proprietor indicators (proprietor is the mismatch-risk flag);
+(3) a *class-conditioned* author name-match — the claimant-vs-MARC-author
+name similarity, active only when the renewal is claimed as author, since an
+estate or proprietor renews under a different name and must not be penalized.
+The eval reports grouped-CV AUC for A and B, then the honest external vault AUC
+and P/R for the baseline, trained-A, and trained-B arms, plus trained-B's
+coefficients — the test of whether the domain features let a trained arm beat
+the untrained weighted-mean where it counts.
 
 The eval is STANDALONE. It does not touch the production combiner
 (``match/combiners/features.py``); it only *reuses* the production renewal
@@ -42,6 +56,7 @@ from logging import INFO
 from logging import basicConfig
 from logging import getLogger
 from pathlib import Path
+from re import split as re_split
 from statistics import mean
 from statistics import pstdev
 
@@ -79,6 +94,7 @@ from pd_matcher.match.scorers.title import score_title
 from pd_matcher.match.scorers.year import score_year
 from pd_matcher.models import MarcRecord
 from pd_matcher.models import NyplRenRecord
+from pd_matcher.normalize.registration_numbers import reg_class
 
 _LOGGER = getLogger("renewal_matcher_eval")
 
@@ -89,7 +105,7 @@ _HARVEST = Path("data/harvested_renewal_pairs.jsonl")
 _VAULT = Path("data/training/label_vault.jsonl")
 _PROGRESS = Path("/tmp/agent-progress.log")
 
-_FEATURE_NAMES: tuple[str, ...] = (
+_FEATURE_NAMES_A: tuple[str, ...] = (
     "title_norm",
     "title_present",
     "author_norm",
@@ -100,6 +116,30 @@ _FEATURE_NAMES: tuple[str, ...] = (
     "year_present",
 )
 
+_FEATURE_NAMES_EXTRA: tuple[str, ...] = (
+    "oreg_book",
+    "oreg_periodical",
+    "oreg_drama",
+    "claim_author",
+    "claim_estate",
+    "claim_proprietor",
+    "name_match_cond",
+    "name_expected",
+)
+
+_FEATURE_NAMES_B: tuple[str, ...] = _FEATURE_NAMES_A + _FEATURE_NAMES_EXTRA
+
+_N_FEATURES_A: int = len(_FEATURE_NAMES_A)
+_N_FEATURES_B: int = len(_FEATURE_NAMES_B)
+
+_OREG_BOOK: frozenset[str] = frozenset({"A", "AA", "AF", "AI", "AFO", "AIO"})
+_OREG_PERIODICAL: frozenset[str] = frozenset({"B", "BB"})
+_OREG_DRAMA: frozenset[str] = frozenset({"D", "DF", "DP"})
+
+_CODE_AUTHOR: frozenset[str] = frozenset({"A"})
+_CODE_ESTATE: frozenset[str] = frozenset({"W", "C", "E", "NK"})
+_CODE_PROPRIETOR: frozenset[str] = frozenset({"PWH", "PPW", "PCW"})
+
 _CV_SPLITS: int = 5
 _LOGREG_C: float = 1.0
 _RANDOM_STATE: int = 0
@@ -108,10 +148,12 @@ _RANDOM_STATE: int = 0
 class Sample:
     """One labeled ``(MARC, renewal)`` pair: features, baseline, label, group.
 
-    ``features`` is the 8-dim per-scorer vector; ``baseline`` is the weighted-
-    mean combiner's calibrated score for the pair; ``label`` is 1 for a true
-    match, 0 otherwise; ``group`` is the MARC control id used to keep a record
-    and its hard negatives on the same side of a CV split.
+    ``features`` is the full feature-set-B vector (the 8-dim per-scorer block
+    followed by the 8-dim domain block); feature set A is its first
+    :data:`_N_FEATURES_A` columns. ``baseline`` is the weighted-mean combiner's
+    calibrated score for the pair; ``label`` is 1 for a true match, 0 otherwise;
+    ``group`` is the MARC control id used to keep a record and its hard negatives
+    on the same side of a CV split.
     """
 
     __slots__ = ("baseline", "features", "group", "label")
@@ -175,6 +217,113 @@ def _feature_vector(evidence: tuple[Evidence, Evidence, Evidence, Evidence]) -> 
         vector.append(item.normalized)
         vector.append(0.0 if item.skipped else 1.0)
     return vector
+
+
+def _parse_claimants(claimants: str | None) -> tuple[tuple[str, str], ...]:
+    """Return ``(name, statutory_code)`` pairs parsed from a claimants string.
+
+    NYPL transcribes each renewal claimant as ``Name|CODE``, joining multiple
+    claimants with ``||``; a minority use ``;`` separators or a trailing
+    ``Name (CODE)``. The statutory code names the renewal-right class — ``A``
+    author, ``W`` widow/er, ``C`` child, ``E`` executor, ``NK`` next-of-kin,
+    ``PWH``/``PPW``/``PCW`` proprietor / work-for-hire. Parts without a
+    recognizable trailing code yield an empty code.
+    """
+    if not claimants:
+        return ()
+    pairs: list[tuple[str, str]] = []
+    for raw_part in re_split(r"\|\||;", claimants):
+        part = raw_part.strip()
+        if not part:
+            continue
+        head, _, tail = part.rpartition("|")
+        code = tail.strip()
+        if head and code.isalpha() and code.isupper():
+            pairs.append((head.strip(), code))
+            continue
+        if part.endswith(")") and "(" in part:
+            name, _, bracket = part.rpartition("(")
+            inner = bracket[:-1].strip()
+            if inner.isalpha() and inner.isupper():
+                pairs.append((name.strip(), inner))
+                continue
+        pairs.append((part, ""))
+    return tuple(pairs)
+
+
+def _oreg_indicators(oreg: str | None) -> tuple[float, float, float]:
+    """Return ``(is_book, is_periodical, is_drama)`` for a renewal ``oreg``.
+
+    Uses :func:`reg_class` to read the leading registration class token, then
+    buckets it into the three families that survive the in-scope filter; an
+    unrecognized class produces all-zero (the implicit "else" bucket).
+    """
+    cls = reg_class(oreg)
+    return (
+        1.0 if cls in _OREG_BOOK else 0.0,
+        1.0 if cls in _OREG_PERIODICAL else 0.0,
+        1.0 if cls in _OREG_DRAMA else 0.0,
+    )
+
+
+def _claimant_indicators(pairs: tuple[tuple[str, str], ...]) -> tuple[float, float, float]:
+    """Return ``(is_author, is_estate, is_proprietor)`` over parsed claimants.
+
+    Any author-coded claimant sets ``is_author``; any of widow/child/executor/
+    next-of-kin sets ``is_estate``; any proprietor / work-for-hire code sets
+    ``is_proprietor`` — the risk flag, since a proprietor renewal need not share
+    a name with the MARC author.
+    """
+    codes = {code for _, code in pairs}
+    return (
+        1.0 if codes & _CODE_AUTHOR else 0.0,
+        1.0 if codes & _CODE_ESTATE else 0.0,
+        1.0 if codes & _CODE_PROPRIETOR else 0.0,
+    )
+
+
+def _name_match_features(
+    marc: MarcRecord,
+    pairs: tuple[tuple[str, str], ...],
+    ctx: ScorerContext,
+) -> tuple[float, float]:
+    """Return ``(name_match_cond, name_expected)`` for the class-conditioned name.
+
+    The name-similarity between the renewal claimant and the MARC author is only
+    meaningful when the renewal right is claimed *as author* (code ``A``): an
+    estate or proprietor renews under a different name, so a name mismatch there
+    is not evidence against a true match. When author is expected, the first
+    author-coded claimant name is scored against the MARC author with the
+    production author scorer and the normalized reading returned; otherwise both
+    features are zero.
+    """
+    author_name: str | None = None
+    for name, code in pairs:
+        if code in _CODE_AUTHOR:
+            author_name = name
+            break
+    if author_name is None:
+        return 0.0, 0.0
+    evidence = score_author(marc.main_author, author_name, ctx)
+    return evidence.normalized, 1.0
+
+
+def _extra_features(marc: MarcRecord, renewal: NyplRenRecord, ctx: ScorerContext) -> list[float]:
+    """Return the 8-dim domain feature block appended for feature set B."""
+    pairs = _parse_claimants(renewal.claimants)
+    oreg_book, oreg_periodical, oreg_drama = _oreg_indicators(renewal.oreg)
+    claim_author, claim_estate, claim_proprietor = _claimant_indicators(pairs)
+    name_match_cond, name_expected = _name_match_features(marc, pairs, ctx)
+    return [
+        oreg_book,
+        oreg_periodical,
+        oreg_drama,
+        claim_author,
+        claim_estate,
+        claim_proprietor,
+        name_match_cond,
+        name_expected,
+    ]
 
 
 def _baseline_score(
@@ -296,7 +445,7 @@ def build_harvested_samples(
         renewal = _renewal_from_harvest(row)
         ctx = context_cache.context_for(marc)
         evidence = _renewal_evidence(marc, renewal, ctx)
-        features = _feature_vector(evidence)
+        features = _feature_vector(evidence) + _extra_features(marc, renewal, ctx)
         baseline = _baseline_score(evidence, combiner, calibrator)
         label = 1 if row["label"] == "match" else 0
         samples.append(Sample(features, baseline, label, marc.control_id))
@@ -342,7 +491,7 @@ def build_vault_samples(
                 continue
             ctx = context_cache.context_for(marc)
             evidence = _renewal_evidence(marc, renewal, ctx)
-            features = _feature_vector(evidence)
+            features = _feature_vector(evidence) + _extra_features(marc, renewal, ctx)
             baseline = _baseline_score(evidence, combiner, calibrator)
             label = 1 if entry.verdict == "match" else 0
             samples.append(Sample(features, baseline, label, entry.marc_control_id))
@@ -359,9 +508,14 @@ def build_vault_samples(
     return samples, counts
 
 
-def _matrix(samples: list[Sample]) -> tuple[ndarray, ndarray, list[str], ndarray]:
-    """Return (X, y, groups, baseline) numpy arrays for a sample list."""
-    features = asarray([s.features for s in samples], dtype=float)
+def _matrix(samples: list[Sample], n_features: int) -> tuple[ndarray, ndarray, list[str], ndarray]:
+    """Return (X, y, groups, baseline) numpy arrays for a sample list.
+
+    ``X`` is sliced to the first ``n_features`` columns so the same stored 16-dim
+    feature vector serves both feature set A (:data:`_N_FEATURES_A`) and feature
+    set B (:data:`_N_FEATURES_B`) without rescoring.
+    """
+    features = asarray([s.features[:n_features] for s in samples], dtype=float)
     labels = asarray([s.label for s in samples], dtype=int)
     groups = [s.group for s in samples]
     baseline = asarray([s.baseline for s in samples], dtype=float)
@@ -381,14 +535,16 @@ def _new_model() -> Pipeline:
     )
 
 
-def grouped_cv(samples: list[Sample]) -> tuple[list[float], list[float]]:
+def grouped_cv(samples: list[Sample], n_features: int) -> tuple[list[float], list[float]]:
     """Grouped-by-MARC k-fold: return per-fold (trained AUC, baseline AUC).
 
     The baseline AUC is computed on the *same* held-out fold so the two arms
     are compared on identical rows; the baseline needs no training, so only the
-    fold membership varies it.
+    fold membership varies it. ``n_features`` selects feature set A or B; the
+    fold assignment is identical across feature sets (same rows, same groups,
+    same splitter seed), so A-vs-B is a like-for-like comparison per fold.
     """
-    features, labels, groups, baseline = _matrix(samples)
+    features, labels, groups, baseline = _matrix(samples, n_features)
     splitter = GroupKFold(n_splits=_CV_SPLITS)
     trained_aucs: list[float] = []
     baseline_aucs: list[float] = []
@@ -451,10 +607,105 @@ def _pearson(left: list[float], right: ndarray) -> float:
     )
 
 
+class ArmResult:
+    """One feature set's trained-arm results: CV AUCs, vault AUC/PR, coefficients."""
+
+    __slots__ = (
+        "coefs",
+        "cv_baseline",
+        "cv_trained",
+        "intercept",
+        "resub_auc",
+        "vault_auc",
+        "vault_pr",
+    )
+
+    def __init__(
+        self,
+        cv_trained: list[float],
+        cv_baseline: list[float],
+        resub_auc: float,
+        vault_auc: float,
+        vault_pr: dict[str, float],
+        coefs: dict[str, float],
+        intercept: float,
+    ) -> None:
+        self.cv_trained = cv_trained
+        self.cv_baseline = cv_baseline
+        self.resub_auc = resub_auc
+        self.vault_auc = vault_auc
+        self.vault_pr = vault_pr
+        self.coefs = coefs
+        self.intercept = intercept
+
+
+def _run_arm(
+    n_features: int,
+    feature_names: tuple[str, ...],
+    harvested: list[Sample],
+    vault: list[Sample],
+) -> ArmResult:
+    """Train on the full harvested set, evaluate on the vault, for one feature set.
+
+    Runs grouped-by-MARC CV on the harvested rows, then freezes a model on all
+    harvested rows and scores the never-trained-on vault. The F1 threshold is
+    chosen on the harvested (training) scores and applied unchanged to the vault.
+    """
+    cv_trained, cv_baseline = grouped_cv(harvested, n_features)
+    h_features, h_labels, _, _ = _matrix(harvested, n_features)
+    v_features, v_labels, _, _ = _matrix(vault, n_features)
+    model = _new_model()
+    model.fit(h_features, h_labels)
+    h_scores = model.predict_proba(h_features)[:, 1]
+    resub_auc = float(roc_auc_score(h_labels, h_scores))
+    v_scores = model.predict_proba(v_features)[:, 1]
+    vault_auc = float(roc_auc_score(v_labels, v_scores))
+    threshold = _best_f1_threshold(h_scores, h_labels)
+    vault_pr = _pr(v_scores, v_labels, threshold)
+    logreg: LogisticRegression = model.named_steps["logreg"]
+    coefs = dict(zip(feature_names, logreg.coef_[0].tolist(), strict=True))
+    return ArmResult(
+        cv_trained,
+        cv_baseline,
+        resub_auc,
+        vault_auc,
+        vault_pr,
+        coefs,
+        float(logreg.intercept_[0]),
+    )
+
+
+def _print_pr(label: str, pr: dict[str, float]) -> None:
+    """Print a labeled precision/recall/confusion line at its threshold."""
+    print(
+        f"{label} P/R @ thr={pr['threshold']:.3f}  "
+        f"P={pr['precision']:.3f} R={pr['recall']:.3f} "
+        f"tp={int(pr['tp'])} fp={int(pr['fp'])} fn={int(pr['fn'])} tn={int(pr['tn'])}"
+    )
+
+
+def _print_arm(name: str, result: ArmResult) -> None:
+    """Print a feature set's CV, vault, and coefficient block."""
+    print(f"\n--- Feature set {name} ---")
+    folds = [round(a, 4) for a in result.cv_trained]
+    print(f"  grouped {_CV_SPLITS}-fold CV trained AUC = {folds}")
+    print(
+        f"  trained AUC mean±sd       = "
+        f"{mean(result.cv_trained):.4f} ± {pstdev(result.cv_trained):.4f}"
+    )
+    print(f"  resubstitution AUC        = {result.resub_auc:.4f}  (overfit check vs CV)")
+    print(f"  vault trained AUC         = {result.vault_auc:.4f}")
+    _print_pr("  vault trained", result.vault_pr)
+    print("  coefficients (standardized):")
+    for feature_name, value in result.coefs.items():
+        print(f"    {feature_name:18s} = {value:+.4f}")
+    print(f"    {'intercept':18s} = {result.intercept:+.4f}")
+
+
 def main() -> None:
-    """Run the full eval and print a transcribable report to stdout."""
+    """Run the A-vs-B eval and print a transcribable report to stdout."""
     basicConfig(level=INFO, format="%(asctime)s %(levelname)s %(message)s")
-    _progress("start")
+    _progress("start (v2: A vs B feature sets)")
     config = _load_default_matching_config()
     combiner = build_combiner(config, learned_model_dir=None)
     calibrator = _load_calibrator(_CACHES)
@@ -462,34 +713,25 @@ def main() -> None:
 
     _progress("scoring harvested set")
     harvested, stored = build_harvested_samples(context_cache, combiner, calibrator)
-    _, h_labels, _, h_baseline = _matrix(harvested)
+    _, h_labels, _, h_baseline = _matrix(harvested, _N_FEATURES_A)
     fidelity = _pearson(stored, h_baseline)
     _progress(f"harvested scored: {len(harvested)} rows, fidelity r={fidelity:.4f}")
 
-    trained_aucs, baseline_aucs = grouped_cv(harvested)
-
     _progress("scoring vault external test")
     vault, counts = build_vault_samples(context_cache, combiner, calibrator)
-    v_features, v_labels, _, v_baseline = _matrix(vault)
+    _, v_labels, _, v_baseline = _matrix(vault, _N_FEATURES_A)
 
-    h_features, _, _, _ = _matrix(harvested)
-    final_model = _new_model()
-    final_model.fit(h_features, h_labels)
-    resub_auc = float(roc_auc_score(h_labels, final_model.predict_proba(h_features)[:, 1]))
-
-    v_trained_scores = final_model.predict_proba(v_features)[:, 1]
-    vault_trained_auc = float(roc_auc_score(v_labels, v_trained_scores))
+    baseline_cv = grouped_cv(harvested, _N_FEATURES_A)[1]
     vault_baseline_auc = float(roc_auc_score(v_labels, v_baseline))
-
-    trained_threshold = _best_f1_threshold(final_model.predict_proba(h_features)[:, 1], h_labels)
     baseline_threshold = _best_f1_threshold(h_baseline, h_labels)
-    vault_trained_pr = _pr(v_trained_scores, v_labels, trained_threshold)
     vault_baseline_pr = _pr(v_baseline, v_labels, baseline_threshold)
 
-    logreg: LogisticRegression = final_model.named_steps["logreg"]
-    coefs = dict(zip(_FEATURE_NAMES, logreg.coef_[0].tolist(), strict=True))
+    _progress("running arm A")
+    arm_a = _run_arm(_N_FEATURES_A, _FEATURE_NAMES_A, harvested, vault)
+    _progress("running arm B")
+    arm_b = _run_arm(_N_FEATURES_B, _FEATURE_NAMES_B, harvested, vault)
 
-    print("\n================ RENEWAL MATCHER EVAL (#45) ================")
+    print("\n============ RENEWAL MATCHER EVAL v2 (#45) — A vs B ============")
     print(f"year_window (retrieval) = {context_cache.config_year_window}")
     print(f"calibrator present      = {calibrator is not None}")
     print("\n--- Harvested set ---")
@@ -502,12 +744,6 @@ def main() -> None:
         f"baseline-fidelity r     = {fidelity:.4f}  "
         "(recomputed vs stored 'score'; <1 from field reconstruction)"
     )
-    print(f"\ngrouped {_CV_SPLITS}-fold CV (group = MARC control id):")
-    print(f"  trained AUC per fold  = {[round(a, 4) for a in trained_aucs]}")
-    print(f"  trained AUC mean±sd   = {mean(trained_aucs):.4f} ± {pstdev(trained_aucs):.4f}")
-    print(f"  baseline AUC per fold = {[round(a, 4) for a in baseline_aucs]}")
-    print(f"  baseline AUC mean±sd  = {mean(baseline_aucs):.4f} ± {pstdev(baseline_aucs):.4f}")
-    print(f"  resubstitution AUC    = {resub_auc:.4f}  (full-train; overfit check vs CV)")
 
     print("\n--- Vault external test (human-labeled, never trained on) ---")
     print(f"renewal entries         = {counts['renewal_entries']}")
@@ -519,29 +755,25 @@ def main() -> None:
         f"RESOLVED                = {counts['resolved']}  "
         f"(match={counts['resolved_match']}, no_match={counts['resolved_no_match']})"
     )
-    print(f"\ntrained  AUC            = {vault_trained_auc:.4f}")
-    print(f"baseline AUC            = {vault_baseline_auc:.4f}")
-    print(
-        f"trained  P/R @ thr={vault_trained_pr['threshold']:.3f}  "
-        f"P={vault_trained_pr['precision']:.3f} R={vault_trained_pr['recall']:.3f} "
-        f"tp={int(vault_trained_pr['tp'])} fp={int(vault_trained_pr['fp'])} "
-        f"fn={int(vault_trained_pr['fn'])} tn={int(vault_trained_pr['tn'])}"
-    )
-    print(
-        f"baseline P/R @ thr={vault_baseline_pr['threshold']:.3f}  "
-        f"P={vault_baseline_pr['precision']:.3f} R={vault_baseline_pr['recall']:.3f} "
-        f"tp={int(vault_baseline_pr['tp'])} fp={int(vault_baseline_pr['fp'])} "
-        f"fn={int(vault_baseline_pr['fn'])} tn={int(vault_baseline_pr['tn'])}"
-    )
 
-    print("\n--- Trained logistic-regression coefficients (standardized) ---")
-    for name, value in coefs.items():
-        print(f"  {name:18s} = {value:+.4f}")
-    print(f"  intercept          = {logreg.intercept_[0]:+.4f}")
-    print("===========================================================\n")
+    print("\n--- Baseline (untrained weighted-mean) ---")
+    print(f"  harvested CV baseline AUC = {mean(baseline_cv):.4f} ± {pstdev(baseline_cv):.4f}")
+    print(f"  vault baseline AUC        = {vault_baseline_auc:.4f}")
+    _print_pr("  vault baseline", vault_baseline_pr)
+
+    _print_arm("A (prior: title/author/claimant/year)", arm_a)
+    _print_arm("B (A + oreg-class + claimant-class + name-cond)", arm_b)
+
+    print("\n--- Verdict inputs (vault AUC) ---")
+    print(f"  baseline = {vault_baseline_auc:.4f}")
+    print(f"  trained A = {arm_a.vault_auc:.4f}")
+    print(f"  trained B = {arm_b.vault_auc:.4f}")
+    print(f"  B beats baseline on vault = {arm_b.vault_auc > vault_baseline_auc}")
+    print(f"  B beats A on vault        = {arm_b.vault_auc > arm_a.vault_auc}")
+    print("===============================================================\n")
     _progress(
-        f"done: harvested CV trained={mean(trained_aucs):.3f} baseline={mean(baseline_aucs):.3f}; "
-        f"vault trained={vault_trained_auc:.3f} baseline={vault_baseline_auc:.3f}"
+        f"done: vault baseline={vault_baseline_auc:.3f} "
+        f"trainedA={arm_a.vault_auc:.3f} trainedB={arm_b.vault_auc:.3f}"
     )
 
 
