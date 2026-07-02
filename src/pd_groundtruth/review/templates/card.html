@@ -146,6 +146,7 @@
       </div>
       <div class="row">
         {%- if card.cce_renewal_claimants %}<div class="field"><div class="k">renewal claimants</div><div class="v">{{ card.cce_renewal_claimants }}</div></div>{% endif -%}
+        <div class="field"><div class="k">renewed by</div><div class="v">{{ card.cce_renewal_renewed_by }}</div></div>
       </div>
       <div class="row">
         {%- if card.cce_reg_year is not none %}<div class="field"><div class="k">original reg year</div><div class="v">{{ card.cce_reg_year }}</div></div>{% endif -%}

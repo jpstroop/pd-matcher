@@ -413,6 +413,9 @@ def test_renewal_card_presents_renewal_record_as_cce_side(renewal_client: TestCl
     # The oreg-derived format label surfaces on the renewal card.
     assert "format" in response.text
     assert "Book" in response.text
+    # The claimant-derived renewal-right label surfaces on the renewal card.
+    assert "renewed by" in response.text
+    assert "proprietor (work for hire)" in response.text
     # The registration-only presentation is not used for a renewal pair.
     assert "<h2>CCE (Copyright Office)</h2>" not in response.text
 

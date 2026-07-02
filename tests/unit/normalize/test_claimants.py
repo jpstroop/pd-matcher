@@ -2,6 +2,7 @@
 
 from pd_matcher.normalize.claimants import author_claimant_name
 from pd_matcher.normalize.claimants import claimant_class_indicators
+from pd_matcher.normalize.claimants import claimant_renewal_label
 from pd_matcher.normalize.claimants import parse_claimants
 
 
@@ -96,3 +97,61 @@ def test_author_claimant_name_none_when_no_author() -> None:
 
 def test_author_claimant_name_none_for_empty() -> None:
     assert author_claimant_name(()) is None
+
+
+def test_claimant_renewal_label_author() -> None:
+    assert claimant_renewal_label("Jane Doe|A") == "author"
+
+
+def test_claimant_renewal_label_widow() -> None:
+    assert claimant_renewal_label("John Doe|W") == "widow/widower (estate)"
+
+
+def test_claimant_renewal_label_child() -> None:
+    assert claimant_renewal_label("Rhoda F. Haynes|C") == "child (estate)"
+
+
+def test_claimant_renewal_label_executor() -> None:
+    assert claimant_renewal_label("Estate of Doe|E") == "executor (estate)"
+
+
+def test_claimant_renewal_label_next_of_kin() -> None:
+    assert claimant_renewal_label("Estate of Doe|NK") == "next of kin (estate)"
+
+
+def test_claimant_renewal_label_proprietor_work_for_hire() -> None:
+    assert claimant_renewal_label("Acme Press|PWH") == "proprietor (work for hire)"
+
+
+def test_claimant_renewal_label_proprietor_posthumous() -> None:
+    assert claimant_renewal_label("Acme Press|PPW") == "proprietor (posthumous work)"
+
+
+def test_claimant_renewal_label_proprietor_composite() -> None:
+    assert claimant_renewal_label("Acme Press|PCW") == "proprietor (composite work)"
+
+
+def test_claimant_renewal_label_multiple_distinct_classes_joined() -> None:
+    assert (
+        claimant_renewal_label("Jane Doe|A||Acme Press|PWH") == "author; proprietor (work for hire)"
+    )
+
+
+def test_claimant_renewal_label_deduplicates_repeated_relationship() -> None:
+    assert claimant_renewal_label("Jane Doe|C||John Doe|C") == "child (estate)"
+
+
+def test_claimant_renewal_label_parenthetical_code_form() -> None:
+    assert claimant_renewal_label("Jane Doe (PWH)") == "proprietor (work for hire)"
+
+
+def test_claimant_renewal_label_unrecognized_code_is_unknown() -> None:
+    assert claimant_renewal_label("Just A Name") == "Unknown"
+
+
+def test_claimant_renewal_label_empty_is_unknown() -> None:
+    assert claimant_renewal_label("   ") == "Unknown"
+
+
+def test_claimant_renewal_label_none_is_unknown() -> None:
+    assert claimant_renewal_label(None) == "Unknown"
