@@ -21,10 +21,19 @@ Steps, in order:
    token-anchored matches so a serial like ``A INTERNATIONAL`` is left alone.
 3. Drop every remaining non-alphanumeric byte (interior spaces, hyphens,
    periods, em/en dashes, commas).
+4. Fold the interim/foreign class-token variant: an ``AI`` or ``AF`` class
+   immediately followed by a stray ``O``/``0`` before the serial digits
+   (``AIO4671``/``AI04671`` -> ``AI4671``; ``AFO76081``/``AF076081`` ->
+   ``AF76081``). NYPL transcribes the interim/foreign class marker
+   inconsistently as ``AI``/``AIO``/``AI0`` and ``AF``/``AFO``/``AF0`` (letter
+   ``O`` and digit ``0`` both occur, verified byte-level), so the trailing
+   symbol is class noise, not part of the serial. This fold is scoped to the
+   ``AI``/``AF`` classes only: a plain ``A`` serial keeps any leading zero
+   (``A193774`` and ``A0193774`` are left unchanged).
 
-Letter ``O`` and digit ``0`` are intentionally preserved as distinct: the
-source numbering scheme treats them as different symbols and conflating them
-would merge unrelated registrations.
+Letter ``O`` and digit ``0`` are otherwise preserved as distinct: outside the
+``AI``/``AF`` class-token fold the source numbering scheme treats them as
+different symbols and conflating them would merge unrelated registrations.
 """
 
 from re import Pattern
@@ -43,6 +52,8 @@ _CLASS_PREFIX_EXPANSIONS: tuple[tuple[Pattern[str], str], ...] = (
     (re_compile(f"^A{_SEP}(?:AD{_SEP}INT|INT)\\.?(?=\\s|$)"), "AI"),
 )
 
+_INTERIM_FOREIGN_CLASS_FOLD: Pattern[str] = re_compile(r"^(A[IF])[O0](?=[0-9])")
+
 
 def normalize_regnum(raw: str) -> str:
     """Collapse documented registration-number format variance to a canon.
@@ -57,7 +68,8 @@ def normalize_regnum(raw: str) -> str:
     upper = raw.upper().strip()
     for pattern, replacement in _CLASS_PREFIX_EXPANSIONS:
         upper = pattern.sub(replacement, upper)
-    return _NON_ALNUM.sub("", upper)
+    collapsed = _NON_ALNUM.sub("", upper)
+    return _INTERIM_FOREIGN_CLASS_FOLD.sub(r"\1", collapsed)
 
 
 def reg_class(raw: str | None) -> str:
@@ -90,9 +102,7 @@ _CLASS_FORMATS: dict[str, str] = {
     "A": "Book",
     "AA": "Book (pamphlet)",
     "AF": "Book (foreign)",
-    "AFO": "Book (foreign)",
     "AI": "Book (ad interim)",
-    "AIO": "Book (ad interim)",
     "B": "Periodical",
     "BB": "Periodical contribution",
     "B5": "Periodical contribution",

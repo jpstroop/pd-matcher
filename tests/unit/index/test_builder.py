@@ -7,10 +7,14 @@ from time import sleep
 from pytest import MonkeyPatch
 
 from pd_matcher.index.builder import _META_PARSER_FINGERPRINT_KEY
+from pd_matcher.index.builder import _META_SIBLING_PROPAGATED_KEY
 from pd_matcher.index.builder import _PACKAGE_ROOT
 from pd_matcher.index.builder import _PARSER_FINGERPRINT_FILES
 from pd_matcher.index.builder import _cache_mismatch_reason
 from pd_matcher.index.builder import _ExistingMeta
+from pd_matcher.index.builder import _PrevLinkedEntry
+from pd_matcher.index.builder import _RegLookupValue
+from pd_matcher.index.builder import _sibling_rewrites
 from pd_matcher.index.builder import build_index
 from pd_matcher.index.codec import decode_reg
 from pd_matcher.index.codec import decode_uuid_list
@@ -501,6 +505,162 @@ def test_build_index_joins_additional_entry_range_interior_number(tmp_path: Path
 
         assert store.ren_by_oreg.get(make_renewal_key("A160000", 1941)) is None
         assert store.ren_by_oreg.get(make_renewal_key("A160079", 1941)) == b"entry-501"
+
+
+def _seed_sibling_renewal_sources(root: Path) -> tuple[Path, Path]:
+    """Copy the sibling-renewal reg/ren fixtures into isolated source dirs."""
+    reg_dir = root / "reg"
+    ren_dir = root / "ren"
+    reg_dir.mkdir()
+    ren_dir.mkdir()
+    (reg_dir / "sibling_reg.xml").write_bytes((_FIXTURES / "sibling_renewal_reg.xml").read_bytes())
+    (ren_dir / "sibling_ren.tsv").write_bytes((_FIXTURES / "sibling_renewal_ren.tsv").read_bytes())
+    return reg_dir, ren_dir
+
+
+def test_build_index_propagates_sibling_renewal_to_unrenewed_citing_record(
+    tmp_path: Path,
+) -> None:
+    """An un-renewed record inherits a renewed sibling's renewal (direction A).
+
+    UUID-SA-R (full registration ``A50001``, 1950) is not renewed but cites the
+    ad interim sibling ``AI-4671`` via ``<prev-regNum>``. The sibling UUID-SA-S
+    carries its regnum as the NYPL class-token variant ``AIO-4671`` (which
+    :func:`normalize_regnum` folds to ``AI4671``) and *is* renewed. The
+    propagation pass copies the sibling's renewal facts onto UUID-SA-R while
+    leaving its own ``was_renewed`` ``False``.
+    """
+    reg_dir, ren_dir = _seed_sibling_renewal_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+
+    report = build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    assert report.renewal_joins == 2
+    assert report.sibling_renewals_propagated == 2
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        citing_blob = store.reg_by_id.get(b"UUID-SA-R")
+        assert citing_blob is not None
+        citing = decode_reg(citing_blob)
+        assert citing.was_renewed is False
+        assert citing.sibling_renewal_id == "R900001"
+        assert citing.sibling_renewal_via_regnum == "AIO-4671"
+        assert citing.sibling_renewal_rdat == date(1978, 6, 1)
+
+        # The renewed sibling keeps its own join and no inherited facts.
+        sibling_blob = store.reg_by_id.get(b"UUID-SA-S")
+        assert sibling_blob is not None
+        sibling = decode_reg(sibling_blob)
+        assert sibling.was_renewed is True
+        assert sibling.renewal_id == "R900001"
+        assert sibling.sibling_renewal_id is None
+        assert sibling.sibling_renewal_via_regnum is None
+        assert sibling.sibling_renewal_rdat is None
+
+
+def test_build_index_propagates_renewal_from_renewed_citing_record_to_sibling(
+    tmp_path: Path,
+) -> None:
+    """A renewed record pushes its renewal onto an un-renewed sibling (direction B).
+
+    UUID-SB-R (full registration ``A60002``, 1955) is renewed and cites the ad
+    interim sibling ``AI-5678``. That sibling, UUID-SB-T, has no renewal of its
+    own; the propagation pass copies UUID-SB-R's renewal facts onto it with the
+    citing record's regnum recorded as the provenance.
+    """
+    reg_dir, ren_dir = _seed_sibling_renewal_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        target_blob = store.reg_by_id.get(b"UUID-SB-T")
+        assert target_blob is not None
+        target = decode_reg(target_blob)
+        assert target.was_renewed is False
+        assert target.sibling_renewal_id == "R900002"
+        assert target.sibling_renewal_via_regnum == "A60002"
+        assert target.sibling_renewal_rdat == date(1983, 7, 1)
+
+        # The renewed citing record keeps its own join untouched.
+        citing_blob = store.reg_by_id.get(b"UUID-SB-R")
+        assert citing_blob is not None
+        citing = decode_reg(citing_blob)
+        assert citing.was_renewed is True
+        assert citing.renewal_id == "R900002"
+        assert citing.sibling_renewal_id is None
+
+
+def test_build_index_leaves_sibling_fields_none_when_no_renewed_sibling(
+    tmp_path: Path,
+) -> None:
+    """A ``<prev-regNum>`` citing a registration with no renewal propagates nothing.
+
+    UUID-SN-Q cites ``A99999``, which is absent from the corpus, so no sibling
+    renewal is found and the record's sibling fields stay ``None``.
+    """
+    reg_dir, ren_dir = _seed_sibling_renewal_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        blob = store.reg_by_id.get(b"UUID-SN-Q")
+        assert blob is not None
+        record = decode_reg(blob)
+        assert record.was_renewed is False
+        assert record.sibling_renewal_id is None
+        assert record.sibling_renewal_via_regnum is None
+        assert record.sibling_renewal_rdat is None
+
+
+def test_build_index_persists_sibling_renewals_propagated_in_meta(tmp_path: Path) -> None:
+    """The sibling-propagation count is written to the meta sub-DB."""
+    reg_dir, ren_dir = _seed_sibling_renewal_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+    build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+
+    with NyplIndexStore(out_path, readonly=True) as store:
+        blob = store.meta.get(_META_SIBLING_PROPAGATED_KEY)
+    assert blob is not None
+    assert int(blob.decode("ascii")) == 2
+
+
+def test_build_index_reports_zero_sibling_propagation_without_prev_links(
+    tmp_path: Path,
+) -> None:
+    """The tiny corpus carries no ``<prev-regNum>`` links, so nothing propagates."""
+    reg_dir, ren_dir = _seed_sources(tmp_path)
+    out_path = tmp_path / "idx.lmdb"
+    report = build_index(reg_dir=reg_dir, ren_dir=ren_dir, out_path=out_path)
+    assert report.sibling_renewals_propagated == 0
+
+
+def test_sibling_rewrites_skips_prev_linked_record_without_reg_year() -> None:
+    """A citing record with no derivable registration year contributes no lookup."""
+    reg_lookup: dict[str, _RegLookupValue] = {
+        "A100|1950": ("uuid-sibling", True, "R1", date(1970, 1, 1), "A100")
+    }
+    prev_linked: list[_PrevLinkedEntry] = [
+        ("uuid-citing", None, False, None, None, "A200", ("A100",))
+    ]
+    assert _sibling_rewrites(reg_lookup, prev_linked) == {}
+
+
+def test_sibling_rewrites_ignores_sibling_sharing_renewal_state() -> None:
+    """A sibling that exists but shares the citing record's renewal state is a no-op.
+
+    Both records are un-renewed, so neither the inherit (direction A) nor the
+    push (direction B) branch applies even though the ``<prev-regNum>`` lookup
+    resolves; the year-before fallback is exercised by keying the sibling one
+    year below the citing record.
+    """
+    reg_lookup: dict[str, _RegLookupValue] = {
+        "A100|1949": ("uuid-sibling", False, None, None, "A100")
+    }
+    prev_linked: list[_PrevLinkedEntry] = [
+        ("uuid-citing", 1950, False, None, None, "A200", ("A100",))
+    ]
+    assert _sibling_rewrites(reg_lookup, prev_linked) == {}
 
 
 def test_cache_mismatch_reason_reports_each_field_in_declaration_order() -> None:

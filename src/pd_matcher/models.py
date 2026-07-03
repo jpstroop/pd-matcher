@@ -183,6 +183,32 @@ class IndexedNyplRegRecord(Struct, frozen=True, forbid_unknown_fields=True):
     written before this field default to ``None``; the scorer falls back to
     computing the script in that case, so the precompute is a pure speedup
     with identical scores."""
+    sibling_renewal_id: str | None = None
+    """A renewal id inherited from a sibling registration linked by
+    ``<prev-regNum>``, when this record carries no renewal of its own.
+
+    1909-Act works are frequently registered twice — an ad interim (``AI``) or
+    foreign (``AF``) registration and a full one — linked by ``<prev-regNum>``.
+    A renewal filed against one sibling covers the pair, so landing the matcher
+    on the un-renewed sibling would otherwise emit a false "no renewal on
+    record". Index build propagates the renewed sibling's facts across the
+    ``<prev-regNum>`` link into this field. It is only ever set on records with
+    :attr:`was_renewed` ``False`` (a record's own join is never overwritten);
+    ``None`` when no renewed sibling was found. Legacy indices written before
+    this field default to ``None``."""
+    sibling_renewal_via_regnum: str | None = None
+    """The registration number of the sibling whose renewal facts were
+    propagated into :attr:`sibling_renewal_id`/:attr:`sibling_renewal_rdat`.
+
+    Records the provenance of an inherited renewal — the ``regnum`` of the
+    renewed sibling the renewal was actually filed against — so consumers can
+    tell an inherited renewal fact from the record's own. ``None`` when no
+    sibling renewal was propagated. Legacy indices default to ``None``."""
+    sibling_renewal_rdat: date | None = None
+    """The renewal-recording date inherited from a sibling registration,
+    mirroring :attr:`renewal_rdat` but sourced from the ``<prev-regNum>``-linked
+    sibling. ``None`` when no sibling renewal was propagated. Legacy indices
+    default to ``None``."""
 
 
 def index_reg(
