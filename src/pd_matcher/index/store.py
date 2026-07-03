@@ -7,7 +7,7 @@ rest of the codebase can stay unaware of ``lmdb.Cursor`` and friends.
 
 The public surface is two classes:
 
-* :class:`NyplIndexStore` — opens the env, exposes five typed sub-DB handles,
+* :class:`NyplIndexStore` — opens the env, exposes the typed sub-DB handles,
   and supports use as a context manager so callers can rely on
   ``__exit__`` to close the env even on failure paths.
 * :class:`_SubDb` — a minimal handle returned by the sub-DB properties that
@@ -92,7 +92,7 @@ class _SubDb:
 class NyplIndexStore:
     """LMDB environment wrapper exposing the named sub-DBs we care about.
 
-    The env is opened with ``max_dbs=16`` so we have headroom for future
+    The env is opened with ``max_dbs=12`` so we have headroom for future
     sub-DBs without an env migration. ``subdir=True`` is used because the
     LMDB data directory layout (``data.mdb`` plus ``lock.mdb`` inside one
     directory) is what Phase 6's worker processes will mmap-share.
@@ -113,12 +113,8 @@ class NyplIndexStore:
         "_readonly",
         "_reg_by_id_db",
         "_reg_by_year_db",
-        "_ren_author_index_db",
         "_ren_by_id_db",
         "_ren_by_oreg_db",
-        "_ren_by_year_db",
-        "_ren_claimants_index_db",
-        "_ren_title_index_db",
         "_title_index_db",
     )
 
@@ -140,7 +136,7 @@ class NyplIndexStore:
             subdir=True,
             readonly=readonly,
             lock=not readonly,
-            max_dbs=16,
+            max_dbs=12,
             create=not readonly,
         )
         self._reg_by_id_db = self._env.open_db(b"reg_by_id", create=not readonly)
@@ -150,12 +146,6 @@ class NyplIndexStore:
         self._title_index_db = self._env.open_db(b"title_index", create=not readonly)
         self._author_index_db = self._env.open_db(b"author_index", create=not readonly)
         self._publisher_index_db = self._env.open_db(b"publisher_index", create=not readonly)
-        self._ren_by_year_db = self._env.open_db(b"ren_by_year", create=not readonly)
-        self._ren_title_index_db = self._env.open_db(b"ren_title_index", create=not readonly)
-        self._ren_author_index_db = self._env.open_db(b"ren_author_index", create=not readonly)
-        self._ren_claimants_index_db = self._env.open_db(
-            b"ren_claimants_index", create=not readonly
-        )
         self._meta_db = self._env.open_db(b"meta", create=not readonly)
 
     def __enter__(self) -> Self:
@@ -217,26 +207,6 @@ class NyplIndexStore:
     def publisher_index(self) -> _SubDb:
         """Inverted index mapping a publisher token to a uuid-list blob."""
         return _SubDb(self, self._publisher_index_db)
-
-    @property
-    def ren_by_year(self) -> _SubDb:
-        """Sub-DB mapping an original-registration year key to a tuple of renewal entry ids."""
-        return _SubDb(self, self._ren_by_year_db)
-
-    @property
-    def ren_title_index(self) -> _SubDb:
-        """Inverted index mapping a renewal title token to an entry-id-list blob."""
-        return _SubDb(self, self._ren_title_index_db)
-
-    @property
-    def ren_author_index(self) -> _SubDb:
-        """Inverted index mapping a renewal author token to an entry-id-list blob."""
-        return _SubDb(self, self._ren_author_index_db)
-
-    @property
-    def ren_claimants_index(self) -> _SubDb:
-        """Inverted index mapping a renewal claimants token to an entry-id-list blob."""
-        return _SubDb(self, self._ren_claimants_index_db)
 
     @property
     def meta(self) -> _SubDb:

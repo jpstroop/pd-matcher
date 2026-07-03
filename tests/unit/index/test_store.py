@@ -94,24 +94,10 @@ def test_store_token_indexes_round_trip_uuid_list_postings(tmp_path: Path) -> No
         assert store.title_index.get(b"absent") is None
 
 
-def test_store_renewal_sub_dbs_are_isolated(tmp_path: Path) -> None:
-    """The four renewal-side sub-DBs are independent of each other and the rest."""
-    with NyplIndexStore(tmp_path / "env") as store:
-        with store.write_transaction():
-            store.ren_by_year.put(b"shared_key", b"ren_year_value")
-            store.ren_title_index.put(b"shared_key", b"ren_title_value")
-            store.ren_author_index.put(b"shared_key", b"ren_author_value")
-            store.ren_claimants_index.put(b"shared_key", b"ren_claimants_value")
-        assert store.ren_by_year.get(b"shared_key") == b"ren_year_value"
-        assert store.ren_title_index.get(b"shared_key") == b"ren_title_value"
-        assert store.ren_author_index.get(b"shared_key") == b"ren_author_value"
-        assert store.ren_claimants_index.get(b"shared_key") == b"ren_claimants_value"
-
-
 def test_store_has_max_dbs_headroom_beyond_the_named_sub_dbs(tmp_path: Path) -> None:
-    """``max_dbs=16`` leaves spare named-DB slots after the 12 the store uses.
+    """``max_dbs=12`` leaves spare named-DB slots after the 8 the store uses.
 
-    The store opens twelve named sub-DBs; the env is configured for sixteen, so
+    The store opens eight named sub-DBs; the env is configured for twelve, so
     opening four further named DBs through the raw env must succeed rather than
     raising ``MDB_DBS_FULL``.
     """
@@ -120,7 +106,7 @@ def test_store_has_max_dbs_headroom_beyond_the_named_sub_dbs(tmp_path: Path) -> 
     env_path = tmp_path / "env"
     with NyplIndexStore(env_path):
         pass
-    env = LmdbEnvironment(str(env_path), max_dbs=16, readonly=False)
+    env = LmdbEnvironment(str(env_path), max_dbs=12, readonly=False)
     try:
         for index in range(4):
             with env.begin(write=True) as txn:

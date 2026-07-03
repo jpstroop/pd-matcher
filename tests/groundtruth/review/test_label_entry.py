@@ -107,11 +107,6 @@ def test_build_label_entry_defaults_match_source_to_registration() -> None:
     assert entry.match_source == "registration"
 
 
-def test_build_label_entry_sets_match_source_renewal_for_renewal_pairing() -> None:
-    entry = _build(_row(pairing_type="renewal"))
-    assert entry.match_source == "renewal"
-
-
 def test_build_label_entry_copies_human_and_identifier_fields() -> None:
     entry = _build(_row())
     assert entry.marc_control_id == "ctrl-1"

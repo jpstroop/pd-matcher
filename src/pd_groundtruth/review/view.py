@@ -71,7 +71,6 @@ class ReviewCard(Struct, frozen=True, forbid_unknown_fields=True):
     decade: int | None
     score: float
     band: str
-    pairing_type: str
     marc_control_id: str
     nypl_uuid: str
 
@@ -383,7 +382,6 @@ def build_card(
         decade=row.decade,
         score=row.score,
         band=row.band,
-        pairing_type=row.pairing_type,
         marc_control_id=row.marc_control_id,
         nypl_uuid=row.nypl_uuid,
         marc_title=marc.title,

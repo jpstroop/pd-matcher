@@ -37,10 +37,6 @@ _META_REG_COUNT_KEY = b"registrations_written"
 _META_REN_COUNT_KEY = b"renewals_written"
 _META_RENEWAL_JOINS_KEY = b"renewal_joins"
 _META_YEAR_BUCKETS_KEY = b"year_buckets"
-_META_REN_YEAR_BUCKETS_KEY = b"renewal_year_buckets"
-_META_REN_TITLE_TOKENS_KEY = b"renewal_title_tokens"
-_META_REN_AUTHOR_TOKENS_KEY = b"renewal_author_tokens"
-_META_REN_CLAIMANTS_TOKENS_KEY = b"renewal_claimants_tokens"
 
 
 class IndexStats(Struct, frozen=True, forbid_unknown_fields=True):
@@ -53,10 +49,6 @@ class IndexStats(Struct, frozen=True, forbid_unknown_fields=True):
     renewals_written: int
     renewal_joins: int
     year_buckets: int
-    renewal_year_buckets: int
-    renewal_title_tokens: int
-    renewal_author_tokens: int
-    renewal_claimants_tokens: int
 
 
 class NyplIndexLookup:
@@ -111,16 +103,6 @@ class NyplIndexLookup:
         """
         for _key, blob in self._store.reg_by_id.iter_items():
             yield decode_reg(blob)
-
-    def iter_renewals(self) -> Iterator[NyplRenRecord]:
-        """Yield every renewal in the index in storage order.
-
-        Mirrors :meth:`iter_registrations` over the ``ren_by_id`` sub-DB so the
-        renewal-side IDF builders can scan the entire renewal corpus once. The
-        walk is read-only and streams from a single LMDB cursor.
-        """
-        for _key, blob in self._store.ren_by_id.iter_items():
-            yield decode_ren(blob)
 
     def candidates_for_year(
         self,
@@ -268,75 +250,6 @@ class NyplIndexLookup:
         """
         yield from self._candidates_intersecting_year(marc, year, window)
 
-    def _renewal_year_candidates(self, year: int, window: int) -> set[str]:
-        """Return the union of renewal entry ids across the ``ren_by_year`` window buckets."""
-        candidates: set[str] = set()
-        for candidate_year in range(year - window, year + window + 1):
-            blob = self._store.ren_by_year.get(encode_year_key(candidate_year))
-            if blob is None:
-                continue
-            candidates.update(decode_uuid_list(blob))
-        return candidates
-
-    def _renewal_token_candidates(self, marc: MarcRecord) -> set[str]:
-        """Return the union of every renewal sharing a query token.
-
-        Mirrors :meth:`_token_candidates` over the renewal-side inverted
-        indexes: title tokens from ``marc.title`` hit ``ren_title_index``,
-        author tokens from ``marc.main_author`` and
-        ``marc.statement_of_responsibility`` hit ``ren_author_index``, and
-        publisher tokens from ``marc.publisher`` hit ``ren_claimants_index``
-        (the renewal side carries claimants, not a publisher field).
-        """
-        candidates: set[str] = set()
-        for token in title_keys(marc.title):
-            candidates.update(self._postings(self._store.ren_title_index, token))
-        author_tokens = author_keys(marc.main_author) | author_keys(
-            marc.statement_of_responsibility
-        )
-        for token in author_tokens:
-            candidates.update(self._postings(self._store.ren_author_index, token))
-        for token in publisher_keys(marc.publisher):
-            candidates.update(self._postings(self._store.ren_claimants_index, token))
-        return candidates
-
-    def candidates_for_renewal(
-        self,
-        marc: MarcRecord,
-        window: int = 0,
-    ) -> Iterator[NyplRenRecord]:
-        """Yield renewals sharing an original-registration year AND a field token.
-
-        The renewal-side mirror of :meth:`candidates_for`: a MARC record is
-        retrieved directly against renewal records (for books with no
-        registration match) by intersecting the renewal year set (bucketed on
-        the original-registration ``odat`` year so it aligns with
-        ``marc.publication_year``) with the union of renewals sharing a
-        title/author/claimants token. This is retrieval only — scoring is the
-        caller's concern.
-
-        Args:
-            marc: The MARC record to retrieve renewal candidates for.
-            window: Inclusive year radius; ``0`` restricts to the exact year.
-
-        Yields:
-            :class:`NyplRenRecord` instances, deduplicated by entry id.
-            Nothing is yielded when ``marc`` has no ``publication_year``, when
-            the year set is empty, or when the record shares no token.
-        """
-        if marc.publication_year is None:
-            return
-        year_set = self._renewal_year_candidates(marc.publication_year, window)
-        if not year_set:
-            return
-        token_set = self._renewal_token_candidates(marc)
-        if not token_set:
-            return
-        for entry_id in year_set & token_set:
-            record = self.get_renewal(entry_id)
-            if record is not None:
-                yield record
-
     def stats(self) -> IndexStats:
         """Return the build metadata persisted alongside the index.
 
@@ -353,10 +266,6 @@ class NyplIndexLookup:
         ren_blob = meta.get(_META_REN_COUNT_KEY)
         joins_blob = meta.get(_META_RENEWAL_JOINS_KEY)
         buckets_blob = meta.get(_META_YEAR_BUCKETS_KEY)
-        ren_buckets_blob = meta.get(_META_REN_YEAR_BUCKETS_KEY)
-        ren_title_blob = meta.get(_META_REN_TITLE_TOKENS_KEY)
-        ren_author_blob = meta.get(_META_REN_AUTHOR_TOKENS_KEY)
-        ren_claimants_blob = meta.get(_META_REN_CLAIMANTS_TOKENS_KEY)
         if (
             schema_blob is None
             or hash_blob is None
@@ -365,10 +274,6 @@ class NyplIndexLookup:
             or ren_blob is None
             or joins_blob is None
             or buckets_blob is None
-            or ren_buckets_blob is None
-            or ren_title_blob is None
-            or ren_author_blob is None
-            or ren_claimants_blob is None
         ):
             raise RuntimeError("index meta sub-DB is incomplete; rebuild required")
         return IndexStats(
@@ -379,10 +284,6 @@ class NyplIndexLookup:
             renewals_written=int(ren_blob.decode("ascii")),
             renewal_joins=int(joins_blob.decode("ascii")),
             year_buckets=int(buckets_blob.decode("ascii")),
-            renewal_year_buckets=int(ren_buckets_blob.decode("ascii")),
-            renewal_title_tokens=int(ren_title_blob.decode("ascii")),
-            renewal_author_tokens=int(ren_author_blob.decode("ascii")),
-            renewal_claimants_tokens=int(ren_claimants_blob.decode("ascii")),
         )
 
 

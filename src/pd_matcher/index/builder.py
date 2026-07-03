@@ -62,10 +62,6 @@ _META_REG_COUNT_KEY = b"registrations_written"
 _META_REN_COUNT_KEY = b"renewals_written"
 _META_RENEWAL_JOINS_KEY = b"renewal_joins"
 _META_YEAR_BUCKETS_KEY = b"year_buckets"
-_META_REN_YEAR_BUCKETS_KEY = b"renewal_year_buckets"
-_META_REN_TITLE_TOKENS_KEY = b"renewal_title_tokens"
-_META_REN_AUTHOR_TOKENS_KEY = b"renewal_author_tokens"
-_META_REN_CLAIMANTS_TOKENS_KEY = b"renewal_claimants_tokens"
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _PARSER_FINGERPRINT_FILES: tuple[Path, ...] = (
@@ -94,22 +90,6 @@ class _IngestResult(Struct, frozen=True, forbid_unknown_fields=True):
     publisher_postings: dict[str, list[str]]
 
 
-class _RenewalIngestResult(Struct, frozen=True, forbid_unknown_fields=True):
-    """Aggregates collected during the renewal ingest pass.
-
-    Mirrors :class:`_IngestResult` for the renewal side: ``year_buckets`` is
-    keyed on the original-registration (``odat``) year so it aligns with a
-    MARC record's publication year, and the three token-postings maps hold
-    ``entry_id`` postings keyed on renewal title/author/claimants tokens.
-    """
-
-    written: int
-    year_buckets: dict[int, list[str]]
-    title_postings: dict[str, list[str]]
-    author_postings: dict[str, list[str]]
-    claimants_postings: dict[str, list[str]]
-
-
 class BuildReport(Struct, frozen=True, forbid_unknown_fields=True):
     """Summary of one :func:`build_index` invocation.
 
@@ -123,10 +103,6 @@ class BuildReport(Struct, frozen=True, forbid_unknown_fields=True):
     renewals_written: int
     renewal_joins: int
     year_buckets: int
-    renewal_year_buckets: int
-    renewal_title_tokens: int
-    renewal_author_tokens: int
-    renewal_claimants_tokens: int
     duration_seconds: float
 
 
@@ -278,25 +254,17 @@ def _accumulate_postings(
 def _ingest_renewals(
     store: NyplIndexStore,
     ren_dir: Path,
-) -> _RenewalIngestResult:
-    """Stream renewals into ``ren_by_id``/``ren_by_oreg`` and collect index aggregates.
+) -> int:
+    """Stream renewals into ``ren_by_id``/``ren_by_oreg`` and return the count written.
 
-    Alongside the by-id record and the ``ren_by_oreg`` join, the renewal-side
-    inverted index is accumulated in memory: title tokens via
-    :func:`title_keys`, author tokens via :func:`author_keys`, and claimants
-    tokens via :func:`publisher_keys` (claimants is a scalar string). Year
-    buckets are keyed on the original-registration year (``odat``) so renewal
-    retrieval aligns with a MARC record's publication year exactly as the
-    registration side does; renewals lacking an ``odat`` are omitted from the
-    year buckets but still written to ``ren_by_id``.
+    Each renewal is written by entry id and, when it carries both an original
+    registration number (``oreg``) and date (``odat``), joined into
+    ``ren_by_oreg`` under every :func:`make_renewal_keys` key so a registration
+    can resolve its ``was_renewed`` flag with a single lookup.
     """
     bind_contextvars(phase="renewals")
     try:
         written = 0
-        year_buckets: dict[int, list[str]] = {}
-        title_postings: dict[str, list[str]] = {}
-        author_postings: dict[str, list[str]] = {}
-        claimants_postings: dict[str, list[str]] = {}
         parser_stats = NyplRenParseStats()
         with store.write_transaction():
             for record in iter_nypl_ren_directory(ren_dir, stats=parser_stats):
@@ -305,30 +273,13 @@ def _ingest_renewals(
                 if record.oreg is not None and record.odat is not None:
                     for join_key in make_renewal_keys(record.oreg, record.odat.year):
                         store.ren_by_oreg.put(join_key, entry_id_blob)
-                if record.odat is not None:
-                    year_buckets.setdefault(record.odat.year, []).append(record.entry_id)
-                _accumulate_postings(title_postings, title_keys(record.title), record.entry_id)
-                _accumulate_postings(author_postings, author_keys(record.author), record.entry_id)
-                _accumulate_postings(
-                    claimants_postings, publisher_keys(record.claimants), record.entry_id
-                )
                 written += 1
         _LOGGER.info(
             "index.renewals.ingested",
             count=written,
-            year_buckets=len(year_buckets),
-            title_tokens=len(title_postings),
-            author_tokens=len(author_postings),
-            claimants_tokens=len(claimants_postings),
             years_rejected_out_of_range=parser_stats.years_rejected_out_of_range,
         )
-        return _RenewalIngestResult(
-            written=written,
-            year_buckets=year_buckets,
-            title_postings=title_postings,
-            author_postings=author_postings,
-            claimants_postings=claimants_postings,
-        )
+        return written
     finally:
         unbind_contextvars("phase")
 
@@ -418,9 +369,9 @@ def _flush_year_buckets(
 ) -> int:
     """Write each year bucket to ``sub_db`` and return the bucket count.
 
-    Shared by the registration (``reg_by_year``) and renewal (``ren_by_year``)
-    sides: both store ``encode_year_key(year) -> encode_uuid_list(ids)`` for
-    every accumulated year, in ascending year order.
+    The registration (``reg_by_year``) side stores
+    ``encode_year_key(year) -> encode_uuid_list(ids)`` for every accumulated
+    year, in ascending year order.
     """
     bind_contextvars(phase=f"year_buckets.{name}")
     try:
@@ -470,10 +421,6 @@ def _write_meta(
     renewals: int,
     renewal_joins: int,
     year_buckets: int,
-    renewal_year_buckets: int,
-    renewal_title_tokens: int,
-    renewal_author_tokens: int,
-    renewal_claimants_tokens: int,
 ) -> None:
     """Persist the build metadata used by lookups and the info CLI."""
     bind_contextvars(phase="meta")
@@ -488,12 +435,6 @@ def _write_meta(
             store.meta.put(_META_REN_COUNT_KEY, str(renewals).encode("ascii"))
             store.meta.put(_META_RENEWAL_JOINS_KEY, str(renewal_joins).encode("ascii"))
             store.meta.put(_META_YEAR_BUCKETS_KEY, str(year_buckets).encode("ascii"))
-            store.meta.put(_META_REN_YEAR_BUCKETS_KEY, str(renewal_year_buckets).encode("ascii"))
-            store.meta.put(_META_REN_TITLE_TOKENS_KEY, str(renewal_title_tokens).encode("ascii"))
-            store.meta.put(_META_REN_AUTHOR_TOKENS_KEY, str(renewal_author_tokens).encode("ascii"))
-            store.meta.put(
-                _META_REN_CLAIMANTS_TOKENS_KEY, str(renewal_claimants_tokens).encode("ascii")
-            )
         _LOGGER.info(
             "index.meta.written",
             schema_version=schema_version,
@@ -502,10 +443,6 @@ def _write_meta(
             renewals=renewals,
             renewal_joins=renewal_joins,
             year_buckets=year_buckets,
-            renewal_year_buckets=renewal_year_buckets,
-            renewal_title_tokens=renewal_title_tokens,
-            renewal_author_tokens=renewal_author_tokens,
-            renewal_claimants_tokens=renewal_claimants_tokens,
         )
     finally:
         unbind_contextvars("phase")
@@ -564,10 +501,6 @@ def build_index(
             renewals_written=0,
             renewal_joins=0,
             year_buckets=0,
-            renewal_year_buckets=0,
-            renewal_title_tokens=0,
-            renewal_author_tokens=0,
-            renewal_claimants_tokens=0,
             duration_seconds=perf_counter() - start,
         )
 
@@ -579,7 +512,7 @@ def build_index(
     _purge_directory(out_path)
 
     with NyplIndexStore(out_path, readonly=False) as store:
-        renewals = _ingest_renewals(store, ren_dir)
+        renewals_written = _ingest_renewals(store, ren_dir)
         ingest = _ingest_registrations(store, reg_dir)
         bucket_count = _flush_year_buckets(
             store, store.reg_by_year, ingest.year_buckets, name="reg"
@@ -589,56 +522,32 @@ def build_index(
         _flush_token_index(
             store, store.publisher_index, ingest.publisher_postings, name="publisher"
         )
-        renewal_bucket_count = _flush_year_buckets(
-            store, store.ren_by_year, renewals.year_buckets, name="ren"
-        )
-        renewal_title_tokens = _flush_token_index(
-            store, store.ren_title_index, renewals.title_postings, name="ren_title"
-        )
-        renewal_author_tokens = _flush_token_index(
-            store, store.ren_author_index, renewals.author_postings, name="ren_author"
-        )
-        renewal_claimants_tokens = _flush_token_index(
-            store, store.ren_claimants_index, renewals.claimants_postings, name="ren_claimants"
-        )
         _write_meta(
             store,
             schema_version=schema_version,
             source_hash=source_hash,
             parser_fingerprint=parser_fingerprint,
             registrations=ingest.written,
-            renewals=renewals.written,
+            renewals=renewals_written,
             renewal_joins=ingest.joins,
             year_buckets=bucket_count,
-            renewal_year_buckets=renewal_bucket_count,
-            renewal_title_tokens=renewal_title_tokens,
-            renewal_author_tokens=renewal_author_tokens,
-            renewal_claimants_tokens=renewal_claimants_tokens,
         )
 
     duration = perf_counter() - start
     _LOGGER.info(
         "index.build.complete",
         registrations=ingest.written,
-        renewals=renewals.written,
+        renewals=renewals_written,
         renewal_joins=ingest.joins,
         year_buckets=bucket_count,
-        renewal_year_buckets=renewal_bucket_count,
-        renewal_title_tokens=renewal_title_tokens,
-        renewal_author_tokens=renewal_author_tokens,
-        renewal_claimants_tokens=renewal_claimants_tokens,
         duration_seconds=duration,
     )
     return BuildReport(
         skipped=False,
         registrations_written=ingest.written,
-        renewals_written=renewals.written,
+        renewals_written=renewals_written,
         renewal_joins=ingest.joins,
         year_buckets=bucket_count,
-        renewal_year_buckets=renewal_bucket_count,
-        renewal_title_tokens=renewal_title_tokens,
-        renewal_author_tokens=renewal_author_tokens,
-        renewal_claimants_tokens=renewal_claimants_tokens,
         duration_seconds=duration,
     )
 

@@ -265,10 +265,6 @@ def _format_build_report(report: BuildReport, out_path: Path) -> str:
         f"  renewals: {report.renewals_written}\n"
         f"  renewal joins: {report.renewal_joins}\n"
         f"  year buckets: {report.year_buckets}\n"
-        f"  renewal year buckets: {report.renewal_year_buckets}\n"
-        f"  renewal title tokens: {report.renewal_title_tokens}\n"
-        f"  renewal author tokens: {report.renewal_author_tokens}\n"
-        f"  renewal claimants tokens: {report.renewal_claimants_tokens}\n"
         f"  duration: {report.duration_seconds:.2f}s"
     )
 
@@ -282,11 +278,7 @@ def _format_index_stats(stats: IndexStats) -> str:
         f"  registrations: {stats.registrations_written}\n"
         f"  renewals: {stats.renewals_written}\n"
         f"  renewal joins: {stats.renewal_joins}\n"
-        f"  year buckets: {stats.year_buckets}\n"
-        f"  renewal year buckets: {stats.renewal_year_buckets}\n"
-        f"  renewal title tokens: {stats.renewal_title_tokens}\n"
-        f"  renewal author tokens: {stats.renewal_author_tokens}\n"
-        f"  renewal claimants tokens: {stats.renewal_claimants_tokens}"
+        f"  year buckets: {stats.year_buckets}"
     )
 
 
