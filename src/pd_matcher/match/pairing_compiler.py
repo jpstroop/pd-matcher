@@ -11,9 +11,17 @@ The design boundary is deliberate:
   accessor is written out.
 * **Configuration composes and pairs them.** A :class:`FieldSpec` names
   one or more registry entries and a *combine op* from a closed
-  vocabulary (``first``, ``concat``/``join``). A :class:`PairingSpec`
-  routes a composed MARC field against a composed CCE field under a
-  scorer group.
+  vocabulary (``first``, ``concat``/``join``, and CCE-only ``best``). A
+  :class:`PairingSpec` routes a composed MARC field against a composed CCE
+  field under a scorer group.
+
+The two sides have different accessor contracts. A **MARC accessor**
+returns ``str | None`` — a MARC record describes one book, so its composed
+field is a single scalar. A **CCE accessor** returns ``tuple[str, ...]``
+uniformly: ``first`` yields a 0- or 1-tuple, ``concat``/``join`` a 1-tuple
+of the joined string, and ``best`` one element per non-empty list item so
+the pipeline can score a co-claimant list element-by-element and keep the
+best. ``best`` is rejected for MARC fields, which have no list to split.
 
 :func:`compile_pairings` resolves every name once, at load time, and
 raises :class:`~pd_matcher.config.loader.ConfigError` on any unknown name
@@ -36,8 +44,9 @@ from pd_matcher.models import MarcRecord
 MarcRawAccessor = Callable[[MarcRecord], tuple[str, ...]]
 CceRawAccessor = Callable[[IndexedNyplRegRecord], tuple[str, ...]]
 MarcAccessor = Callable[[MarcRecord], str | None]
-CceAccessor = Callable[[IndexedNyplRegRecord], str | None]
-CombineOp = Callable[[tuple[str, ...], str], str | None]
+CceAccessor = Callable[[IndexedNyplRegRecord], tuple[str, ...]]
+MarcCombineOp = Callable[[tuple[str, ...], str], str | None]
+CceCombineOp = Callable[[tuple[str, ...], str], tuple[str, ...]]
 
 
 def _scalar(value: str | None) -> tuple[str, ...]:
@@ -83,10 +92,34 @@ def _combine_join(values: tuple[str, ...], separator: str) -> str | None:
     return separator.join(kept)
 
 
-_COMBINE_OPS: dict[str, CombineOp] = {
+def _cce_first(values: tuple[str, ...], separator: str) -> tuple[str, ...]:
+    """Wrap :func:`_combine_first`'s result into a 0- or 1-tuple."""
+    result = _combine_first(values, separator)
+    return () if result is None else (result,)
+
+
+def _cce_join(values: tuple[str, ...], separator: str) -> tuple[str, ...]:
+    """Wrap :func:`_combine_join`'s result into a 0- or 1-tuple."""
+    result = _combine_join(values, separator)
+    return () if result is None else (result,)
+
+
+def _cce_best(values: tuple[str, ...], separator: str) -> tuple[str, ...]:
+    """Keep each non-empty value as its own element for per-element scoring."""
+    return tuple(value for value in values if value)
+
+
+_MARC_COMBINE_OPS: dict[str, MarcCombineOp] = {
     "first": _combine_first,
     "concat": _combine_join,
     "join": _combine_join,
+}
+
+_CCE_COMBINE_OPS: dict[str, CceCombineOp] = {
+    "first": _cce_first,
+    "concat": _cce_join,
+    "join": _cce_join,
+    "best": _cce_best,
 }
 
 
@@ -117,7 +150,12 @@ class CompiledPairings(Struct, frozen=True, forbid_unknown_fields=True):
 def _compile_marc_field(name: str, spec: FieldSpec) -> MarcAccessor:
     """Compile a MARC :class:`FieldSpec` into a ``str | None`` accessor."""
     accessors = _resolve_marc_accessors(name, spec)
-    combine = _COMBINE_OPS[spec.combine]
+    combine = _MARC_COMBINE_OPS.get(spec.combine)
+    if combine is None:
+        raise ConfigError(
+            f"marc_fields[{name!r}] uses combine {spec.combine!r}, which is valid only for CCE "
+            "fields; MARC fields are scalar and cannot be split into best-of-element candidates"
+        )
     separator = spec.separator
 
     def accessor(marc: MarcRecord) -> str | None:
@@ -130,12 +168,18 @@ def _compile_marc_field(name: str, spec: FieldSpec) -> MarcAccessor:
 
 
 def _compile_cce_field(name: str, spec: FieldSpec) -> CceAccessor:
-    """Compile a CCE :class:`FieldSpec` into a ``str | None`` accessor."""
+    """Compile a CCE :class:`FieldSpec` into a ``tuple[str, ...]`` accessor.
+
+    Scalar and ``first`` specs yield a 0- or 1-tuple, ``concat``/``join`` a
+    1-tuple of the joined string, and ``best`` one element per non-empty
+    list item — the uniform contract the pipeline iterates when scoring a
+    CCE field element-by-element.
+    """
     accessors = _resolve_cce_accessors(name, spec)
-    combine = _COMBINE_OPS[spec.combine]
+    combine = _CCE_COMBINE_OPS[spec.combine]
     separator = spec.separator
 
-    def accessor(nypl: IndexedNyplRegRecord) -> str | None:
+    def accessor(nypl: IndexedNyplRegRecord) -> tuple[str, ...]:
         values: tuple[str, ...] = ()
         for raw in accessors:
             values = values + raw(nypl)

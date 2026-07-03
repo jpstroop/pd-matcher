@@ -107,7 +107,7 @@ def test_compile_renewal_author_pairing_uses_renewal_field() -> None:
     )
     compiled = compile_pairings(cfg)
     cce_accessor = compiled.author[0].cce_accessor
-    assert cce_accessor(_nypl(renewal_author="Renewal Author")) == "Renewal Author"
+    assert cce_accessor(_nypl(renewal_author="Renewal Author")) == ("Renewal Author",)
 
 
 def test_compile_renewal_title_pairing_uses_renewal_field() -> None:
@@ -119,7 +119,7 @@ def test_compile_renewal_title_pairing_uses_renewal_field() -> None:
     )
     compiled = compile_pairings(cfg)
     cce_accessor = compiled.title[0].cce_accessor
-    assert cce_accessor(_nypl(renewal_title="Renewal Title")) == "Renewal Title"
+    assert cce_accessor(_nypl(renewal_title="Renewal Title")) == ("Renewal Title",)
 
 
 def test_compile_publisher_claimants_pairing_reads_claimants() -> None:
@@ -131,7 +131,7 @@ def test_compile_publisher_claimants_pairing_reads_claimants() -> None:
     )
     compiled = compile_pairings(cfg)
     cce_accessor = compiled.publisher[0].cce_accessor
-    assert cce_accessor(_nypl(claimants=("Acme Co", "Sons"))) == "Acme Co Sons"
+    assert cce_accessor(_nypl(claimants=("Acme Co", "Sons"))) == ("Acme Co Sons",)
 
 
 def test_compile_publisher_sor_publisher_names_pairing_reads_publisher_names() -> None:
@@ -148,7 +148,7 @@ def test_compile_publisher_sor_publisher_names_pairing_reads_publisher_names() -
     assert pairing.marc_accessor(_marc(statement_of_responsibility="by Matsumoto")) == (
         "by Matsumoto"
     )
-    assert pairing.cce_accessor(_nypl(publisher_names=("Ryozo Matsumoto",))) == "Ryozo Matsumoto"
+    assert pairing.cce_accessor(_nypl(publisher_names=("Ryozo Matsumoto",))) == ("Ryozo Matsumoto",)
 
 
 def test_compile_publisher_sor_claimants_pairing_reads_claimants() -> None:
@@ -163,7 +163,7 @@ def test_compile_publisher_sor_claimants_pairing_reads_claimants() -> None:
     compiled = compile_pairings(cfg)
     pairing = compiled.publisher[0]
     assert pairing.marc_accessor(_marc(statement_of_responsibility="by Levy")) == "by Levy"
-    assert pairing.cce_accessor(_nypl(claimants=("Howard S. Levy",))) == "Howard S. Levy"
+    assert pairing.cce_accessor(_nypl(claimants=("Howard S. Levy",))) == ("Howard S. Levy",)
 
 
 def test_compile_renewal_claimants_pairing_uses_renewal_field() -> None:
@@ -175,7 +175,7 @@ def test_compile_renewal_claimants_pairing_uses_renewal_field() -> None:
     )
     compiled = compile_pairings(cfg)
     cce_accessor = compiled.author[0].cce_accessor
-    assert cce_accessor(_nypl(renewal_claimants="X; Y")) == "X; Y"
+    assert cce_accessor(_nypl(renewal_claimants="X; Y")) == ("X; Y",)
 
 
 def test_compile_author_sor_renewal_author_pairing_reads_both_fields() -> None:
@@ -193,7 +193,7 @@ def test_compile_author_sor_renewal_author_pairing_reads_both_fields() -> None:
         "by Daisy Neumann"
     )
     assert pairing.cce_accessor(_nypl(renewal_author="GOLDSTEIN, DAISY NEUMANN.")) == (
-        "GOLDSTEIN, DAISY NEUMANN."
+        "GOLDSTEIN, DAISY NEUMANN.",
     )
 
 
@@ -211,10 +211,9 @@ def test_compile_author_sor_renewal_claimants_pairing_reads_both_fields() -> Non
     assert pairing.marc_accessor(_marc(statement_of_responsibility="by Daisy Neumann")) == (
         "by Daisy Neumann"
     )
-    assert (
-        pairing.cce_accessor(_nypl(renewal_claimants="Daisy Neumann|Mrs. Richard Goldstein|||A"))
-        == "Daisy Neumann|Mrs. Richard Goldstein|||A"
-    )
+    assert pairing.cce_accessor(
+        _nypl(renewal_claimants="Daisy Neumann|Mrs. Richard Goldstein|||A")
+    ) == ("Daisy Neumann|Mrs. Richard Goldstein|||A",)
 
 
 def test_combine_first_returns_first_non_empty() -> None:
@@ -250,7 +249,7 @@ def test_combine_join_joins_non_empty_with_separator() -> None:
     )
     compiled = compile_pairings(cfg)
     accessor = compiled.author[0].cce_accessor
-    assert accessor(_nypl(claimants=("A", "", "B"))) == "A, B"
+    assert accessor(_nypl(claimants=("A", "", "B"))) == ("A, B",)
 
 
 def test_combine_concat_is_synonym_for_join() -> None:
@@ -262,11 +261,11 @@ def test_combine_concat_is_synonym_for_join() -> None:
     )
     compiled = compile_pairings(cfg)
     accessor = compiled.author[0].cce_accessor
-    assert accessor(_nypl(claimants=("A", "B"))) == "A B"
+    assert accessor(_nypl(claimants=("A", "B"))) == ("A B",)
 
 
-def test_combine_join_returns_none_when_all_empty() -> None:
-    """``join`` returns ``None`` when no non-empty value remains."""
+def test_combine_join_returns_empty_tuple_when_all_empty() -> None:
+    """``join`` on the CCE side yields an empty tuple when no value remains."""
     cfg = PairingConfig(
         marc_fields={"f": FieldSpec(fields=("title_main",), combine="first")},
         cce_fields={"c": FieldSpec(fields=("claimants",), combine="join")},
@@ -274,7 +273,57 @@ def test_combine_join_returns_none_when_all_empty() -> None:
     )
     compiled = compile_pairings(cfg)
     accessor = compiled.author[0].cce_accessor
-    assert accessor(_nypl(claimants=())) is None
+    assert accessor(_nypl(claimants=())) == ()
+
+
+def test_combine_best_yields_one_element_per_non_empty_value() -> None:
+    """``best`` keeps each list item as its own element instead of joining."""
+    cfg = PairingConfig(
+        marc_fields={"f": FieldSpec(fields=("title_main",), combine="first")},
+        cce_fields={"pn": FieldSpec(fields=("publisher_names",), combine="best")},
+        pairings=(PairingSpec(group="publisher", marc="f", cce="pn"),),
+    )
+    compiled = compile_pairings(cfg)
+    accessor = compiled.publisher[0].cce_accessor
+    assert accessor(_nypl(publisher_names=("Putnam", "James D. Horan"))) == (
+        "Putnam",
+        "James D. Horan",
+    )
+
+
+def test_combine_best_drops_empty_elements() -> None:
+    """``best`` skips empty strings but keeps the surviving elements separate."""
+    cfg = PairingConfig(
+        marc_fields={"f": FieldSpec(fields=("title_main",), combine="first")},
+        cce_fields={"cl": FieldSpec(fields=("claimants",), combine="best")},
+        pairings=(PairingSpec(group="publisher", marc="f", cce="cl"),),
+    )
+    compiled = compile_pairings(cfg)
+    accessor = compiled.publisher[0].cce_accessor
+    assert accessor(_nypl(claimants=("A", "", "B"))) == ("A", "B")
+
+
+def test_combine_best_yields_empty_tuple_for_empty_list() -> None:
+    """``best`` on an absent list yields an empty tuple (scored as skipped)."""
+    cfg = PairingConfig(
+        marc_fields={"f": FieldSpec(fields=("title_main",), combine="first")},
+        cce_fields={"pn": FieldSpec(fields=("publisher_names",), combine="best")},
+        pairings=(PairingSpec(group="publisher", marc="f", cce="pn"),),
+    )
+    compiled = compile_pairings(cfg)
+    accessor = compiled.publisher[0].cce_accessor
+    assert accessor(_nypl(publisher_names=())) == ()
+
+
+def test_compile_raises_on_marc_best_combine() -> None:
+    """``best`` is CCE-only; a MARC field requesting it fails at compile time."""
+    cfg = PairingConfig(
+        marc_fields={"bad": FieldSpec(fields=("publisher",), combine="best")},
+        cce_fields={"t": FieldSpec(fields=("title",), combine="first")},
+        pairings=(PairingSpec(group="publisher", marc="bad", cce="t"),),
+    )
+    with raises(ConfigError, match="valid only for CCE fields"):
+        compile_pairings(cfg)
 
 
 def test_compile_buckets_pairings_by_group() -> None:
@@ -377,7 +426,7 @@ def test_compile_title_with_sor_pairing_concatenates_title_and_sor() -> None:
         )
         == "Cold mountain by Charles Frazier"
     )
-    assert pairing.cce_accessor(_nypl(title="Cold mountain")) == "Cold mountain"
+    assert pairing.cce_accessor(_nypl(title="Cold mountain")) == ("Cold mountain",)
 
 
 def test_compile_title_with_sor_pairing_omits_missing_sor() -> None:

@@ -8,6 +8,7 @@ from msgspec import to_builtins
 from pytest import raises
 
 from pd_matcher.config.loader import _path_dec_hook
+from pd_matcher.config.schemas import FieldSpec
 from pd_matcher.config.schemas import IndexConfig
 from pd_matcher.config.schemas import MatchingConfig
 
@@ -116,6 +117,20 @@ def test_index_config_is_frozen_and_forbids_extras() -> None:
         setattr(cfg, "schema_version", 99)
     with raises(ValidationError):
         convert({"lmdb_path": "x", "unknown": 1}, type=IndexConfig, dec_hook=_path_dec_hook)
+
+
+def test_field_spec_accepts_best_combine_and_roundtrips() -> None:
+    """A ``combine: best`` FieldSpec validates and survives a round-trip."""
+    spec = convert({"fields": ["publisher_names"], "combine": "best"}, type=FieldSpec)
+    assert spec.combine == "best"
+    again = convert(to_builtins(spec), type=FieldSpec)
+    assert again == spec
+
+
+def test_field_spec_rejects_unknown_combine() -> None:
+    """An out-of-vocabulary ``combine`` value must be rejected."""
+    with raises(ValidationError):
+        convert({"fields": ["publisher_names"], "combine": "mystery"}, type=FieldSpec)
 
 
 def test_path_dec_hook_rejects_unsupported_types() -> None:

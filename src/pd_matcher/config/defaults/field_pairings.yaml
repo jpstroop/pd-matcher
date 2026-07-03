@@ -17,6 +17,11 @@
 #       first        first non-empty raw value, else absent
 #       concat/join  every non-empty raw value joined by `separator`
 #                    (synonyms; default separator is a single space)
+#       best         CCE only: keep each non-empty value as its own element;
+#                    the pipeline scores each and keeps the best Evidence, so a
+#                    co-claimant list ("Putnam James D. Horan") is compared
+#                    element-by-element instead of as one diluted blob. Invalid
+#                    for MARC fields (scalar); fails at load time.
 #     Unknown raw field names fail at load time (compile_pairings).
 #
 #   pairings
@@ -43,8 +48,8 @@ marc_fields:
 cce_fields:
   title:             {fields: [title],             combine: first}
   author_name:       {fields: [author_name],       combine: first}
-  publisher_names:   {fields: [publisher_names],   combine: join}
-  claimants:         {fields: [claimants],         combine: join}
+  publisher_names:   {fields: [publisher_names],   combine: best}
+  claimants:         {fields: [claimants],         combine: best}
   renewal_author:    {fields: [renewal_author],    combine: first}
   renewal_title:     {fields: [renewal_title],     combine: first}
   renewal_claimants: {fields: [renewal_claimants], combine: first}
