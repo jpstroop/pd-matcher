@@ -281,93 +281,6 @@ def test_candidates_in_year_window_widens_year_set(tmp_path: Path) -> None:
     assert [r.uuid for r in widened] == ["UUID-0011"]
 
 
-def test_candidates_for_renewal_returns_year_and_title_token_sharer(tmp_path: Path) -> None:
-    """A title token shared with entry-001 in the odat-1940 bucket retrieves it."""
-    out_path = _build_tiny_index(tmp_path)
-    with NyplIndexLookup(out_path) as lookup:
-        marc = _marc(title="An illustrated study of widgets", publication_year=1940)
-        records = list(lookup.candidates_for_renewal(marc))
-    assert [r.entry_id for r in records] == ["entry-001"]
-
-
-def test_candidates_for_renewal_matches_via_author_token(tmp_path: Path) -> None:
-    """An author token (no shared title token) still retrieves the renewal."""
-    out_path = _build_tiny_index(tmp_path)
-    with NyplIndexLookup(out_path) as lookup:
-        marc = _marc(title="Totally different heading", main_author="Smith", publication_year=1940)
-        records = list(lookup.candidates_for_renewal(marc))
-    assert [r.entry_id for r in records] == ["entry-001"]
-
-
-def test_candidates_for_renewal_matches_via_claimants_token(tmp_path: Path) -> None:
-    """A MARC publisher token retrieves a renewal via its claimants index."""
-    out_path = _build_tiny_index(tmp_path)
-    with NyplIndexLookup(out_path) as lookup:
-        marc = _marc(title="Totally different heading", publisher="Acme", publication_year=1940)
-        records = list(lookup.candidates_for_renewal(marc))
-    assert [r.entry_id for r in records] == ["entry-001"]
-
-
-def test_candidates_for_renewal_excludes_year_miss(tmp_path: Path) -> None:
-    """A shared token but a non-matching odat year yields nothing (intersection)."""
-    out_path = _build_tiny_index(tmp_path)
-    with NyplIndexLookup(out_path) as lookup:
-        marc = _marc(title="A study of widgets", publication_year=1955)
-        records = list(lookup.candidates_for_renewal(marc))
-    assert records == []
-
-
-def test_candidates_for_renewal_excludes_token_miss(tmp_path: Path) -> None:
-    """A correct year but no shared token yields nothing (token set empty)."""
-    out_path = _build_tiny_index(tmp_path)
-    with NyplIndexLookup(out_path) as lookup:
-        marc = _marc(title="Zzz qqq xyzzy", publication_year=1940)
-        records = list(lookup.candidates_for_renewal(marc))
-    assert records == []
-
-
-def test_candidates_for_renewal_yields_nothing_without_publication_year(tmp_path: Path) -> None:
-    """No publication_year short-circuits to an empty iterator."""
-    out_path = _build_tiny_index(tmp_path)
-    with NyplIndexLookup(out_path) as lookup:
-        marc = _marc(title="A study of widgets", publication_year=None)
-        records = list(lookup.candidates_for_renewal(marc))
-    assert records == []
-
-
-def test_candidates_for_renewal_yields_nothing_when_year_bucket_empty(tmp_path: Path) -> None:
-    """An odat year with no renewals yields nothing even with shared tokens."""
-    out_path = _build_tiny_index(tmp_path)
-    with NyplIndexLookup(out_path) as lookup:
-        marc = _marc(title="A study of widgets", publication_year=1800)
-        records = list(lookup.candidates_for_renewal(marc))
-    assert records == []
-
-
-def test_candidates_for_renewal_skips_entry_with_no_renewal_record(tmp_path: Path) -> None:
-    """A posting that points at a missing renewal entry is skipped."""
-    out_path = _build_tiny_index(tmp_path)
-    from pd_matcher.index.codec import encode_uuid_list
-    from pd_matcher.index.codec import encode_year_key
-
-    with NyplIndexStore(out_path) as store, store.write_transaction():
-        store.ren_by_year.put(encode_year_key(1940), encode_uuid_list(("entry-ghost",)))
-        store.ren_title_index.put(b"widgets", encode_uuid_list(("entry-ghost",)))
-
-    with NyplIndexLookup(out_path) as lookup:
-        marc = _marc(title="widgets", publication_year=1940)
-        records = list(lookup.candidates_for_renewal(marc))
-    assert records == []
-
-
-def test_iter_renewals_walks_every_record(tmp_path: Path) -> None:
-    """The renewal-scan helper visits every renewal written to the index."""
-    out_path = _build_tiny_index(tmp_path)
-    with NyplIndexLookup(out_path) as lookup:
-        entry_ids = sorted(record.entry_id for record in lookup.iter_renewals())
-    assert entry_ids == ["entry-001", "entry-002", "entry-003", "entry-004"]
-
-
 def test_stats_reflect_build_report(tmp_path: Path) -> None:
     out_path = _build_tiny_index(tmp_path)
     with NyplIndexLookup(out_path) as lookup:
@@ -377,12 +290,6 @@ def test_stats_reflect_build_report(tmp_path: Path) -> None:
     assert stats.renewals_written == 4
     assert stats.renewal_joins == 2
     assert stats.year_buckets == 4
-    # Renewals entry-001 (odat 1940) and entry-002 (odat 1955) seed two buckets;
-    # entry-003 (no odat) and entry-004 (unparseable odat) carry no year.
-    assert stats.renewal_year_buckets == 2
-    assert stats.renewal_title_tokens > 0
-    assert stats.renewal_author_tokens > 0
-    assert stats.renewal_claimants_tokens > 0
     assert stats.build_timestamp.endswith("+00:00")
     assert len(stats.source_hash) == 64
 

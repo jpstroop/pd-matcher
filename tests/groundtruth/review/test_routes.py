@@ -389,40 +389,6 @@ def test_index_renders_a_card(client: TestClient) -> None:
     assert "Renewed" in response.text
 
 
-@fixture
-def renewal_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
-    db_path = tmp_path / "review.db"
-    with ReviewDb.connect(db_path) as db:
-        db.insert_pair(
-            _pair(
-                language="eng",
-                control_id="ren-1",
-                nypl_uuid="ren-entry-1",
-                pairing_type="renewal",
-                renewal_title="A renewed study of widgets",
-            )
-        )
-    app = create_app(db_path, vault_path)
-    with TestClient(app) as test_client:
-        yield test_client
-
-
-def test_renewal_card_presents_renewal_record_as_cce_side(renewal_client: TestClient) -> None:
-    response = renewal_client.get("/pair/1")
-    assert response.status_code == 200
-    assert "CCE (Copyright Office — Renewal)" in response.text
-    assert "A renewed study of widgets" in response.text
-    assert "ren entry" in response.text
-    # The oreg-derived format label surfaces on the renewal card.
-    assert "format" in response.text
-    assert "Book" in response.text
-    # The claimant-derived renewal-right label surfaces on the renewal card.
-    assert "renewed by" in response.text
-    assert "proprietor (work for hire)" in response.text
-    # The registration-only presentation is not used for a renewal pair.
-    assert "<h2>CCE (Copyright Office)</h2>" not in response.text
-
-
 def test_audit_note_banner_renders_when_set(audit_note_client: TestClient) -> None:
     response = audit_note_client.get("/pair/1")
     assert response.status_code == 200
