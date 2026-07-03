@@ -86,8 +86,8 @@ def _idf_table_from_documents(
 ) -> IdfTable:
     """Compute an :class:`IdfTable` from one token set per document.
 
-    Shared IDF math for every flavour (title/author/publisher, registration
-    and renewal): each set is one document, a token's document frequency is
+    Shared IDF math for every flavour (title/author/publisher over the
+    registration corpus): each set is one document, a token's document frequency is
     the number of sets it appears in, and the smoothed IDF is
     ``log((N + 1) / (df + 1)) + 1``. ``default_idf`` is the score an unseen
     token receives (``df = 0``).
@@ -184,50 +184,6 @@ def build_publisher_idf_table(lookup: NyplIndexLookup, *, language: str = "eng")
         language=language,
         name_stopwords=stopwords.publisher,
         values_of=_publisher_values,
-    )
-
-
-def build_renewal_title_idf_table(lookup: NyplIndexLookup, *, language: str = "eng") -> IdfTable:
-    """Scan the renewal corpus and return an :class:`IdfTable` over renewal title tokens.
-
-    The renewal-side mirror of :func:`build_idf_table`: ranges over each
-    renewal's ``title`` (via :meth:`NyplIndexLookup.iter_renewals`) through the
-    same title pipeline (number normalization, tokenize, drop title stopwords,
-    stem) so the table lines up with the title scorer when matching a MARC
-    record directly against renewals.
-    """
-    stopwords = load_stopwords(language)
-    document_token_sets = (
-        set(_prepare_tokens(record.title or "", language=language, title_stopwords=stopwords.title))
-        for record in lookup.iter_renewals()
-    )
-    return _idf_table_from_documents(
-        document_token_sets,
-        source_hash=lookup.stats().source_hash,
-        language=language,
-    )
-
-
-def build_renewal_author_idf_table(lookup: NyplIndexLookup, *, language: str = "eng") -> IdfTable:
-    """Scan the renewal corpus and return an :class:`IdfTable` over renewal author tokens.
-
-    The renewal-side mirror of :func:`build_author_idf_table`: ranges over each
-    renewal's ``author`` (via :meth:`NyplIndexLookup.iter_renewals`) through the
-    unstemmed name pipeline so the table lines up with the author scorer.
-    """
-    stopwords = load_stopwords(language)
-    document_token_sets = (
-        set(
-            _prepare_name_tokens(
-                record.author or "", language=language, name_stopwords=stopwords.author
-            )
-        )
-        for record in lookup.iter_renewals()
-    )
-    return _idf_table_from_documents(
-        document_token_sets,
-        source_hash=lookup.stats().source_hash,
-        language=language,
     )
 
 
@@ -356,56 +312,14 @@ def load_or_build_publisher_idf(
     )
 
 
-def load_or_build_renewal_title_idf(
-    cache_path: Path,
-    lookup_factory: Callable[[], NyplIndexLookup],
-    *,
-    language: str = "eng",
-) -> IdfTable:
-    """Return a cached renewal-title :class:`IdfTable`, rebuilding on source drift.
-
-    Same caching contract as :func:`load_or_build_idf` but over CCE renewal
-    ``title`` tokens (see :func:`build_renewal_title_idf_table`).
-    """
-    return _load_or_build(
-        cache_path,
-        lookup_factory,
-        lambda lookup: build_renewal_title_idf_table(lookup, language=language),
-        language=language,
-    )
-
-
-def load_or_build_renewal_author_idf(
-    cache_path: Path,
-    lookup_factory: Callable[[], NyplIndexLookup],
-    *,
-    language: str = "eng",
-) -> IdfTable:
-    """Return a cached renewal-author :class:`IdfTable`, rebuilding on source drift.
-
-    Same caching contract as :func:`load_or_build_idf` but over CCE renewal
-    ``author`` tokens (see :func:`build_renewal_author_idf_table`).
-    """
-    return _load_or_build(
-        cache_path,
-        lookup_factory,
-        lambda lookup: build_renewal_author_idf_table(lookup, language=language),
-        language=language,
-    )
-
-
 __all__ = [
     "IdfTable",
     "build_author_idf_table",
     "build_idf_table",
     "build_publisher_idf_table",
-    "build_renewal_author_idf_table",
-    "build_renewal_title_idf_table",
     "load_idf_table",
     "load_or_build_author_idf",
     "load_or_build_idf",
     "load_or_build_publisher_idf",
-    "load_or_build_renewal_author_idf",
-    "load_or_build_renewal_title_idf",
     "save_idf_table",
 ]

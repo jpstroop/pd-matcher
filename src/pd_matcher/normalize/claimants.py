@@ -12,20 +12,13 @@ is the statutory renewal-right class the Copyright Office recorded:
   posthumous / composite work — a *proprietor* renewal.
 
 The class governs whether the claimant is expected to share a name with the
-MARC author. An author renews under their own name, so a claimant-vs-author
-name match is real evidence; an estate or a proprietor renews under a *different*
-name, so a name mismatch there is expected and must never be read as evidence
-against a true match. :func:`parse_claimants` recovers the ``(name, code)``
-pairs and :func:`claimant_class_indicators` / :func:`author_claimant_name`
-expose the classification the renewal scorers condition on.
+MARC author. :func:`parse_claimants` recovers the ``(name, code)`` pairs and
+:func:`claimant_renewal_label` renders the statutory renewal-right class as a
+human-readable label for the review UI.
 """
 
 from re import Pattern
 from re import compile as re_compile
-
-CLAIMANT_AUTHOR_CODES: frozenset[str] = frozenset({"A"})
-CLAIMANT_ESTATE_CODES: frozenset[str] = frozenset({"W", "C", "E", "NK"})
-CLAIMANT_PROPRIETOR_CODES: frozenset[str] = frozenset({"PWH", "PPW", "PCW"})
 
 _SEPARATOR: Pattern[str] = re_compile(r"\|\||;")
 
@@ -108,53 +101,7 @@ def claimant_renewal_label(claimants: str | None) -> str:
     return "; ".join(labels)
 
 
-def claimant_class_indicators(pairs: tuple[tuple[str, str], ...]) -> tuple[bool, bool, bool]:
-    """Return ``(is_author, is_estate, is_proprietor)`` over parsed claimants.
-
-    Any author-coded claimant sets ``is_author``; any widow/child/executor/
-    next-of-kin code sets ``is_estate``; any proprietor / work-for-hire code
-    sets ``is_proprietor``. The three are independent — a renewal can carry more
-    than one class of claimant.
-
-    Args:
-        pairs: ``(name, code)`` pairs from :func:`parse_claimants`.
-
-    Returns:
-        A ``(is_author, is_estate, is_proprietor)`` triple of booleans.
-    """
-    codes = {code for _name, code in pairs}
-    return (
-        bool(codes & CLAIMANT_AUTHOR_CODES),
-        bool(codes & CLAIMANT_ESTATE_CODES),
-        bool(codes & CLAIMANT_PROPRIETOR_CODES),
-    )
-
-
-def author_claimant_name(pairs: tuple[tuple[str, str], ...]) -> str | None:
-    """Return the first author-coded claimant name, or ``None`` when none is present.
-
-    Only an author-coded claimant renews under the author's own name, so this is
-    the sole claimant whose name a class-conditioned author name-match may score
-    against the MARC author.
-
-    Args:
-        pairs: ``(name, code)`` pairs from :func:`parse_claimants`.
-
-    Returns:
-        The first author-coded claimant's name, or ``None``.
-    """
-    for name, code in pairs:
-        if code in CLAIMANT_AUTHOR_CODES:
-            return name
-    return None
-
-
 __all__ = [
-    "CLAIMANT_AUTHOR_CODES",
-    "CLAIMANT_ESTATE_CODES",
-    "CLAIMANT_PROPRIETOR_CODES",
-    "author_claimant_name",
-    "claimant_class_indicators",
     "claimant_renewal_label",
     "parse_claimants",
 ]

@@ -25,14 +25,10 @@ from pd_groundtruth.active_learning import run_active_learning
 from pd_groundtruth.active_select import DEFAULT_LANGUAGE_WEIGHTS
 from pd_groundtruth.build_corpus import build_corpus
 from pd_groundtruth.build_queue import build_queue
-from pd_groundtruth.build_renewal_queue import build_renewal_queue
 from pd_groundtruth.disk_guard import InsufficientDiskSpaceError
 from pd_groundtruth.dump_vault_marcs import dump_vault_marcs
 from pd_groundtruth.enrich_vault import run_enrich
 from pd_groundtruth.filter import filter_marcxml
-from pd_groundtruth.harvest_renewal_pairs import PROVENANCE_POSITIVE
-from pd_groundtruth.harvest_renewal_pairs import HarvestedPair
-from pd_groundtruth.harvest_renewal_pairs import run_harvest
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
@@ -61,7 +57,6 @@ _DEFAULT_PER_DECADE_CAP = 20000
 _DEFAULT_SEED = 42
 _DEFAULT_WORKERS = 8
 _DEFAULT_SAMPLE_PER_LANG = 1500
-_DEFAULT_RENEWAL_MIN_SCORE = 60.0
 _DEFAULT_REVIEW_HOST = "127.0.0.1"
 _DEFAULT_REVIEW_PORT = 8000
 _DEFAULT_POOL_PATH = Path("data/candidates")
@@ -71,9 +66,6 @@ _DEFAULT_ACTIVE_DB_PATH = Path("data/active_learning.db")
 _DEFAULT_ACTIVE_TARGET = 1000
 _DEFAULT_VAULT_PATH = Path("data/training/label_vault.jsonl")
 _DEFAULT_VAULT_MARCS_PATH = Path("data/training/marc.xml")
-_DEFAULT_HARVEST_OUT_PATH = Path("data/harvested_renewal_pairs.jsonl")
-_DEFAULT_HARVEST_NEGATIVES = 1
-_HARVEST_EXAMPLE_LIMIT = 5
 _LABELER = "jpstroop"
 _LOG_DIR_NAME = "logs"
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -513,91 +505,6 @@ def build_queue_command(
         f"records_matched={summary.records_matched} "
         f"pairs_written={summary.pairs_written} "
         f"strata=[{strata}]"
-    )
-
-
-@app.command(name="build-renewal-queue")
-def build_renewal_queue_command(
-    pool: Annotated[
-        Path,
-        Option("--pool", help="Root dir whose <lang>/*.xml shards form the candidate pool."),
-    ] = _DEFAULT_POOL_PATH,
-    index: Annotated[
-        Path, Option("--index", help="LMDB env produced by `pd-matcher index build`.")
-    ] = _DEFAULT_INDEX_PATH,
-    out: Annotated[
-        Path, Option("--out", help="Destination SQLite review database (appended to).")
-    ] = _DEFAULT_REVIEW_DB_PATH,
-    min_score: Annotated[
-        float,
-        Option(
-            "--min-score",
-            help=(
-                "Renewal-arm score floor (0-100); a MARC whose best renewal scores below it "
-                "is not a renewal-haver and is skipped before the join check runs."
-            ),
-        ),
-    ] = _DEFAULT_RENEWAL_MIN_SCORE,
-    append: Annotated[
-        bool,
-        Option(
-            "--append",
-            help=(
-                "Append onto an existing --out database, skipping MARCs already present "
-                "(today's silent behavior, now opt-in). Required when --out exists."
-            ),
-        ),
-    ] = False,
-    log_file: Annotated[
-        Path | None,
-        Option("--log-file", help="Override the auto-generated log file path."),
-    ] = None,
-) -> None:
-    """Queue scenario-4 (renewal-only) MARC↔renewal pairs for labeling.
-
-    Renewal-first: for every pool MARC not already in the ``--out`` review DB the
-    cheap renewal search runs first, keeping only books whose best renewal clears
-    ``--min-score`` (the renewal-havers). Each renewal-haver's best renewal is
-    then checked against the joined-renewal-id set computed once from the index:
-
-    * a renewal joined to a registration we hold is excluded (its work is already
-      determined);
-    * an unjoined renewal is emitted as a scenario-4 ``pairing_type="renewal"``
-      pair with an audit note.
-
-    The join check is an O(1) set membership; the joined-id set is derived at
-    runtime from the index's ``was_renewed`` / ``renewal_id`` fields, so no index
-    rebuild is required. Existing registration pairs are left untouched and never
-    duplicated.
-
-    When ``--out`` already exists the build refuses unless ``--append`` is given:
-    appending skips MARCs already in the DB, which would keep their possibly
-    outdated pairs after the matching logic changed. The pre-flight check runs
-    before any index load or pool scan.
-    """
-    if out.exists() and not append:
-        echo(
-            f"renewal review DB at {out} already exists. Appending would skip MARCs "
-            f"already present and keep their possibly-outdated pairs. Pass --append "
-            f"to add onto it deliberately, or delete it (or choose a new --out) to "
-            f"build fresh.",
-            err=True,
-        )
-        raise Exit(code=2)
-    _configure_logging("build-renewal-queue", log_file)
-    summary = build_renewal_queue(
-        pool=pool,
-        index_path=index,
-        out_path=out,
-        matching_config=_load_default_matching_config(),
-        min_score=min_score,
-    )
-    echo(
-        f"records_scanned={summary.records_scanned} "
-        f"renewal_havers={summary.renewal_havers} "
-        f"joined_excluded={summary.joined_excluded} "
-        f"class_filtered={summary.class_filtered} "
-        f"scenario4_written={summary.scenario4_written}"
     )
 
 
@@ -1094,97 +1001,3 @@ def enrich_vault_command(
         f"{report.missing_in_pool} MARC records not found in pool; "
         f"{report.missing_in_index} CCE records not found in index"
     )
-
-
-def _echo_harvest_examples(pairs: list[HarvestedPair]) -> None:
-    """Print up to :data:`_HARVEST_EXAMPLE_LIMIT` positive MARC↔renewal titles."""
-    shown = 0
-    echo("examples (MARC title | renewal title):")
-    for pair in pairs:
-        if pair.provenance != PROVENANCE_POSITIVE:
-            continue
-        echo(f"  {pair.marc_title!r} | {pair.renewal_title!r}")
-        shown += 1
-        if shown >= _HARVEST_EXAMPLE_LIMIT:
-            break
-
-
-@app.command(name="harvest-renewal-pairs")
-def harvest_renewal_pairs_command(
-    vault: Annotated[
-        Path,
-        Option("--vault", help="JSONL label vault to harvest verified matches from (read-only)."),
-    ] = _DEFAULT_VAULT_PATH,
-    index: Annotated[
-        Path, Option("--index", help="LMDB env produced by `pd-matcher index build`.")
-    ] = _DEFAULT_INDEX_PATH,
-    out: Annotated[
-        Path,
-        Option(
-            "--out", help="Destination JSONL training set (overwritten); gitignored by default."
-        ),
-    ] = _DEFAULT_HARVEST_OUT_PATH,
-    negatives_per_positive: Annotated[
-        int,
-        Option(
-            "--negatives-per-positive",
-            help="Hard-negative look-alikes to emit per verified positive.",
-        ),
-    ] = _DEFAULT_HARVEST_NEGATIVES,
-    marc_collection: Annotated[
-        Path,
-        Option(
-            "--marc-collection",
-            help="Single MARCXML <collection> of vault MARCs (used when --pool is absent).",
-        ),
-    ] = _DEFAULT_VAULT_MARCS_PATH,
-    pool: Annotated[
-        Path | None,
-        Option(
-            "--pool",
-            help=(
-                "Root dir whose <lang>/*.xml shards form the candidate pool. "
-                "Mutually exclusive with --marc-collection."
-            ),
-        ),
-    ] = None,
-    log_file: Annotated[
-        Path | None,
-        Option("--log-file", help="Override the auto-generated log file path."),
-    ] = None,
-) -> None:
-    """Harvest verified MARC↔renewal training pairs from the vault and index.
-
-    Every verified registration-pathway match whose registration is joined to a
-    renewal in the index yields a free, human-verified MARC↔renewal POSITIVE
-    (no hand-labeling). Each positive's MARC is then retrieved against the
-    renewal index and scored to emit ``--negatives-per-positive`` hard-negative
-    look-alikes (the true renewal excluded). The result is written as a JSONL
-    training set, kept strictly separate from the hand-labeled vault — every row
-    carries a ``provenance`` marker. The vault is only ever read.
-
-    By default the MARCs are read from the committed training collection
-    (``--marc-collection``); pass ``--pool`` to read from a sharded acquired pool
-    instead.
-    """
-    _configure_logging("harvest-renewal-pairs", log_file)
-    pairs, summary = run_harvest(
-        vault_path=vault,
-        index_path=index,
-        out_path=out,
-        matching_config=_load_default_matching_config(),
-        negatives_per_positive=negatives_per_positive,
-        pool_path=pool,
-        marc_collection_path=None if pool is not None else marc_collection,
-    )
-    echo(
-        f"positives={summary.positives} negatives={summary.negatives} "
-        f"vault_matches_examined={summary.vault_matches_examined} "
-        f"joined={summary.joined} "
-        f"missing_marc={summary.missing_marc} "
-        f"missing_registration={summary.missing_registration} "
-        f"registration_not_joined={summary.registration_not_joined} "
-        f"renewal_missing={summary.renewal_missing}"
-    )
-    echo(f"wrote {len(pairs)} rows to {out}")
-    _echo_harvest_examples(pairs)

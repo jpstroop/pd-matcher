@@ -34,7 +34,6 @@ VERDICT_UNSURE: str = "unsure"
 _VALID_VERDICTS: frozenset[str] = frozenset({VERDICT_MATCH, VERDICT_NO_MATCH, VERDICT_UNSURE})
 
 PAIRING_REGISTRATION: str = "registration"
-PAIRING_RENEWAL: str = "renewal"
 
 _SCHEMA: str = """
 CREATE TABLE IF NOT EXISTS review_pair (
@@ -951,7 +950,6 @@ class ReviewDb:
 
 __all__ = [
     "PAIRING_REGISTRATION",
-    "PAIRING_RENEWAL",
     "SORT_ASC",
     "SORT_DESC",
     "VERDICT_MATCH",
