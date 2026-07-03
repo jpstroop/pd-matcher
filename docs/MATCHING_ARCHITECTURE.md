@@ -13,7 +13,7 @@ Conflating the two — scoring every registration in a record's year — is what
 
 ## The LMDB index
 
-`index build` materialises one LMDB environment (`caches/cce.lmdb`, `schema_version = 3`) with these named sub-DBs (`index/store.py`):
+`index build` materialises one LMDB environment (`caches/cce.lmdb`, `schema_version = 6`) with these named sub-DBs (`index/store.py`):
 
 | sub-DB | key → value | purpose |
 |---|---|---|
@@ -24,7 +24,7 @@ Conflating the two — scoring every registration in a record's year — is what
 | `title_index` | title token → uuid list | **inverted token index** |
 | `author_index` | author token → uuid list | inverted token index |
 | `publisher_index` | publisher token → uuid list | inverted token index |
-| `meta` | build metadata (schema version, source hash, counts) | idempotent rebuilds |
+| `meta` | build metadata (schema version, source hash, counts, sibling-propagation count) | idempotent rebuilds |
 
 ### Year buckets
 
@@ -40,6 +40,24 @@ Conflating the two — scoring every registration in a record's year — is what
 - **No stemming is applied to keys.** Stemming is a per-language *scoring* concern; applying it to keys would couple the index to the stemmer and to a language we don't reliably know for CCE records.
 
 The builder (`index/builder.py`) accumulates the postings in memory during ingestion (alongside the year buckets) and flushes them at the end. Publisher postings draw tokens from both `publisher_names` and `claimants`.
+
+## The renewal join (build-time)
+
+A registration's copyright status hinges on whether it was renewed, and a renewal cites the registration it renews by number (`oreg`) and date (`odat`). Rather than re-join at match time, the builder resolves the join **once, at build**: renewals stream first into `ren_by_oreg` (keyed by every normalized `(regnum, year)` form the renewal cites), then each registration looks itself up there and stores the result as its `was_renewed` flag plus renewal id/date. The join key is produced by `normalize_regnum` on both sides so surface-format drift between the two transcriptions doesn't break the match.
+
+### Registration-number normalization and the class-token fold
+
+The two sides disagree on surface format far more than on substance — `A 963122` vs `A963122`, `AI-9217` vs `AI9217`, `A--Foreign 32851` vs `AF32851`. `normalize_regnum` (`normalize/registration_numbers.py`) collapses all of that to one canonical alphanumeric token: it uppercases, expands the verbose foreign/interim class phrases (`A--Foreign` → `AF`, `A ad int.` → `AI`), and drops every remaining non-alphanumeric byte.
+
+On 2026-07-03 it gained one more step: an **interim/foreign class-token fold**. NYPL transcribes the ad-interim (`AI`, book foreign-interim) and foreign (`AF`, book foreign) class marker inconsistently — `AI` / `AIO` / `AI0` and `AF` / `AFO` / `AF0`, with the trailing symbol appearing as **both the letter `O` (`0x4f`) and the digit `0` (`0x30`)**, verified byte-level. That trailing symbol is class noise, not part of the serial, so `AIO4671` / `AI04671` / `AI4671` are one registration. The fold rewrites an `AI`/`AF` class immediately followed by a stray `O`/`0` before the serial digits down to the bare class. It is deliberately scoped to `AI`/`AF` only — a plain `A` serial keeps any leading zero (`A0193774` is left alone), because outside those two classes `O` and `0` are distinct symbols and conflating them would merge unrelated registrations.
+
+Folding the class token recovered **+373 renewal joins** on the current corpus (173,474 → 173,847). This surfaced during the [recall-miss forensics](findings/recall_miss_forensics_2026-07-03.md), tracing a single ad-interim pair whose renewal cited `AIO-4671` (letter `O`) against a registration written `AF0-76081` (digit `0`).
+
+### Sibling renewal-fact propagation
+
+A work registered *ad interim* and then fully registered has **two** registration numbers for one work, cross-linked by `<prev-regNum>`. Frequently only one of the pair carries the renewal join — the renewal cites one number, not both — so the *other* registration would report `was_renewed = false` even though the work was renewed.
+
+After the main ingest, `_sibling_rewrites` (`index/builder.py`) walks the `<prev-regNum>`-linked registrations and, for each cited prior number (checked at the citing record's registration year and the year before, since siblings' years routinely differ by one), propagates renewal facts across the pair: an un-renewed record inherits a renewed sibling's renewal, or a renewed record pushes its facts onto an un-renewed sibling. Only the `was_renewed = false` record is ever written, so a record's **own** join is never overwritten — the inherited facts land in separate `sibling_renewal_*` fields (id, date, and the `via_regnum` naming the source), which the output surfaces as `match_renewal_via`. On the current corpus **223** records were rewritten. This second pass touches only the handful of affected records by uuid rather than re-streaming the corpus.
 
 ## Candidate retrieval
 

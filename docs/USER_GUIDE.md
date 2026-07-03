@@ -96,6 +96,70 @@ Run `pdm run pd-matcher prepare-marc --help` for the chunking flags.
 
 Each row in `matches.jsonl` is a candidate, not a verdict. Verifying which candidates are true links — and what each true link implies for copyright status — is the human step this tool exists to make possible. The labeling UI (*Daily flow B*) is one way to do that verification systematically, but it is not required to use the matcher.
 
+### What's in each output row
+
+Every row is a flat JSON object with the columns below (`output/jsonl_writer.py::RECORD_FIELDS`, the authoritative order). On a no-match record every `match_*` and score column is the empty string; the `marc_*` columns are always populated.
+
+**Your MARC record.** Each text field appears three ways: `_original` (as catalogued), `_normalized` (diacritics stripped, punctuation collapsed), and `_stemmed` (the language-stemmed tokens the title scorer actually compares).
+
+| column | meaning |
+|---|---|
+| `marc_id` | the MARC control identifier (001) |
+| `marc_title_original` / `_normalized` / `_stemmed` | the fused title (245 `$a`+`$b`) |
+| `marc_author_original` / `_normalized` / `_stemmed` | the statement of responsibility (245 `$c`) |
+| `marc_main_author_original` / `_normalized` / `_stemmed` | the main author (1xx) |
+| `marc_publisher_original` / `_normalized` / `_stemmed` | the publisher (264/260 `$b`) |
+| `marc_year` | publication year |
+| `marc_lccn` / `marc_lccn_normalized` | the LCCN as catalogued and canonicalized |
+| `marc_country_code` / `marc_language_code` | 008 country and language codes |
+
+**The matched CCE registration.** Empty on a no-match row.
+
+| column | meaning |
+|---|---|
+| `match_type` | `registration` on a match, empty otherwise |
+| `match_title` / `_normalized` | the CCE registration title |
+| `match_author` / `_normalized` | the CCE author name |
+| `match_publisher` / `_normalized` | the CCE publisher/claimant names, space-joined |
+| `match_year` | the registration year |
+| `match_source_id` | the CCE registration's NYPL uuid (the durable join key) |
+| `match_date` | the registration date (ISO, or year-only when that's all that's known) |
+
+**The copyright facts.** These carry the registration and renewal evidence a consumer reasons over. The renewal columns encode a specific provenance model — read the three notes below carefully.
+
+| column | meaning |
+|---|---|
+| `match_regnum` | the matched registration's own CCE registration number |
+| `match_prev_regnums` | prior registration numbers this record back-references (`<prev-regNum>`), semicolon-joined — the earlier or *ad interim* registrations of the same work |
+| `match_was_renewed` | `true`/`false` — whether the matched registration's **own** renewal join fired. This reflects the record's own join only; it is **not** set from a sibling's renewal |
+| `match_renewal_id` / `match_renewal_date` | the renewal's entry id and date. When the record was renewed these are its **own** renewal; when it was not, they carry a `<prev-regNum>`-linked sibling registration's renewal (propagated at index build) |
+| `match_renewal_via` | **empty** when the renewal facts are the record's own; a **regnum** when the facts were inherited from that prev-regNum-linked sibling registration, naming which one |
+
+The sibling case matters for *ad interim* books: the full registration may carry the renewal while the *ad interim* one does not (or vice versa). `match_renewal_via` tells you whether the renewal you see belongs to this exact registration or to its cross-linked sibling — see [docs/findings/recall_miss_forensics_2026-07-03.md](findings/recall_miss_forensics_2026-07-03.md) for why that distinction was added.
+
+**The scores.**
+
+| column | meaning |
+|---|---|
+| `title_score` / `author_score` / `publisher_score` | per-field scores, integer 0–100 (empty when the scorer was skipped) |
+| `combined_score` | the combined confidence, `calibrated × 100` with two decimals — the value `--min-score` compares against |
+| `year_difference` | `marc_year − match_year` |
+
+### Confidence and calibration
+
+`combined_score` is on a 0–100 scale, and `--min-score` filters against it. What that number *means* depends on whether a calibrator is present:
+
+- **With `caches/calibrator.msgpack`** — `match` auto-loads it (from the index's parent directory) and the weighted-mean arm emits a **calibrated probability**: `--min-score 90` keeps only pairs at ≈ 90% confidence. The learned arm (`--scorer learned`) emits calibrated probabilities natively, so the threshold means the same thing for both combiners.
+- **With no artifact** — the weighted arm **silently** falls back to `raw / 100` (uncalibrated), so `--min-score 90` is filtering on raw score, not 90% confidence, with nothing in the output to flag it. Making that non-silent is tracked at [issue #117](https://github.com/jpstroop/pd-matcher/issues/117).
+
+The artifact is fit out-of-band from the labeled vault; nothing in `index` or `match` builds it. To fit or refit it:
+
+```bash
+pdm run python scripts/fit_calibrator.py
+```
+
+See [docs/findings/calibrator_refit_2026-07-03.md](findings/calibrator_refit_2026-07-03.md) for the current fit and [docs/DESIGN.md](DESIGN.md#platt-scaling-optional-off-by-default) for the math.
+
 ---
 
 ## The mode-1 (labeling) loop in 60 seconds

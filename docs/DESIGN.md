@@ -212,7 +212,7 @@ This is the deliberate boundary that keeps the subsystem fully typed and bounded
 
 - The MARC parser emits a fixed, typed `MarcRecord` of **raw subfields** (it now keeps `245$a` as `title_main` distinct from the fused `title`, and extracts `245$n`/`$p`). The CCE side already exposes `title`, `author_name`, `publisher_names`, `claimants`.
 - A finite **raw-field registry** in `match/pairing_compiler.py` (`MARC_FIELDS`, `CCE_FIELDS`) exposes each raw subfield by name through an explicit, typed accessor returning `tuple[str, ...]` (scalar fields wrap to a 0/1-tuple; list fields pass through). There is no `getattr` — that would leak `Any`; every accessor is written out.
-- YAML composes registry entries via a **closed combine vocabulary**: `first` (first non-empty value), `concat`/`join` (join non-empty values by a separator). That is the *entire* expressive surface — composing already-extracted subfields. Config cannot express arbitrary logic *by design*: the scoring stays in tested code, and a typo or unknown field name cannot silently produce a degraded matcher.
+- YAML composes registry entries via a **closed combine vocabulary**: `first` (first non-empty value), `concat`/`join` (join non-empty values by a separator), and CCE-only `best` (keep each non-empty value as its own element for per-element scoring — see below). That is the *entire* expressive surface — composing already-extracted subfields. Config cannot express arbitrary logic *by design*: the scoring stays in tested code, and a typo or unknown field name cannot silently produce a degraded matcher.
 - `compile_pairings(cfg)` resolves every field name against the registries and every pairing against the named field maps **once, at load time**, raising `ConfigError` on any unknown name. Typos fail at startup, not silently at match time. The result is a `CompiledPairings` of plain typed callables, bucketed by scorer group, ready for the hot loop. This mirrors the established library pattern for MARC→index mapping (cf. Traject).
 
 #### Default pairings
@@ -229,6 +229,14 @@ This is the deliberate boundary that keeps the subsystem fully typed and bounded
 | publisher | `publisher` | `author_name` | self-published / author-as-publisher |
 
 The combiner keys on one Evidence per group tag (`title.token_set`, `name.author`, `name.publisher`), so best-per-group selection yields exactly one Evidence per tag — the combiner is unchanged.
+
+#### `best`: element-wise scoring of list-valued CCE fields
+
+A MARC record describes one book, so its composed fields are scalar. A CCE registration's publisher signal is not: NYPL records the publisher *and* any person co-claimants together, so `publisher_names` and `claimants` are **lists** ("Putnam", "James D. Horan"). Joining that list into one blob before scoring (the `concat` op) dilutes a correct publisher match — "Putnam" vs "Putnam" — with the co-claimant tokens that share nothing with the MARC publisher.
+
+The `best` combine op keeps each list element as its own candidate value. The pipeline scores the MARC field against every element and keeps the single **maximum** Evidence for the group (`match/pipeline.py::_best_element_evidence`), so the publisher group is decided by the best-matching name rather than a diluted average. It is defined for CCE fields only — a scalar MARC field has no list to split, so requesting `best` for one fails at compile time. In the default pairings, `publisher_names` and `claimants` use `combine: best`; every other field uses `first` or `concat`.
+
+Shipping `best` lifted the publisher-evidence AUC from 0.8187 to 0.8293 and regression recall from 0.9477 to 0.9558 (nine more correct top-1s) on 2026-07-03 — see [docs/findings/publisher_split_2026-07-03.md](findings/publisher_split_2026-07-03.md).
 
 The hard-signal scorers (`lccn`, `isbn`, `year`, `edition`) compare specific typed scalars, are not transposable, and stay hard-wired in the pipeline — they are deliberately *not* part of the pairing subsystem.
 
@@ -256,7 +264,7 @@ By default the weighted-mean combiner runs **uncalibrated**: `calibrated = raw /
 calibrated = 1 / (1 + exp(-(a × raw + b)))
 ```
 
-The artifact is **not** built during index or match — nothing in the engine fits it automatically. It is fit out-of-band by `scripts/fit_calibrator.py`, which scores the resolved labeled-vault pairs with the production combiner and partitions the raw scores into positives (`verdict=match`) and negatives (`verdict=no_match`), then fits `a` and `b` by Newton iteration. See `docs/findings/fit_calibrator_2026-06-07.md` for the most recent fit and its outcome. The published `combined_score` in the JSONL output is `calibrated × 100` (the 0–100 scale `--min-score` compares against).
+The artifact is **not** built during index or match — nothing in the engine fits it automatically. It is fit out-of-band by `scripts/fit_calibrator.py` (`pdm run python scripts/fit_calibrator.py`), which scores the resolved labeled-vault pairs with the production combiner and partitions the raw scores into positives (`verdict=match`) and negatives (`verdict=no_match`), then fits `a` and `b` by Newton iteration. The most recent fit landed on 2026-07-03; see `docs/findings/calibrator_refit_2026-07-03.md` for the coefficients and outcome. The published `combined_score` in the JSONL output is `calibrated × 100` (the 0–100 scale `--min-score` compares against). Because `caches/` is gitignored the artifact is never committed, so a fresh checkout runs uncalibrated until the fit is re-run; making that silent fallback loud is tracked at issue #117.
 
 ### What happens to the match
 
@@ -344,7 +352,7 @@ The training data is the **labeled vault**, not any precomputed registration↔r
 
 A side benefit, when a calibrator is in place: thresholds become meaningful. `--min-score` is on the 0–100 calibrated scale, so `--min-score 70` means "only show me matches with at least 70% probability of being correct" — not "only show me raw scores above 70 vibe points."
 
-In practice the most recent fit was **not** landed. The vault's negatives skew high (the labeler tends to surface borderline cases), so the sigmoid suppressed the mid-band and cost recall; see `docs/findings/fit_calibrator_2026-06-07.md` for the full numbers and the decision to keep running with the linear pass-through. The findings doc is the source of any concrete count or coefficient — they drift, so we don't pin them here.
+The **first** fit (2026-06-07) was deliberately *not* landed: the vault's negatives skewed high (the labeler tends to surface borderline cases), so the sigmoid suppressed the mid-band and cost recall — see `docs/findings/fit_calibrator_2026-06-07.md`. On a roughly doubled vault whose negatives now separate cleanly, a **refit on 2026-07-03 landed** as the recommended weighted-arm calibrator: `docs/findings/calibrator_refit_2026-07-03.md` has the current coefficients and the durability story (the artifact lives only in gitignored `caches/`, so a lost cache silently drops back to the linear pass-through — #117). The findings docs are the source of any concrete count or coefficient — they drift, so we don't pin them here.
 
 The learned combiner (`--scorer learned`) produces a probability directly from the LightGBM model, so it needs no Platt step at all.
 
