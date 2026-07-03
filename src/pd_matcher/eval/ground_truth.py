@@ -63,6 +63,7 @@ _LOGGER = getLogger(__name__)
 
 _VERDICT_MATCH: str = "match"
 _VERDICT_UNSURE: str = "unsure"
+_MATCH_SOURCE_RENEWAL: str = "renewal"
 
 
 class EvalReport(Struct, frozen=True, forbid_unknown_fields=True):
@@ -119,6 +120,25 @@ def _partition_entries(
     return keep, unsure
 
 
+def _drop_renewal_arm(entries: list[VaultEntry]) -> tuple[list[VaultEntry], int]:
+    """Split off paused renewal-arm pairs; return ``(registration_entries, excluded)``.
+
+    Renewal-arm pairs (``match_source == "renewal"``) carry a renewal-record
+    ``nypl_uuid`` that :meth:`NyplIndexLookup.get_registration` cannot resolve,
+    and the registration matcher never surfaces them as a top candidate. They
+    are artifacts of the paused renewal-matching exploration, so the
+    registration-arm eval excludes them rather than counting them as misses.
+    """
+    registration: list[VaultEntry] = []
+    excluded = 0
+    for entry in entries:
+        if entry.match_source == _MATCH_SOURCE_RENEWAL:
+            excluded += 1
+            continue
+        registration.append(entry)
+    return registration, excluded
+
+
 def _ground_truth_by_marc(
     entries: dict[tuple[str, str], VaultEntry],
 ) -> dict[str, str]:
@@ -136,6 +156,8 @@ def _ground_truth_by_marc(
     gt: dict[str, str] = {}
     for entry in entries.values():
         if entry.verdict != _VERDICT_MATCH:
+            continue
+        if entry.match_source == _MATCH_SOURCE_RENEWAL:
             continue
         gt[entry.marc_control_id] = entry.nypl_uuid
     return gt
@@ -289,8 +311,11 @@ def run_eval(
     started = perf_counter()
     raw = current_entries(vault_path)
     kept_entries, unsure = _partition_entries(raw)
+    registration_entries, renewal_excluded = _drop_renewal_arm(kept_entries)
+    if renewal_excluded:
+        _LOGGER.info("eval.vault.renewal_arm_excluded count=%d", renewal_excluded)
     ground_truth = _ground_truth_by_marc(raw)
-    needed_marc_ids = {entry.marc_control_id for entry in kept_entries} | set(ground_truth)
+    needed_marc_ids = {entry.marc_control_id for entry in registration_entries} | set(ground_truth)
     marc_by_id = build_marc_index(pool_path, needed_marc_ids)
     pairings = compile_pairings(pairing_config)
     with NyplIndexLookup(index_path) as lookup:
@@ -298,7 +323,7 @@ def run_eval(
         author_idf = build_author_idf_table(lookup)
         publisher_idf = build_publisher_idf_table(lookup)
         scored, positives, negatives, missing_pool, missing_index = _run_pass_a(
-            kept_entries,
+            registration_entries,
             marc_by_id=marc_by_id,
             lookup=lookup,
             idf=idf,

@@ -7,6 +7,7 @@ from pytest import LogCaptureFixture
 
 from pd_groundtruth.label_vault import SCHEMA_VERSION
 from pd_groundtruth.label_vault import MarcIdentifiers
+from pd_groundtruth.label_vault import MatchSource
 from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import upsert_entry
 from pd_matcher.config.loader import load_pairing_config
@@ -105,6 +106,7 @@ def _vault_entry(
     nypl_uuid: str,
     verdict: str,
     timestamp: str = "2026-05-22T10:00:00+00:00",
+    match_source: MatchSource | None = None,
 ) -> VaultEntry:
     """Return a minimal :class:`VaultEntry` for the synthetic vault."""
     return VaultEntry(
@@ -116,6 +118,7 @@ def _vault_entry(
         labeled_at=timestamp,
         labeler="test",
         marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+        match_source=match_source,
     )
 
 
@@ -238,6 +241,53 @@ def test_run_eval_excludes_unsure_entries(tmp_path: Path) -> None:
     assert report.pairs_positive == 1
     assert report.pairs_negative == 0
     assert report.pairs_unsure_excluded == 1
+
+
+def test_run_eval_excludes_renewal_arm_pairs(
+    tmp_path: Path,
+    caplog: LogCaptureFixture,
+) -> None:
+    """``match_source='renewal'`` pairs are dropped from both passes, not scored.
+
+    The paused renewal arm carries a renewal-record ``nypl_uuid`` the
+    registration lookup cannot resolve; the eval must skip it (logging the
+    count) rather than emit a ``cce_not_in_index`` miss.
+    """
+    from logging import INFO
+
+    index_path = _build_index(tmp_path)
+    pool_path = tmp_path / "pool"
+    _write_pool(pool_path, _standard_marc_records())
+    vault_path = tmp_path / "vault.jsonl"
+    _seed_vault(
+        vault_path,
+        (
+            _vault_entry(
+                marc_control_id="marc-aaa",
+                nypl_uuid="UUID-0001",
+                verdict="match",
+            ),
+            _vault_entry(
+                marc_control_id="marc-ren",
+                nypl_uuid="REN-9999",
+                verdict="match",
+                match_source="renewal",
+            ),
+        ),
+    )
+    with caplog.at_level(INFO, logger="pd_matcher.eval.ground_truth"):
+        report = run_eval(
+            vault_path=vault_path,
+            pool_path=pool_path,
+            index_path=index_path,
+            matching_config=_matching_config(),
+            pairing_config=_pairing_config(),
+        )
+    assert report.pairs_evaluated == 1
+    assert report.pairs_positive == 1
+    assert report.marcs_evaluated == 1
+    assert any("renewal_arm_excluded count=1" in r.getMessage() for r in caplog.records)
+    assert not any("REN-9999" in r.getMessage() for r in caplog.records)
 
 
 def test_run_eval_logs_warning_when_marc_missing_from_pool(
