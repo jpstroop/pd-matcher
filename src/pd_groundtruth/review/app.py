@@ -33,6 +33,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from pd_groundtruth.label_vault import CategoryKey
+from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import upsert_entry
 from pd_groundtruth.review import nav_history
@@ -124,14 +125,20 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
         """Render one card, threading the cookie nav history through context."""
         history = nav_history.read_history(request)
         history = nav_history.advance(history, row.id)
-        current_categories = _vault_categories_for_pair(
+        vault_entry = _vault_entry_for_pair(
             _vault_path(request), row.marc_control_id, row.nypl_uuid
         )
+        current_categories = vault_entry.categories if vault_entry is not None else ()
         response = templates.TemplateResponse(
             request,
             "card.html",
             {
-                "card": build_card(row, current_label=current_label),
+                "card": build_card(
+                    row,
+                    current_label=current_label,
+                    vault_verdict=vault_entry.verdict if vault_entry is not None else None,
+                    vault_note=vault_entry.note if vault_entry is not None else None,
+                ),
                 "filters": filters,
                 "counts": counts,
                 "back_id": nav_history.back_id(history),
@@ -311,25 +318,25 @@ def _filter_known_categories(values: list[str]) -> tuple[CategoryKey, ...]:
     return tuple(cast("CategoryKey", value) for value in values if value in allowed)
 
 
-def _vault_categories_for_pair(
+def _vault_entry_for_pair(
     vault_path: Path,
     marc_control_id: str,
     nypl_uuid: str,
-) -> tuple[CategoryKey, ...]:
-    """Return any previously-saved categories for ``(marc_control_id, nypl_uuid)``.
+) -> VaultEntry | None:
+    """Return the standing vault entry for ``(marc_control_id, nypl_uuid)``.
 
-    Reads the vault directly (the DB doesn't carry categories). An I/O
-    failure or a vault miss returns ``()`` so the form still renders
-    cleanly even when the vault is unavailable or the pair has never been
-    labeled.
+    Reads the vault directly (the DB doesn't carry categories, and a
+    re-verification queue's pairs may be unlabeled in the DB while carrying a
+    standing vault verdict). An I/O failure or a vault miss returns ``None``
+    so the form still renders cleanly even when the vault is unavailable or
+    the pair has never been labeled.
     """
     try:
         entries = current_entries(vault_path)
     except Exception:
         _LOGGER.exception("vault read failed during card render")
-        return ()
-    entry = entries.get((marc_control_id, nypl_uuid))
-    return entry.categories if entry is not None else ()
+        return None
+    return entries.get((marc_control_id, nypl_uuid))
 
 
 def _append_vault_entry(

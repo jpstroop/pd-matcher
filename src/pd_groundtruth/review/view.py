@@ -364,6 +364,9 @@ def _has_renewal_details(row: ReviewPairRow) -> bool:
 def build_card(
     row: ReviewPairRow,
     current_label: CurrentLabelRow | None = None,
+    *,
+    vault_verdict: str | None = None,
+    vault_note: str | None = None,
 ) -> ReviewCard:
     """Project a persisted :class:`ReviewPairRow` into a :class:`ReviewCard`.
 
@@ -371,9 +374,12 @@ def build_card(
     expose full MARC subfields, decodes ``evidence_json`` into ordered
     :class:`EvidenceBar` readings, and renders the renewal flag as a label.
     When ``current_label`` is supplied (i.e. the pair has already been
-    labeled), its ``note`` and ``verdict`` are projected onto the card so the
-    template can pre-fill the textarea and visually mark the current verdict
-    button.
+    labeled in this DB), its ``note`` and ``verdict`` are projected onto the
+    card so the template can pre-fill the textarea and visually mark the
+    current verdict button. When the DB carries no label, ``vault_verdict``
+    and ``vault_note`` — the pair's standing vault state, if any — fill the
+    same roles, so a re-verification queue shows the label under review
+    instead of a blank state. A DB label always wins over the vault fallback.
     """
     marc: MarcRecord = json_decode(row.marc_json, type=MarcRecord)
     cce_lccn_canonical = canonical_lccn(row.cce_lccn)
@@ -449,8 +455,8 @@ def build_card(
         cce_is_translation=_is_translation_row(row),
         evidence=_build_evidence(row.evidence_json, row.evidence_sources_json),
         audit_note=row.audit_note,
-        note=current_label.note if current_label is not None else None,
-        current_verdict=current_label.verdict if current_label is not None else None,
+        note=current_label.note if current_label is not None else vault_note,
+        current_verdict=current_label.verdict if current_label is not None else vault_verdict,
     )
 
 
