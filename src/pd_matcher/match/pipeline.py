@@ -91,8 +91,12 @@ def _build_context(
     )
 
 
-def _select_best(evidences: Sequence[Evidence]) -> tuple[int, Evidence, tuple[Evidence, ...]]:
-    """Return the highest-scoring Evidence's index plus the losers in input order."""
+def _argmax_by_score(evidences: Sequence[Evidence]) -> int:
+    """Return the index of the highest-scoring Evidence.
+
+    A ``skipped`` Evidence scores ``-1.0`` so a real (even zero) score always
+    wins over a skipped one, and ties keep the first (lowest-index) entry.
+    """
     best_index = 0
     best_score = evidences[0].score if not evidences[0].skipped else -1.0
     for index in range(1, len(evidences)):
@@ -101,11 +105,66 @@ def _select_best(evidences: Sequence[Evidence]) -> tuple[int, Evidence, tuple[Ev
         if current_score > best_score:
             best_score = current_score
             best_index = index
+    return best_index
+
+
+def _select_best(evidences: Sequence[Evidence]) -> tuple[int, Evidence, tuple[Evidence, ...]]:
+    """Return the highest-scoring Evidence's index plus the losers in input order."""
+    best_index = _argmax_by_score(evidences)
     losers = tuple(ev for index, ev in enumerate(evidences) if index != best_index)
     return best_index, evidences[best_index], losers
 
 
 _GroupScorer = Callable[[str | None, str | None, ScorerContext], Evidence]
+
+
+def _best_element_evidence(
+    scorer: _GroupScorer,
+    marc_value: str | None,
+    cce_values: tuple[str, ...],
+    ctx: ScorerContext,
+) -> Evidence:
+    """Score ``marc_value`` against each CCE element and keep the best Evidence.
+
+    A ``best``-combined CCE field surfaces one element per co-claimant, so the
+    correct name in a "Putnam James D. Horan" list is scored on its own instead
+    of diluted into one blob. An empty tuple (the CCE field is absent) is scored
+    once against ``None`` to emit the group's skipped Evidence. A scalar or
+    ``first``/``join`` field yields a 1-tuple, so the common case makes exactly
+    one scorer call and one 1-tuple, matching the pre-change cost.
+    """
+    if not cce_values:
+        return scorer(marc_value, None, ctx)
+    scored = tuple(scorer(marc_value, cce_value, ctx) for cce_value in cce_values)
+    return scored[_argmax_by_score(scored)]
+
+
+def _best_title_element_evidence(
+    marc_value: str | None,
+    cce_values: tuple[str, ...],
+    candidate: IndexedNyplRegRecord,
+    ctx: ScorerContext,
+) -> Evidence:
+    """Best-of-element title scoring that threads the candidate's title script.
+
+    Like :func:`_best_element_evidence` but specialised for the title scorer:
+    each element that equals the candidate's canonical title reuses its
+    precomputed :attr:`~pd_matcher.models.IndexedNyplRegRecord.title_script`,
+    so the script-mismatch guard does not re-derive the dominant script per
+    candidate.
+    """
+    if not cce_values:
+        return score_title(marc_value, None, ctx)
+    scored = tuple(
+        score_title(
+            marc_value,
+            cce_value,
+            ctx,
+            nypl_title_script=(candidate.title_script if cce_value == candidate.title else None),
+        )
+        for cce_value in cce_values
+    )
+    return scored[_argmax_by_score(scored)]
 
 
 def _apply_title_isolation_multiplier(winning: list[Evidence], title_index: int) -> None:
@@ -190,12 +249,19 @@ def _score_group(
     losing: list[Evidence],
     winning_sources: list[tuple[str, str]],
 ) -> None:
-    """Score every pairing in one author/publisher group and keep the best."""
+    """Score every pairing in one author/publisher group and keep the best.
+
+    Each pairing's CCE accessor returns a tuple of candidate values; the best
+    Evidence across those elements represents the pairing (see
+    :func:`_best_element_evidence`), then the best pairing represents the group.
+    """
     if not pairings:
         return
     scorer = _GROUP_SCORERS[pairings[0].group]
     evidences = tuple(
-        scorer(pairing.marc_accessor(marc), pairing.cce_accessor(candidate), ctx)
+        _best_element_evidence(
+            scorer, pairing.marc_accessor(marc), pairing.cce_accessor(candidate), ctx
+        )
         for pairing in pairings
     )
     _finalize_group(pairings, evidences, winning, losing, winning_sources)
@@ -223,14 +289,10 @@ def _score_title_group(
     if not pairings:
         return
     evidences = tuple(
-        score_title(
-            pairing.marc_accessor(marc),
-            cce_value,
-            ctx,
-            nypl_title_script=(candidate.title_script if cce_value == candidate.title else None),
+        _best_title_element_evidence(
+            pairing.marc_accessor(marc), pairing.cce_accessor(candidate), candidate, ctx
         )
         for pairing in pairings
-        for cce_value in (pairing.cce_accessor(candidate),)
     )
     _finalize_group(pairings, evidences, winning, losing, winning_sources)
 

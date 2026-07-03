@@ -85,17 +85,23 @@ class FieldSpec(Struct, frozen=True, forbid_unknown_fields=True):
     ``CCE_FIELDS`` depending on the section). ``combine`` selects the
     closed-vocabulary operation applied to the concatenated raw values:
 
-    * ``first`` — the first non-empty value, else ``None``.
+    * ``first`` — the first non-empty value, else absent.
     * ``concat`` / ``join`` — every non-empty value joined by
-      ``separator`` (synonyms; both drop empties and yield ``None`` when
+      ``separator`` (synonyms; both drop empties and yield nothing when
       all values are empty).
+    * ``best`` — every non-empty value kept as a separate element (CCE
+      side only). The pipeline scores each element and keeps the single
+      best Evidence, so a CCE publisher/claimant list ("Putnam James D.
+      Horan") is compared element-by-element instead of as one diluted
+      blob. Requesting ``best`` for a MARC field — which is scalar — fails
+      at compile time.
 
     The vocabulary is deliberately finite so configuration can compose
     already-extracted subfields without expressing arbitrary logic.
     """
 
     fields: tuple[str, ...]
-    combine: Literal["first", "concat", "join"]
+    combine: Literal["first", "concat", "join", "best"]
     separator: str = " "
 
 

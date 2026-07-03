@@ -17,9 +17,12 @@ from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
 from pd_matcher.match.pipeline import _apply_title_isolation_multiplier
 from pd_matcher.match.pipeline import _build_context
+from pd_matcher.match.pipeline import _score_group
 from pd_matcher.match.pipeline import _score_title_group
 from pd_matcher.match.pipeline import _with_multiplier
 from pd_matcher.match.pipeline import match_record
+from pd_matcher.match.scorers.context import ScorerContext
+from pd_matcher.match.scorers.name import score_publisher
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 
@@ -417,6 +420,42 @@ def test_score_title_group_no_pairings_is_a_noop(tmp_path: Path) -> None:
     assert winning == []
     assert losing == []
     assert sources == []
+
+
+def test_score_group_best_of_element_scores_best_publisher_not_blob(
+    scorer_context: ScorerContext,
+) -> None:
+    """A ``best``-combined publisher list scores its matching element, not the blob.
+
+    The candidate lists a co-claimant ("Alfred A. Knopf") alongside the true
+    publisher ("Macmillan"). Under the old ``join`` behavior the pipeline scored
+    MARC "Macmillan" against the concatenated "Alfred A. Knopf Macmillan" blob,
+    diluting the match; best-of-element scores each list item separately and
+    keeps the "Macmillan" ↔ "Macmillan" Evidence, which must beat the blob score.
+    """
+    cfg = PairingConfig(
+        marc_fields={"pub": FieldSpec(fields=("publisher",), combine="first")},
+        cce_fields={"pn": FieldSpec(fields=("publisher_names",), combine="best")},
+        pairings=(PairingSpec(group="publisher", marc="pub", cce="pn"),),
+    )
+    pairings = compile_pairings(cfg)
+    marc = MarcRecord(control_id="m", title="t", title_main="t", publisher="Macmillan")
+    candidate = IndexedNyplRegRecord(
+        uuid="u",
+        title="t",
+        was_renewed=False,
+        publisher_names=("Alfred A. Knopf", "Macmillan"),
+    )
+    winning: list[Evidence] = []
+    losing: list[Evidence] = []
+    sources: list[tuple[str, str]] = []
+    _score_group(pairings.publisher, marc, candidate, scorer_context, winning, losing, sources)
+    best_single = score_publisher("Macmillan", "Macmillan", scorer_context)
+    blob = score_publisher("Macmillan", "Alfred A. Knopf Macmillan", scorer_context)
+    assert len(winning) == 1
+    assert winning[0].score == best_single.score
+    assert winning[0].score > blob.score
+    assert sources == [("pub", "pn")]
 
 
 def test_match_record_captures_winning_source_for_each_evidence(
