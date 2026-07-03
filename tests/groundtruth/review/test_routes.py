@@ -15,8 +15,11 @@ from pytest import fixture
 from pytest import mark
 
 from pd_groundtruth.label_vault import SCHEMA_VERSION
+from pd_groundtruth.label_vault import MarcIdentifiers
+from pd_groundtruth.label_vault import VaultEntry
 from pd_groundtruth.label_vault import current_entries
 from pd_groundtruth.label_vault import iter_entries
+from pd_groundtruth.label_vault import upsert_entry
 from pd_groundtruth.review.app import create_app
 from pd_groundtruth.review_db import PairInsert
 from pd_groundtruth.review_db import ReviewDb
@@ -1126,6 +1129,30 @@ def test_pair_route_pre_fills_latest_note_after_relabel(client: TestClient) -> N
     assert response.status_code == 200
     assert "second take</textarea>" in response.text
     assert "first take</textarea>" not in response.text
+
+
+def test_pair_route_falls_back_to_vault_verdict_when_db_unlabeled(
+    client: TestClient,
+    vault_path: Path,
+) -> None:
+    """A DB-unlabeled pair with a standing vault verdict shows that verdict."""
+    upsert_entry(
+        vault_path,
+        VaultEntry(
+            schema=SCHEMA_VERSION,
+            marc_control_id="eng-1",
+            nypl_uuid="u-eng-1",
+            verdict="match",
+            note="standing vault note",
+            labeled_at="2026-06-14T10:00:00+00:00",
+            labeler="test",
+            marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+        ),
+    )
+    response = client.get("/pair/1")
+    assert response.status_code == 200
+    assert 'class="match current"' in response.text
+    assert "standing vault note</textarea>" in response.text
 
 
 def test_pair_route_marks_current_verdict_button(client: TestClient) -> None:
