@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from msgspec.structs import replace
 from pytest import raises
 
 from pd_groundtruth.review_db import PAIRING_REGISTRATION
@@ -1159,3 +1160,16 @@ def test_legacy_db_without_pairing_type_column_is_backfilled(tmp_path: Path) -> 
         row = db.get_pair(pair_id)
     assert row is not None
     assert row.pairing_type == PAIRING_REGISTRATION
+
+
+def test_insert_pair_round_trips_alt_pair_id(tmp_path: Path) -> None:
+    with ReviewDb.connect(tmp_path / "r.db") as db:
+        first = db.insert_pair(_pair(control_id="a", nypl_uuid="u-a"))
+        base = _pair(control_id="b", nypl_uuid="u-b")
+        second = db.insert_pair(replace(base, alt_pair_id=first))
+        linked = db.get_pair(second)
+        plain = db.get_pair(first)
+    assert linked is not None
+    assert linked.alt_pair_id == first
+    assert plain is not None
+    assert plain.alt_pair_id is None

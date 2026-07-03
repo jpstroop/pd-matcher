@@ -29,6 +29,11 @@
     .field { margin: .35rem 0; }
     .comparison-grid > .panel > .row > .field:first-child { margin-top: 0; }
     .comparison-grid > .panel > .row > .field:last-child { margin-bottom: 0; }
+    .alt-compare { margin-top: 1.25rem; border: 2px solid #c9a227; border-radius: 6px; padding: 0.75rem 1rem 1rem; }
+    .alt-compare-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 0.5rem; }
+    .alt-compare-heading h2 { margin: 0; }
+    .alt-compare-body { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; align-items: start; }
+    @media (max-width: 1100px) { .alt-compare-body { grid-template-columns: 1fr; } }
     .field .k { color: var(--muted); font-size: .78rem; }
     .field .v { font-size: .98rem; }
     .v.title { font-weight: 600; font-size: 1.1rem; }

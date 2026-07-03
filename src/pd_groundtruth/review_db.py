@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS review_pair (
     evidence_json TEXT NOT NULL,
     evidence_sources_json TEXT NOT NULL DEFAULT '{}',
     audit_note TEXT,
+    alt_pair_id INTEGER,
     created_at TEXT NOT NULL
 );
 
@@ -222,6 +223,7 @@ class PairInsert(Struct, frozen=True, forbid_unknown_fields=True):
     evidence_sources_json: str = "{}"
     audit_note: str | None = None
     pairing_type: str = PAIRING_REGISTRATION
+    alt_pair_id: int | None = None
 
 
 class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
@@ -272,6 +274,7 @@ class ReviewPairRow(Struct, frozen=True, forbid_unknown_fields=True):
     evidence_sources_json: str = "{}"
     audit_note: str | None = None
     pairing_type: str = PAIRING_REGISTRATION
+    alt_pair_id: int | None = None
 
 
 class LanguageProgress(Struct, frozen=True, forbid_unknown_fields=True):
@@ -347,6 +350,7 @@ _ADDITIVE_CCE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("evidence_sources_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("audit_note", "TEXT"),
     ("pairing_type", "TEXT NOT NULL DEFAULT 'registration'"),
+    ("alt_pair_id", "INTEGER"),
 )
 
 
@@ -398,6 +402,7 @@ def _row_to_pair(row: Row) -> ReviewPairRow:
         evidence_sources_json=row["evidence_sources_json"] or "{}",
         audit_note=row["audit_note"],
         pairing_type=row["pairing_type"],
+        alt_pair_id=row["alt_pair_id"],
     )
 
 
@@ -479,6 +484,7 @@ class ReviewDb:
                 cce_renewal_new_matter,
                 evidence_sources_json,
                 audit_note,
+                alt_pair_id,
                 created_at
             ) VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
@@ -486,6 +492,7 @@ class ReviewDb:
                 ?, ?,
                 ?, ?, ?,
                 ?, ?, ?,
+                ?,
                 ?,
                 ?,
                 ?,
@@ -536,6 +543,7 @@ class ReviewDb:
                 pair.cce_renewal_new_matter,
                 pair.evidence_sources_json,
                 pair.audit_note,
+                pair.alt_pair_id,
                 _now(),
             ),
         )
