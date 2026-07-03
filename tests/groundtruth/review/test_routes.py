@@ -50,6 +50,7 @@ def _pair(
     marc_notes: tuple[str, ...] = (),
     audit_note: str | None = None,
     pairing_type: str = "registration",
+    alt_pair_id: int | None = None,
 ) -> PairInsert:
     marc = MarcRecord(
         control_id=control_id,
@@ -115,6 +116,7 @@ def _pair(
         cce_renewal_new_matter=renewal_new_matter,
         evidence_sources_json=evidence_sources_json,
         audit_note=audit_note,
+        alt_pair_id=alt_pair_id,
     )
 
 
@@ -136,6 +138,25 @@ def client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
             )
         )
         db.insert_pair(_pair(language="fre", control_id="fre-1", nypl_uuid="u-fre-1"))
+    app = create_app(db_path, vault_path)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@fixture
+def alt_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
+    """Pair 2 links pair 1 as its matcher-preferred alternative."""
+    db_path = tmp_path / "review.db"
+    with ReviewDb.connect(db_path) as db:
+        db.insert_pair(_pair(language="eng", control_id="alt-1", nypl_uuid="u-alt-1"))
+        db.insert_pair(
+            _pair(
+                language="eng",
+                control_id="lab-1",
+                nypl_uuid="u-lab-1",
+                alt_pair_id=1,
+            )
+        )
     app = create_app(db_path, vault_path)
     with TestClient(app) as test_client:
         yield test_client
@@ -1475,3 +1496,17 @@ def test_labels_route_renders_category_filter_widget(
     assert response.status_code == 200
     assert '<input type="checkbox" name="categories" value="translation" checked>' in response.text
     assert '<input type="checkbox" name="categories" value="ocr_confusion">' in response.text
+
+
+def test_pair_route_renders_alternative_panel_when_linked(alt_client: TestClient) -> None:
+    response = alt_client.get("/pair/2")
+    assert response.status_code == 200
+    assert "Matcher's top-1 alternative" in response.text
+    assert "CCE (Copyright Office) — alternative" in response.text
+    assert "open / label this pair (#1)" in response.text
+
+
+def test_pair_route_no_alternative_panel_without_link(alt_client: TestClient) -> None:
+    response = alt_client.get("/pair/1")
+    assert response.status_code == 200
+    assert "Matcher's top-1 alternative" not in response.text

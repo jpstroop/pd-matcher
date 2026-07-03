@@ -1,5 +1,64 @@
 {% extends "base.html" %}
 {% block content %}
+{% macro cce_panel(c, heading) %}
+    <section class="panel">
+      <h2>{{ heading }}</h2>
+      <div class="row">
+        {%- if c.cce_title %}<div class="field"><div class="k">title</div><div class="v title">{{ c.cce_title }}</div></div>{% endif -%}
+        {%- if c.cce_is_translation %}<div class="field"><span class="badge-translation">Translation</span></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if c.cce_author %}<div class="field"><div class="k">author</div><div class="v">{{ c.cce_author }}</div></div>{% endif -%}
+        {%- if c.cce_author_place %}<div class="field"><div class="k">author place</div><div class="v">{{ c.cce_author_place }}</div></div>{% endif -%}
+        {%- if c.author_is_claimant_label %}<div class="field"><span class="badge-claimant">{{ c.author_is_claimant_label }}</span></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if c.cce_publishers %}<div class="field"><div class="k">publishers</div><div class="v">{{ c.cce_publishers }}</div></div>{% endif -%}
+        {%- if c.cce_claimants %}<div class="field"><div class="k">claimants</div><div class="v">{{ c.cce_claimants }}</div></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if c.cce_publication_places %}<div class="field"><div class="k">publication places</div><div class="v">{{ c.cce_publication_places | join("; ") }}</div></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if c.cce_reg_year is not none %}<div class="field"><div class="k">reg year</div><div class="v">{{ c.cce_reg_year }}</div></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if c.cce_desc %}<div class="field"><div class="k">description</div><div class="v">{{ c.cce_desc }}</div></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if c.cce_edition %}<div class="field"><div class="k">edition</div><div class="v">{{ c.cce_edition }}</div></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if c.cce_lccn %}<div class="field"><div class="k">lccn</div><div class="v"><a href="{{ c.cce_lccn_url }}" target="_blank" rel="noopener noreferrer">{{ c.cce_lccn_canonical }}</a>{% if c.cce_lccn_canonical != c.cce_lccn %} <small>({{ c.cce_lccn }})</small>{% endif %}</div></div>{% endif -%}
+      </div>
+      <div class="row">
+        {%- if c.cce_regnum %}<div class="field"><div class="k">reg number</div><div class="v">{{ c.cce_regnum }}</div></div>{% endif -%}
+        {%- if c.cce_prev_regnums %}<div class="field"><div class="k">previous registrations</div><div class="v">{{ c.cce_prev_regnums | join("; ") }}</div></div>{% endif -%}
+        <div class="field"><div class="k">renewal</div><div class="v"><span class="renewal {{ c.cce_renewal_label | replace(' ', '') }}">{{ c.cce_renewal_label }}</span></div></div>
+        {%- if c.cce_has_renewal_details %}<div class="renewal-details">
+          <div class="renewal-details-heading">Renewal details</div>
+          {%- if c.cce_renewal_rdat %}<div class="field"><div class="k">renewal date</div><div class="v">{{ c.cce_renewal_rdat.isoformat() }}</div></div>{% endif -%}
+          {%- if c.cce_renewal_claimants %}<div class="field"><div class="k">renewal claimants</div><div class="v">{{ c.cce_renewal_claimants }}{% if c.cce_renewal_claimants_differ %} <span class="claimants-diff" title="Differs from registration claimants">&#9888;</span>{% endif %}</div></div>{% endif -%}
+          {%- if c.cce_renewal_new_matter %}<div class="field"><div class="k">new matter (renewal)</div><div class="v cce-new-matter">{{ c.cce_renewal_new_matter }}</div></div>{% endif -%}
+          {%- if c.cce_renewal_author %}<div class="field"><div class="k">renewal author</div><div class="v">{{ c.cce_renewal_author }}</div></div>{% endif -%}
+          {%- if c.cce_renewal_title %}<div class="field"><div class="k">renewal title</div><div class="v">{{ c.cce_renewal_title }}</div></div>{% endif -%}
+          {%- if c.cce_renewal_id or c.cce_renewal_oreg %}<div class="renewal-meta">
+            {%- if c.cce_renewal_id %}<span>renewal id <code>{{ c.cce_renewal_id }}</code></span>{% endif -%}
+            {%- if c.cce_renewal_oreg %}<span>oreg <code>{{ c.cce_renewal_oreg }}</code></span>{% endif -%}
+          </div>{% endif -%}
+        </div>{% endif -%}
+        {%- if c.cce_new_matter_claimed %}<div class="field"><div class="k">new matter claimed</div><div class="v cce-new-matter">{{ c.cce_new_matter_claimed }}</div></div>{% endif -%}
+        {%- if c.cce_copies %}<div class="field"><div class="k">copies</div><div class="v">{{ c.cce_copies }}</div></div>{% endif -%}
+        {%- if c.cce_notes %}<div class="field"><div class="k">notes</div><div class="v">
+          {% if c.cce_notes | length > 1 %}<ul class="cce-notes">{% for note in c.cce_notes %}<li>{{ note }}</li>{% endfor %}</ul>{% else %}{{ c.cce_notes[0] }}{% endif %}
+        </div></div>{% endif -%}
+        {%- if c.cce_copy_date %}<div class="field"><div class="k">copyright date</div><div class="v">{{ c.cce_copy_date.isoformat() }}</div></div>{% endif -%}
+        {%- if c.cce_aff_date %}<div class="field"><div class="k">affidavit date</div><div class="v">{{ c.cce_aff_date.isoformat() }}</div></div>{% endif -%}
+        {%- if c.cce_notice_date %}<div class="field"><div class="k">notice date</div><div class="v">{{ c.cce_notice_date.isoformat() }}</div></div>{% endif -%}
+      </div>
+    </section>
+{% endmacro %}
+
 <form class="filters-bar" method="get" action="/">
   <select name="language" aria-label="language filter">
     <option value="">any language</option>
@@ -134,65 +193,42 @@
       </div>
     </section>
 
-    <section class="panel">
-      <h2>CCE (Copyright Office)</h2>
-      <div class="row">
-        {%- if card.cce_title %}<div class="field"><div class="k">title</div><div class="v title">{{ card.cce_title }}</div></div>{% endif -%}
-        {%- if card.cce_is_translation %}<div class="field"><span class="badge-translation">Translation</span></div>{% endif -%}
-      </div>
-      <div class="row">
-        {%- if card.cce_author %}<div class="field"><div class="k">author</div><div class="v">{{ card.cce_author }}</div></div>{% endif -%}
-        {%- if card.cce_author_place %}<div class="field"><div class="k">author place</div><div class="v">{{ card.cce_author_place }}</div></div>{% endif -%}
-        {%- if card.author_is_claimant_label %}<div class="field"><span class="badge-claimant">{{ card.author_is_claimant_label }}</span></div>{% endif -%}
-      </div>
-      <div class="row">
-        {%- if card.cce_publishers %}<div class="field"><div class="k">publishers</div><div class="v">{{ card.cce_publishers }}</div></div>{% endif -%}
-        {%- if card.cce_claimants %}<div class="field"><div class="k">claimants</div><div class="v">{{ card.cce_claimants }}</div></div>{% endif -%}
-      </div>
-      <div class="row">
-        {%- if card.cce_publication_places %}<div class="field"><div class="k">publication places</div><div class="v">{{ card.cce_publication_places | join("; ") }}</div></div>{% endif -%}
-      </div>
-      <div class="row">
-        {%- if card.cce_reg_year is not none %}<div class="field"><div class="k">reg year</div><div class="v">{{ card.cce_reg_year }}</div></div>{% endif -%}
-      </div>
-      <div class="row">
-        {%- if card.cce_desc %}<div class="field"><div class="k">description</div><div class="v">{{ card.cce_desc }}</div></div>{% endif -%}
-      </div>
-      <div class="row">
-        {%- if card.cce_edition %}<div class="field"><div class="k">edition</div><div class="v">{{ card.cce_edition }}</div></div>{% endif -%}
-      </div>
-      <div class="row">
-        {%- if card.cce_lccn %}<div class="field"><div class="k">lccn</div><div class="v"><a href="{{ card.cce_lccn_url }}" target="_blank" rel="noopener noreferrer">{{ card.cce_lccn_canonical }}</a>{% if card.cce_lccn_canonical != card.cce_lccn %} <small>({{ card.cce_lccn }})</small>{% endif %}</div></div>{% endif -%}
-      </div>
-      <div class="row">
-        {%- if card.cce_regnum %}<div class="field"><div class="k">reg number</div><div class="v">{{ card.cce_regnum }}</div></div>{% endif -%}
-        {%- if card.cce_prev_regnums %}<div class="field"><div class="k">previous registrations</div><div class="v">{{ card.cce_prev_regnums | join("; ") }}</div></div>{% endif -%}
-        <div class="field"><div class="k">renewal</div><div class="v"><span class="renewal {{ card.cce_renewal_label | replace(' ', '') }}">{{ card.cce_renewal_label }}</span></div></div>
-        {%- if card.cce_has_renewal_details %}<div class="renewal-details">
-          <div class="renewal-details-heading">Renewal details</div>
-          {%- if card.cce_renewal_rdat %}<div class="field"><div class="k">renewal date</div><div class="v">{{ card.cce_renewal_rdat.isoformat() }}</div></div>{% endif -%}
-          {%- if card.cce_renewal_claimants %}<div class="field"><div class="k">renewal claimants</div><div class="v">{{ card.cce_renewal_claimants }}{% if card.cce_renewal_claimants_differ %} <span class="claimants-diff" title="Differs from registration claimants">&#9888;</span>{% endif %}</div></div>{% endif -%}
-          {%- if card.cce_renewal_new_matter %}<div class="field"><div class="k">new matter (renewal)</div><div class="v cce-new-matter">{{ card.cce_renewal_new_matter }}</div></div>{% endif -%}
-          {%- if card.cce_renewal_author %}<div class="field"><div class="k">renewal author</div><div class="v">{{ card.cce_renewal_author }}</div></div>{% endif -%}
-          {%- if card.cce_renewal_title %}<div class="field"><div class="k">renewal title</div><div class="v">{{ card.cce_renewal_title }}</div></div>{% endif -%}
-          {%- if card.cce_renewal_id or card.cce_renewal_oreg %}<div class="renewal-meta">
-            {%- if card.cce_renewal_id %}<span>renewal id <code>{{ card.cce_renewal_id }}</code></span>{% endif -%}
-            {%- if card.cce_renewal_oreg %}<span>oreg <code>{{ card.cce_renewal_oreg }}</code></span>{% endif -%}
-          </div>{% endif -%}
-        </div>{% endif -%}
-        {%- if card.cce_new_matter_claimed %}<div class="field"><div class="k">new matter claimed</div><div class="v cce-new-matter">{{ card.cce_new_matter_claimed }}</div></div>{% endif -%}
-        {%- if card.cce_copies %}<div class="field"><div class="k">copies</div><div class="v">{{ card.cce_copies }}</div></div>{% endif -%}
-        {%- if card.cce_notes %}<div class="field"><div class="k">notes</div><div class="v">
-          {% if card.cce_notes | length > 1 %}<ul class="cce-notes">{% for note in card.cce_notes %}<li>{{ note }}</li>{% endfor %}</ul>{% else %}{{ card.cce_notes[0] }}{% endif %}
-        </div></div>{% endif -%}
-        {%- if card.cce_copy_date %}<div class="field"><div class="k">copyright date</div><div class="v">{{ card.cce_copy_date.isoformat() }}</div></div>{% endif -%}
-        {%- if card.cce_aff_date %}<div class="field"><div class="k">affidavit date</div><div class="v">{{ card.cce_aff_date.isoformat() }}</div></div>{% endif -%}
-        {%- if card.cce_notice_date %}<div class="field"><div class="k">notice date</div><div class="v">{{ card.cce_notice_date.isoformat() }}</div></div>{% endif -%}
-      </div>
-    </section>
+    {{ cce_panel(card, "CCE (Copyright Office)") }}
   </div>
 
 </form>
+
+{% if alt_card %}
+<div class="alt-compare">
+  <div class="alt-compare-heading">
+    <h2>Matcher's top-1 alternative <span class="ev-heading-score">{{ "%.3f"|format(alt_card.score) }}</span></h2>
+    <a href="/pair/{{ alt_card.pair_id }}">open / label this pair (#{{ alt_card.pair_id }})</a>
+  </div>
+  <div class="alt-compare-body">
+    {{ cce_panel(alt_card, "CCE (Copyright Office) — alternative") }}
+    <section class="panel evidence">
+      <h2>alternative evidence</h2>
+      {% if alt_card.evidence %}
+        <ul class="ev-list">
+        {% for ev in alt_card.evidence %}
+        <li class="ev-entry">
+          <div class="ev-row">
+            <span class="ev-label">{{ ev.scorer }}</span>
+            <span class="ev-bar"><span class="ev-fill" style="width: {{ (ev.normalized * 100) | round(1) }}%"></span></span>
+            <span class="ev-score">{{ "%.2f"|format(ev.normalized) }}</span>
+          </div>
+          {% if ev.source %}<div class="ev-source-row"><span class="ev-source">via {{ ev.source }}</span></div>{% endif %}
+        </li>
+        {% endfor %}
+        </ul>
+      {% else %}
+        <p class="hint">No per-scorer evidence recorded for this pair.</p>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endif %}
+
 <div class="card-ids">
   <span>marc <code>{{ card.marc_control_id }}</code></span>
   <span>reg <code>{{ card.nypl_uuid }}</code></span>

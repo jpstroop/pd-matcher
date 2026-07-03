@@ -129,6 +129,12 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
             _vault_path(request), row.marc_control_id, row.nypl_uuid
         )
         current_categories = vault_entry.categories if vault_entry is not None else ()
+        alt_card = None
+        if row.alt_pair_id is not None:
+            with ReviewDb.connect(_db_path(request)) as db:
+                alt_row = db.get_pair(row.alt_pair_id)
+            if alt_row is not None:
+                alt_card = build_card(alt_row)
         response = templates.TemplateResponse(
             request,
             "card.html",
@@ -147,6 +153,7 @@ def create_app(db_path: Path | None = None, vault_path: Path | None = None) -> F
                 "band_choices": _BAND_CHOICES,
                 "category_choices": _CATEGORY_CHOICES,
                 "current_categories": current_categories,
+                "alt_card": alt_card,
             },
         )
         nav_history.write_history(response, history)
