@@ -121,6 +121,74 @@ def test_jsonl_writer_emits_blank_match_fields_when_no_match(tmp_path: Path) -> 
     assert records[0]["title_score"] == ""
     assert records[0]["combined_score"] == ""
     assert records[0]["year_difference"] == ""
+    assert records[0]["match_regnum"] == ""
+    assert records[0]["match_prev_regnums"] == ""
+    assert records[0]["match_was_renewed"] == ""
+    assert records[0]["match_renewal_id"] == ""
+    assert records[0]["match_renewal_date"] == ""
+    assert records[0]["match_renewal_via"] == ""
+
+
+def test_jsonl_writer_emits_own_renewal_facts(tmp_path: Path) -> None:
+    """A matched record with its own renewal join emits the renewal facts."""
+    path = tmp_path / "out.jsonl"
+    nypl = IndexedNyplRegRecord(
+        uuid="UUID-0001",
+        title="A study of widgets",
+        was_renewed=True,
+        regnum="A111111",
+        reg_date=date(1940, 5, 10),
+        reg_year=1940,
+        prev_regnums=("A100000", "A100001"),
+        renewal_id="R200001",
+        renewal_rdat=date(1968, 5, 15),
+    )
+    with JsonlResultWriter(path) as writer:
+        writer.write(_marc(), _match(), nypl)
+    record = _read_records(path)[0]
+    assert record["match_regnum"] == "A111111"
+    assert record["match_prev_regnums"] == "A100000; A100001"
+    assert record["match_was_renewed"] == "true"
+    assert record["match_renewal_id"] == "R200001"
+    assert record["match_renewal_date"] == "1968-05-15"
+    assert record["match_renewal_via"] == ""
+
+
+def test_jsonl_writer_emits_inherited_sibling_renewal_facts(tmp_path: Path) -> None:
+    """An un-renewed record with propagated sibling facts emits id/date + via."""
+    path = tmp_path / "out.jsonl"
+    nypl = IndexedNyplRegRecord(
+        uuid="UUID-0001",
+        title="A study of widgets",
+        was_renewed=False,
+        regnum="A50001",
+        reg_date=date(1950, 6, 1),
+        reg_year=1950,
+        sibling_renewal_id="R900001",
+        sibling_renewal_via_regnum="AIO-4671",
+        sibling_renewal_rdat=date(1978, 6, 1),
+    )
+    with JsonlResultWriter(path) as writer:
+        writer.write(_marc(), _match(), nypl)
+    record = _read_records(path)[0]
+    assert record["match_was_renewed"] == "false"
+    assert record["match_renewal_id"] == "R900001"
+    assert record["match_renewal_date"] == "1978-06-01"
+    assert record["match_renewal_via"] == "AIO-4671"
+
+
+def test_jsonl_writer_matched_unrenewed_without_sibling_blanks_renewal(tmp_path: Path) -> None:
+    """A matched record that is neither renewed nor sibling-linked blanks renewal facts."""
+    path = tmp_path / "out.jsonl"
+    with JsonlResultWriter(path) as writer:
+        writer.write(_marc(), _match(), _nypl())
+    record = _read_records(path)[0]
+    assert record["match_regnum"] == "A111111"
+    assert record["match_prev_regnums"] == ""
+    assert record["match_was_renewed"] == "false"
+    assert record["match_renewal_id"] == ""
+    assert record["match_renewal_date"] == ""
+    assert record["match_renewal_via"] == ""
 
 
 def test_jsonl_writer_blanks_when_match_present_but_indexed_record_missing(

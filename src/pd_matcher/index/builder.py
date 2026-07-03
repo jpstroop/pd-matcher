@@ -23,6 +23,7 @@ nobody has to remember to bump ``schema_version`` for a code-only change.
 
 from collections.abc import Iterator
 from datetime import UTC
+from datetime import date
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -30,10 +31,12 @@ from shutil import rmtree
 from time import perf_counter
 
 from msgspec import Struct
+from msgspec.structs import replace
 from structlog import get_logger
 from structlog.contextvars import bind_contextvars
 from structlog.contextvars import unbind_contextvars
 
+from pd_matcher.index.codec import decode_reg
 from pd_matcher.index.codec import decode_ren
 from pd_matcher.index.codec import encode_reg
 from pd_matcher.index.codec import encode_ren
@@ -47,6 +50,7 @@ from pd_matcher.index.store import NyplIndexStore
 from pd_matcher.index.store import _SubDb
 from pd_matcher.models import NyplRegRecord
 from pd_matcher.models import index_reg
+from pd_matcher.normalize.registration_numbers import normalize_regnum
 from pd_matcher.parsers.nypl_reg import NyplRegParseStats
 from pd_matcher.parsers.nypl_reg import iter_nypl_reg_directory
 from pd_matcher.parsers.nypl_ren import NyplRenParseStats
@@ -62,6 +66,19 @@ _META_REG_COUNT_KEY = b"registrations_written"
 _META_REN_COUNT_KEY = b"renewals_written"
 _META_RENEWAL_JOINS_KEY = b"renewal_joins"
 _META_YEAR_BUCKETS_KEY = b"year_buckets"
+_META_SIBLING_PROPAGATED_KEY = b"sibling_renewals_propagated"
+
+_RegLookupValue = tuple[str, bool, str | None, date | None, str | None]
+"""``(uuid, was_renewed, renewal_id, renewal_rdat, regnum)`` for one
+registration, keyed in :attr:`_IngestResult.reg_lookup` by
+``f"{normalize_regnum(regnum)}|{reg_year}"``."""
+
+_PrevLinkedEntry = tuple[
+    str, int | None, bool, str | None, date | None, str | None, tuple[str, ...]
+]
+"""``(uuid, reg_year, was_renewed, renewal_id, renewal_rdat, regnum,
+prev_regnums)`` for one registration carrying ``<prev-regNum>`` back-references,
+the working set of the sibling-renewal propagation pass."""
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _PARSER_FINGERPRINT_FILES: tuple[Path, ...] = (
@@ -88,6 +105,8 @@ class _IngestResult(Struct, frozen=True, forbid_unknown_fields=True):
     title_postings: dict[str, list[str]]
     author_postings: dict[str, list[str]]
     publisher_postings: dict[str, list[str]]
+    reg_lookup: dict[str, _RegLookupValue]
+    prev_linked: list[_PrevLinkedEntry]
 
 
 class BuildReport(Struct, frozen=True, forbid_unknown_fields=True):
@@ -103,6 +122,7 @@ class BuildReport(Struct, frozen=True, forbid_unknown_fields=True):
     renewals_written: int
     renewal_joins: int
     year_buckets: int
+    sibling_renewals_propagated: int
     duration_seconds: float
 
 
@@ -309,6 +329,8 @@ def _ingest_registrations(
         title_postings: dict[str, list[str]] = {}
         author_postings: dict[str, list[str]] = {}
         publisher_postings: dict[str, list[str]] = {}
+        reg_lookup: dict[str, _RegLookupValue] = {}
+        prev_linked: list[_PrevLinkedEntry] = []
         parser_stats = NyplRegParseStats()
         with store.write_transaction():
             for record in iter_nypl_reg_directory(reg_dir, stats=parser_stats):
@@ -326,6 +348,29 @@ def _ingest_registrations(
                         break
                 if was_renewed:
                     joins += 1
+                renewal_id = renewal.id if renewal is not None else None
+                renewal_rdat = renewal.rdat if renewal is not None else None
+                if record.regnum is not None:
+                    lookup_key = f"{normalize_regnum(record.regnum)}|{record.reg_year}"
+                    reg_lookup[lookup_key] = (
+                        record.uuid,
+                        was_renewed,
+                        renewal_id,
+                        renewal_rdat,
+                        record.regnum,
+                    )
+                if record.prev_regnums:
+                    prev_linked.append(
+                        (
+                            record.uuid,
+                            record.reg_year,
+                            was_renewed,
+                            renewal_id,
+                            renewal_rdat,
+                            record.regnum,
+                            record.prev_regnums,
+                        )
+                    )
                 indexed = index_reg(record, was_renewed=was_renewed, renewal=renewal)
                 store.reg_by_id.put(record.uuid.encode("utf-8"), encode_reg(indexed))
                 if record.reg_year is not None:
@@ -355,7 +400,85 @@ def _ingest_registrations(
             title_postings=title_postings,
             author_postings=author_postings,
             publisher_postings=publisher_postings,
+            reg_lookup=reg_lookup,
+            prev_linked=prev_linked,
         )
+    finally:
+        unbind_contextvars("phase")
+
+
+def _sibling_rewrites(
+    reg_lookup: dict[str, _RegLookupValue],
+    prev_linked: list[_PrevLinkedEntry],
+) -> dict[str, tuple[str | None, str | None, date | None]]:
+    """Resolve which registrations inherit a sibling's renewal facts.
+
+    Walks the ``<prev-regNum>``-linked registrations and, for each cited prior
+    number, looks it up in ``reg_lookup`` at both the citing record's
+    registration year and the year before (the two siblings' registration years
+    routinely differ by a year). Two directions are resolved:
+
+    * A citing record that is **not** renewed inherits the facts of a **renewed**
+      sibling it points at (the sibling's renewal covers the pair).
+    * A citing record that **is** renewed pushes its own renewal facts onto an
+      **un-renewed** sibling it points at.
+
+    Either way only the ``was_renewed=False`` record is targeted, so a record's
+    own join is never overwritten. Returns a ``uuid -> (sibling_renewal_id,
+    sibling_renewal_via_regnum, sibling_renewal_rdat)`` map of the rewrites to
+    apply; empty when no sibling renewal propagates.
+    """
+    rewrites: dict[str, tuple[str | None, str | None, date | None]] = {}
+    for uuid, reg_year, was_renewed, renewal_id, renewal_rdat, regnum, prev_regnums in prev_linked:
+        if reg_year is None:
+            continue
+        candidate_years = (reg_year, reg_year - 1)
+        for prev in prev_regnums:
+            normalized_prev = normalize_regnum(prev)
+            for candidate_year in candidate_years:
+                sibling = reg_lookup.get(f"{normalized_prev}|{candidate_year}")
+                if sibling is None:
+                    continue
+                s_uuid, s_was_renewed, s_renewal_id, s_renewal_rdat, s_regnum = sibling
+                if not was_renewed and s_was_renewed:
+                    rewrites[uuid] = (s_renewal_id, s_regnum, s_renewal_rdat)
+                elif was_renewed and not s_was_renewed:
+                    rewrites[s_uuid] = (renewal_id, regnum, renewal_rdat)
+    return rewrites
+
+
+def _propagate_sibling_renewals(
+    store: NyplIndexStore,
+    reg_lookup: dict[str, _RegLookupValue],
+    prev_linked: list[_PrevLinkedEntry],
+) -> int:
+    """Rewrite ``<prev-regNum>``-linked records with inherited renewal facts.
+
+    Resolves the rewrite set with :func:`_sibling_rewrites`, then read-modify-
+    writes each affected :class:`IndexedNyplRegRecord` by uuid — the affected
+    subset is small, so this second pass touches only a handful of records
+    rather than re-streaming the corpus. Returns the number of records rewritten.
+    """
+    bind_contextvars(phase="sibling_renewals")
+    try:
+        rewrites = _sibling_rewrites(reg_lookup, prev_linked)
+        if rewrites:
+            with store.write_transaction():
+                for uuid, (sibling_id, via_regnum, sibling_rdat) in rewrites.items():
+                    uuid_blob = uuid.encode("utf-8")
+                    blob = store.reg_by_id.get(uuid_blob)
+                    if blob is None:  # pragma: no cover
+                        continue
+                    updated = replace(
+                        decode_reg(blob),
+                        sibling_renewal_id=sibling_id,
+                        sibling_renewal_via_regnum=via_regnum,
+                        sibling_renewal_rdat=sibling_rdat,
+                    )
+                    store.reg_by_id.put(uuid_blob, encode_reg(updated))
+        propagated = len(rewrites)
+        _LOGGER.info("index.sibling_renewals.propagated", count=propagated)
+        return propagated
     finally:
         unbind_contextvars("phase")
 
@@ -421,6 +544,7 @@ def _write_meta(
     renewals: int,
     renewal_joins: int,
     year_buckets: int,
+    sibling_renewals_propagated: int,
 ) -> None:
     """Persist the build metadata used by lookups and the info CLI."""
     bind_contextvars(phase="meta")
@@ -435,6 +559,10 @@ def _write_meta(
             store.meta.put(_META_REN_COUNT_KEY, str(renewals).encode("ascii"))
             store.meta.put(_META_RENEWAL_JOINS_KEY, str(renewal_joins).encode("ascii"))
             store.meta.put(_META_YEAR_BUCKETS_KEY, str(year_buckets).encode("ascii"))
+            store.meta.put(
+                _META_SIBLING_PROPAGATED_KEY,
+                str(sibling_renewals_propagated).encode("ascii"),
+            )
         _LOGGER.info(
             "index.meta.written",
             schema_version=schema_version,
@@ -443,6 +571,7 @@ def _write_meta(
             renewals=renewals,
             renewal_joins=renewal_joins,
             year_buckets=year_buckets,
+            sibling_renewals_propagated=sibling_renewals_propagated,
         )
     finally:
         unbind_contextvars("phase")
@@ -501,6 +630,7 @@ def build_index(
             renewals_written=0,
             renewal_joins=0,
             year_buckets=0,
+            sibling_renewals_propagated=0,
             duration_seconds=perf_counter() - start,
         )
 
@@ -514,6 +644,9 @@ def build_index(
     with NyplIndexStore(out_path, readonly=False) as store:
         renewals_written = _ingest_renewals(store, ren_dir)
         ingest = _ingest_registrations(store, reg_dir)
+        sibling_propagated = _propagate_sibling_renewals(
+            store, ingest.reg_lookup, ingest.prev_linked
+        )
         bucket_count = _flush_year_buckets(
             store, store.reg_by_year, ingest.year_buckets, name="reg"
         )
@@ -531,6 +664,7 @@ def build_index(
             renewals=renewals_written,
             renewal_joins=ingest.joins,
             year_buckets=bucket_count,
+            sibling_renewals_propagated=sibling_propagated,
         )
 
     duration = perf_counter() - start
@@ -540,6 +674,7 @@ def build_index(
         renewals=renewals_written,
         renewal_joins=ingest.joins,
         year_buckets=bucket_count,
+        sibling_renewals_propagated=sibling_propagated,
         duration_seconds=duration,
     )
     return BuildReport(
@@ -548,6 +683,7 @@ def build_index(
         renewals_written=renewals_written,
         renewal_joins=ingest.joins,
         year_buckets=bucket_count,
+        sibling_renewals_propagated=sibling_propagated,
         duration_seconds=duration,
     )
 

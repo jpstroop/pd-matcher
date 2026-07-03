@@ -61,6 +61,12 @@ RECORD_FIELDS: tuple[str, ...] = (
     "match_year",
     "match_source_id",
     "match_date",
+    "match_regnum",
+    "match_prev_regnums",
+    "match_was_renewed",
+    "match_renewal_id",
+    "match_renewal_date",
+    "match_renewal_via",
     "title_score",
     "author_score",
     "publisher_score",
@@ -141,6 +147,29 @@ def _format_match_date(record: IndexedNyplRegRecord) -> str:
     return ""
 
 
+def _renewal_facts(record: IndexedNyplRegRecord) -> tuple[str, str, str]:
+    """Return ``(renewal_id, renewal_date, renewal_via)`` for a matched record.
+
+    A record's own renewal join takes precedence: when ``was_renewed`` the
+    facts come from its own ``renewal_*`` fields and ``renewal_via`` is empty.
+    Otherwise, when the index propagated a ``<prev-regNum>``-linked sibling's
+    renewal (see :attr:`IndexedNyplRegRecord.sibling_renewal_id`), the inherited
+    facts are surfaced with ``renewal_via`` set to the sibling's regnum so the
+    provenance is explicit. All three are empty strings when neither applies.
+    """
+    if record.was_renewed:
+        date_text = record.renewal_rdat.isoformat() if record.renewal_rdat is not None else ""
+        return record.renewal_id or "", date_text, ""
+    if record.sibling_renewal_id is not None or record.sibling_renewal_rdat is not None:
+        date_text = (
+            record.sibling_renewal_rdat.isoformat()
+            if record.sibling_renewal_rdat is not None
+            else ""
+        )
+        return record.sibling_renewal_id or "", date_text, record.sibling_renewal_via_regnum or ""
+    return "", "", ""
+
+
 def _build_row(
     marc: MarcRecord,
     match: MatchResult | None,
@@ -181,6 +210,12 @@ def _build_row(
         "match_year": "",
         "match_source_id": "",
         "match_date": "",
+        "match_regnum": "",
+        "match_prev_regnums": "",
+        "match_was_renewed": "",
+        "match_renewal_id": "",
+        "match_renewal_date": "",
+        "match_renewal_via": "",
         "title_score": "",
         "author_score": "",
         "publisher_score": "",
@@ -208,6 +243,13 @@ def _build_row(
     row["match_year"] = "" if matched_nypl.reg_year is None else str(matched_nypl.reg_year)
     row["match_source_id"] = matched_nypl.uuid
     row["match_date"] = _format_match_date(matched_nypl)
+    row["match_regnum"] = matched_nypl.regnum or ""
+    row["match_prev_regnums"] = "; ".join(matched_nypl.prev_regnums)
+    row["match_was_renewed"] = "true" if matched_nypl.was_renewed else "false"
+    renewal_id, renewal_date, renewal_via = _renewal_facts(matched_nypl)
+    row["match_renewal_id"] = renewal_id
+    row["match_renewal_date"] = renewal_date
+    row["match_renewal_via"] = renewal_via
     row["title_score"] = _evidence_score(best.evidence, "title.token_set")
     row["author_score"] = _evidence_score(best.evidence, "name.author")
     row["publisher_score"] = _evidence_score(best.evidence, "name.publisher")
