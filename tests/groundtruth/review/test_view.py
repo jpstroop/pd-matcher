@@ -962,3 +962,24 @@ def test_build_card_current_label_with_no_note_propagates_none() -> None:
     )
     assert card.note is None
     assert card.current_verdict == "unsure"
+
+
+def test_build_card_falls_back_to_vault_state_when_db_unlabeled() -> None:
+    card = build_card(
+        _row(_marc(), evidence_json="{}"),
+        vault_verdict="match",
+        vault_note="from the vault",
+    )
+    assert card.current_verdict == "match"
+    assert card.note == "from the vault"
+
+
+def test_build_card_db_label_wins_over_vault_fallback() -> None:
+    card = build_card(
+        _row(_marc(), evidence_json="{}"),
+        current_label=_current_label(verdict="no_match", note="db label"),
+        vault_verdict="match",
+        vault_note="from the vault",
+    )
+    assert card.current_verdict == "no_match"
+    assert card.note == "db label"
