@@ -14,6 +14,8 @@ from collections.abc import Mapping
 from re import IGNORECASE
 from re import Match
 from re import compile as re_compile
+from unicodedata import category as unicode_category
+from unicodedata import normalize as unicode_normalize
 
 _ROMAN_PATTERN = re_compile(r"^[ivxlcdm]+$", IGNORECASE)
 # Digit ordinals ("2nd", "3rd", "1st", "21st", "13th") collapse to their cardinal
@@ -305,6 +307,106 @@ _ORDINAL_TABLES: Mapping[str, Mapping[str, int]] = {
     "ita": _ITALIAN_ORDINALS,
 }
 
+_ENGLISH_NUMBERING_CUES: tuple[str, ...] = (
+    "volume",
+    "number",
+    "part",
+    "book",
+    "edition",
+    "chapter",
+    "act",
+    "no",
+    "nr",
+)
+
+_FRENCH_NUMBERING_CUES: tuple[str, ...] = (
+    "tome",
+    "t",
+    "partie",
+    "livre",
+    "numero",
+    "numéro",
+    "fascicule",
+    "chapitre",
+    "cahier",
+)
+
+_GERMAN_NUMBERING_CUES: tuple[str, ...] = (
+    "band",
+    "bd",
+    "teil",
+    "heft",
+    "nummer",
+    "buch",
+    "kapitel",
+    "abteilung",
+    "lieferung",
+)
+
+_SPANISH_NUMBERING_CUES: tuple[str, ...] = (
+    "tomo",
+    "volumen",
+    "parte",
+    "libro",
+    "numero",
+    "número",
+    "num",
+    "capitulo",
+    "capítulo",
+    "cuaderno",
+)
+
+_ITALIAN_NUMBERING_CUES: tuple[str, ...] = (
+    "tomo",
+    "parte",
+    "libro",
+    "numero",
+    "fascicolo",
+    "capitolo",
+    "quaderno",
+    "n",
+)
+
+
+def _strip_diacritics(word: str) -> str:
+    """Return ``word`` with combining marks removed (NFKD, drop ``Mn``)."""
+    decomposed = unicode_normalize("NFKD", word)
+    return "".join(ch for ch in decomposed if unicode_category(ch) != "Mn")
+
+
+def _build_cue_set(*groups: tuple[str, ...]) -> frozenset[str]:
+    """Lower-case cues and add both accented and diacritic-stripped forms.
+
+    ``normalize_numbers`` runs before :func:`normalize_text` strips diacritics
+    in the scorer prep chain, so a cue token can reach the guard either
+    accented ("numéro") or already folded ("numero") depending on the call
+    site. Carrying both forms makes the numbering-context guard order-agnostic.
+    """
+    cues: set[str] = set()
+    for group in groups:
+        for word in group:
+            lowered = word.lower()
+            cues.add(lowered)
+            cues.add(_strip_diacritics(lowered))
+    return frozenset(cues)
+
+
+_ENGLISH_CUE_SET: frozenset[str] = _build_cue_set(_ENGLISH_NUMBERING_CUES)
+
+_NUMBERING_CUE_TABLES: Mapping[str, frozenset[str]] = {
+    "eng": _ENGLISH_CUE_SET,
+    "fre": _build_cue_set(_FRENCH_NUMBERING_CUES) | _ENGLISH_CUE_SET,
+    "ger": _build_cue_set(_GERMAN_NUMBERING_CUES) | _ENGLISH_CUE_SET,
+    "spa": _build_cue_set(_SPANISH_NUMBERING_CUES) | _ENGLISH_CUE_SET,
+    "ita": _build_cue_set(_ITALIAN_NUMBERING_CUES) | _ENGLISH_CUE_SET,
+}
+
+
+def _cues_for(language: str) -> frozenset[str]:
+    """Return the numbering-cue set for ``language``, falling back to English."""
+    return _NUMBERING_CUE_TABLES.get(language, _NUMBERING_CUE_TABLES["eng"])
+
+
 _ABBREVIATIONS: Mapping[str, str] = {
     "v": "volume",
     "vol": "volume",
@@ -415,6 +517,26 @@ def _expand_abbreviations(text: str) -> str:
     return _ABBREVIATION_RE.sub(_replace, text)
 
 
+def _roman_allowed(core: str, index: int, tokens: list[str], cues: frozenset[str]) -> bool:
+    """Decide whether a Roman-numeral candidate token should convert (#118).
+
+    Multi-character candidates ("ii", "xiv", "mcm") always convert — they do
+    not collide with personal or organizational initials. A single-character
+    candidate ("i", "v", "x", "l", "c", "d", "m") converts only when the
+    preceding token is a numbering cue for the record's language, so an
+    isolated initial ("Faulkner, M.", "A. I. S. C.") is preserved while a
+    genuine numbered part ("part I", "Band V") still converts. The previous
+    token is read from the original (abbreviation-expanded) stream and matched
+    on its punctuation-stripped, lower-cased core.
+    """
+    if len(core) > 1:
+        return True
+    if index == 0:
+        return False
+    previous = tokens[index - 1].strip(_PUNCT_STRIP).lower()
+    return previous in cues
+
+
 def normalize_numbers(s: str, language: str) -> str:
     """Apply Roman/word/ordinal conversion and abbreviation expansion.
 
@@ -434,8 +556,9 @@ def normalize_numbers(s: str, language: str) -> str:
         return s
     expanded = _expand_abbreviations(s)
     tokens = expanded.split()
+    cues = _cues_for(language)
     out: list[str] = []
-    for token in tokens:
+    for index, token in enumerate(tokens):
         core = token.strip(_PUNCT_STRIP)
         if not core:
             out.append(token)
@@ -453,7 +576,7 @@ def normalize_numbers(s: str, language: str) -> str:
             out.append(str(number))
             continue
         roman = roman_to_arabic(core)
-        if roman is not None:
+        if roman is not None and _roman_allowed(core, index, tokens, cues):
             out.append(str(roman))
             continue
         out.append(token)
