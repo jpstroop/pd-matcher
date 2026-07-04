@@ -544,3 +544,107 @@ def test_score_publisher_perfect_match_does_not_overwrite_note(
         alias_index=alias_index,
     )
     assert ev.note is None
+
+
+def test_score_author_initial_unifies_with_full_name(
+    scorer_context: ScorerContext,
+) -> None:
+    """A bare surname initial matches the spelled-out name at full IDF (#119).
+
+    ``"Faulkner, M."`` prepares to ``(faulkner, m)`` and ``"Faulkner, Morris"``
+    to ``(faulkner, morris)``; the initial ``m`` unifies onto ``morris`` so both
+    tokens are shared and the pair scores a full match.
+    """
+    ev = score_author("Faulkner, M.", "Faulkner, Morris", scorer_context)
+    assert ev.score == 100.0
+    assert dict(ev.features)["token_overlap"] == 2.0
+
+
+def test_score_author_initial_unifies_without_trailing_period(
+    scorer_context: ScorerContext,
+) -> None:
+    """The initial need not carry a period to unify (#119)."""
+    ev = score_author("Whitehead, L", "Whitehead, Leslie", scorer_context)
+    assert ev.score == 100.0
+    assert dict(ev.features)["token_overlap"] == 2.0
+
+
+def test_score_author_double_initial_pseudonym_unifies(
+    scorer_context: ScorerContext,
+) -> None:
+    """Both initials of an all-initials form unify onto the spelled-out name.
+
+    ``"H.D."`` prepares to ``(h, d)`` post-#118 (neither letter is a numbering
+    Roman numeral) and ``"Doolittle, Hilda"`` to ``(doolittle, hilda)``; ``h``
+    unifies onto ``hilda`` and ``d`` onto ``doolittle`` for a full match (#119).
+    """
+    ev = score_author("H.D.", "Doolittle, Hilda", scorer_context)
+    assert ev.score == 100.0
+    assert dict(ev.features)["token_overlap"] == 2.0
+
+
+def test_score_author_initial_unification_is_symmetric(
+    scorer_context: ScorerContext,
+) -> None:
+    """The initial may sit on the CCE side and still unify (#119)."""
+    ev = score_author("Faulkner, Morris", "Faulkner, M.", scorer_context)
+    assert ev.score == 100.0
+    assert dict(ev.features)["token_overlap"] == 2.0
+
+
+def test_score_author_multiple_initials_all_unify(
+    scorer_context: ScorerContext,
+) -> None:
+    """Several initials each unify onto their own compatible full token (#119).
+
+    ``"Eliot, T. S."`` → ``(eliot, t, s)`` and ``"Eliot, Thomas Stearns"`` →
+    ``(eliot, thomas, stearns)``; ``t``→``thomas`` and ``s``→``stearns`` give a
+    full three-token match.
+    """
+    ev = score_author("Eliot, T. S.", "Eliot, Thomas Stearns", scorer_context)
+    assert ev.score == 100.0
+    assert dict(ev.features)["token_overlap"] == 3.0
+
+
+def test_score_author_second_initial_not_double_credited(
+    scorer_context: ScorerContext,
+) -> None:
+    """Two like initials cannot both collapse onto one full token (#119).
+
+    ``"J. J. Smith"`` → ``(j, j, smith)`` and ``"John Smith"`` → ``(john,
+    smith)``. The first ``j`` unifies onto ``john``; the second ``j`` finds no
+    unconsumed ``j``-token and stays, so the overlap is two (``john``, ``smith``)
+    rather than a spurious full match.
+    """
+    ev = score_author("J. J. Smith", "John Smith", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 2.0
+    assert ev.score < 100.0
+
+
+def test_score_author_incompatible_initial_not_unified(
+    scorer_context: ScorerContext,
+) -> None:
+    """An initial with no first-letter-compatible full token stays as-is (#119).
+
+    ``"Rankin, E."`` → ``(rankin, e)`` and ``"Rankin, Morris"`` → ``(rankin,
+    morris)``; ``e`` matches neither full token, so only ``rankin`` is shared.
+    """
+    ev = score_author("Rankin, E.", "Rankin, Morris", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score < 100.0
+
+
+def test_score_publisher_initial_path_unchanged_by_unification(
+    scorer_context: ScorerContext,
+) -> None:
+    """The publisher scorer never unifies initials — behavior is pinned (#119).
+
+    ``"Smith, J."`` vs ``"Smith, John"`` shares only ``smith`` (the initial
+    ``j`` is not unified onto ``john``), so the evidence is byte-identical to the
+    pre-#119 single-shared-token path. Any leak of the author-only unification
+    into :func:`_evidence` would raise the overlap to 2 and the score above this
+    pinned value.
+    """
+    ev = score_publisher("Smith, J.", "Smith, John", scorer_context)
+    assert dict(ev.features)["token_overlap"] == 1.0
+    assert ev.score == 83.33333333333333
