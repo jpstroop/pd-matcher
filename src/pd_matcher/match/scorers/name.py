@@ -37,6 +37,16 @@ when the token sets actually intersect — the disjoint fuzzy path above is
 left untouched so OCR/transcription typos on a distinctive token ("Macmillan"
 vs "Macmillian") still score high.
 
+The author scorer additionally unifies bare initials with the spelled-out
+names they abbreviate before scoring (issue #119). After preparation, a
+single-letter alphabetic token on either side that has a first-letter-compatible
+full token on the other side is rewritten to that full token, so ``"Faulkner,
+M."`` and ``"Faulkner, Morris"`` share ``morris`` at its full IDF and flow
+through the exact-shared path. Each full token absorbs at most one initial, so
+two distinct initials never collapse onto one name. This unification is scoped
+to :func:`score_author`; the publisher and claimant scorers, which share
+:func:`_evidence`, are left byte-for-byte unchanged.
+
 The publisher scorer additionally consults a curated alias index when
 one is supplied (either via :class:`ScorerContext` or as an explicit
 kwarg). When both sides of a comparison resolve to the same canonical
@@ -139,6 +149,44 @@ def _idf_gate(
     return max(coverage, distinctive_hit)
 
 
+def _absorb_initials(initials_side: list[str], full_side: list[str]) -> None:
+    """Rewrite each bare initial in ``initials_side`` onto a full token.
+
+    A single-letter alphabetic token is replaced in place by the first
+    still-unconsumed token in ``full_side`` that has length > 1 and the same
+    first letter. Each full token is consumed by at most one initial, so two
+    distinct initials cannot both collapse onto the same name. ``full_side`` is
+    read, never mutated, so callers pass the *original* opposite sequence and a
+    just-rewritten token is never itself an absorption target.
+    """
+    consumed = [False] * len(full_side)
+    for index, token in enumerate(initials_side):
+        if len(token) != 1 or not token.isalpha():
+            continue
+        for candidate_index, candidate in enumerate(full_side):
+            if not consumed[candidate_index] and len(candidate) > 1 and candidate[0] == token[0]:
+                initials_side[index] = candidate
+                consumed[candidate_index] = True
+                break
+
+
+def _unify_initials(marc_tokens: list[str], nypl_tokens: list[str]) -> tuple[list[str], list[str]]:
+    """Return the two token sequences with cross-side initials unified.
+
+    Each single-letter alphabetic token on one side that abbreviates a
+    first-letter-compatible full token on the other side is rewritten to that
+    full token, so an initial and the name it stands for share a token at the
+    full token's IDF and flow through the exact-shared path. The full-token
+    candidates for both passes are read from the original sequences, so the
+    unification is symmetric and order-independent (issue #119).
+    """
+    marc_out = list(marc_tokens)
+    nypl_out = list(nypl_tokens)
+    _absorb_initials(marc_out, nypl_tokens)
+    _absorb_initials(nypl_out, marc_tokens)
+    return marc_out, nypl_out
+
+
 def _evidence(
     scorer_name: str,
     marc_value: str | None,
@@ -146,6 +194,8 @@ def _evidence(
     stopwords: frozenset[str],
     idf: IdfTable,
     ctx: ScorerContext,
+    *,
+    unify_initials: bool = False,
 ) -> Evidence:
     if not marc_value or not nypl_value:
         return Evidence(
@@ -167,8 +217,14 @@ def _evidence(
             decisive=False,
             features=(),
         )
-    marc_set = set(marc_prepared.split())
-    nypl_set = set(nypl_prepared.split())
+    marc_tokens = marc_prepared.split()
+    nypl_tokens = nypl_prepared.split()
+    if unify_initials:
+        marc_tokens, nypl_tokens = _unify_initials(marc_tokens, nypl_tokens)
+        marc_prepared = " ".join(marc_tokens)
+        nypl_prepared = " ".join(nypl_tokens)
+    marc_set = set(marc_tokens)
+    nypl_set = set(nypl_tokens)
     shared = marc_set & nypl_set
     score = float(token_set_ratio(marc_prepared, nypl_prepared))
     if shared:
@@ -196,7 +252,12 @@ def score_author(
     nypl_author: str | None,
     ctx: ScorerContext,
 ) -> Evidence:
-    """Return :class:`Evidence` comparing two author strings."""
+    """Return :class:`Evidence` comparing two author strings.
+
+    A bare authorial initial is unified with the first-letter-compatible
+    spelled-out name on the other side before scoring (issue #119), so
+    ``"Faulkner, M."`` matches ``"Faulkner, Morris"`` at the full name's IDF.
+    """
     return _evidence(
         _AUTHOR_SCORER,
         marc_author,
@@ -204,6 +265,7 @@ def score_author(
         ctx.stopwords.author,
         ctx.author_idf,
         ctx,
+        unify_initials=True,
     )
 
 
