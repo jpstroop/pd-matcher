@@ -341,12 +341,53 @@ def test_score_volume_whole_open_vs_part_is_zero(scorer_context: ScorerContext) 
     assert ev.score == 0.0
 
 
-def test_score_volume_whole_open_vs_unknown_with_page_count_is_zero(
+def test_score_volume_whole_vs_page_count_keeps_the_cap(
     scorer_context: ScorerContext,
 ) -> None:
-    """Series-level MARC vs single-volume CCE (parseable pages) scores 0.0."""
-    marc = _marc(extent="v")
-    cce = _cce(desc="551 p.")
+    """A bare page count against a multi-volume MARC stays informative: the
+    blanket silence-skip was MEASURED OUT 2026-07-04 (vault both-tails: AUC
+    0.9877->0.9835, non-match p90 0.458->0.543). See #124 for the numbers."""
+    for extent in ("v", "2 v", "3 v"):
+        marc = _marc(extent=extent)
+        cce = _cce(desc="551 p.")
+        ev = score_volume(marc, cce, scorer_context)
+        assert ev.skipped is False, extent
+        assert ev.score == 0.0
+
+
+def test_classify_cce_designator_enumeration_reads_as_whole(
+    scorer_context: ScorerContext,
+) -> None:
+    """Two or more distinct designators are an enumeration covering the set
+    ("Vol. 1: Husbandry. [and Vol. 2: Soyle for an orchard]" — card 45), so
+    a whole-set MARC scores compatible, not part-capped."""
+    marc = _marc(extent="2 v")
+    cce = _cce(desc=None, notes=("Vol. 1: Husbandry. [and Vol. 2: Soyle for an orchard]",))
+    ev = score_volume(marc, cce, scorer_context)
+    assert ev.skipped is False
+    assert ev.score == 100.0
+
+
+def test_classify_cce_hierarchical_designators_stay_a_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """Mixed designator types with one number each are a HIERARCHY (the
+    address of a single piece — "bk. 1, pt. 2"), not an enumeration; the
+    single-part meaning survives (corpus census 2026-07-04)."""
+    marc = _marc(extent="2 v")
+    cce = _cce(desc=None, notes=("bk. 1, pt. 2",))
+    ev = score_volume(marc, cce, scorer_context)
+    assert ev.skipped is False
+    assert ev.score == 0.0
+
+
+def test_classify_cce_single_designator_still_a_part(
+    scorer_context: ScorerContext,
+) -> None:
+    """A lone designator keeps its single-part meaning (a registered Vol. 1
+    against a whole-set MARC is still a real conflict — #121 territory)."""
+    marc = _marc(extent="2 v")
+    cce = _cce(desc=None, notes=("Vol. 1: Husbandry.",))
     ev = score_volume(marc, cce, scorer_context)
     assert ev.skipped is False
     assert ev.score == 0.0
