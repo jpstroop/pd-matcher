@@ -207,3 +207,74 @@ def test_normalize_numbers_leaves_unabbreviated_institutional_words_unchanged() 
     assert normalize_numbers("university", "eng") == "university"
     assert normalize_numbers("university press", "eng") == "university press"
     assert normalize_numbers("california", "eng") == "california"
+
+
+def test_normalize_numbers_converts_single_roman_after_english_cue() -> None:
+    """A single-letter Roman converts only when the preceding token is a cue (#118)."""
+    assert normalize_numbers("volume V", "eng") == "volume 5"
+    assert normalize_numbers("vol. V", "eng") == "volume 5"
+    assert normalize_numbers("v. V", "eng") == "volume 5"
+    assert normalize_numbers("part I", "eng") == "part 1"
+    assert normalize_numbers("number C", "eng") == "number 100"
+
+
+def test_normalize_numbers_preserves_single_roman_initials() -> None:
+    """Isolated initials that happen to be Roman letters stay literal (#118)."""
+    assert normalize_numbers("Faulkner, M.", "eng") == "Faulkner, M."
+    assert normalize_numbers("Henry V", "eng") == "Henry V"
+    assert normalize_numbers("A. I. S. C. textbook", "eng") == "A. I. S. C. textbook"
+    assert normalize_numbers("A. I. S. C.", "eng") == "A. I. S. C."
+
+
+def test_normalize_numbers_multichar_romans_convert_unconditionally() -> None:
+    """Multi-character Romans never collide with initials, so they always convert."""
+    assert normalize_numbers("XVII", "eng") == "17"
+    assert normalize_numbers("chapter IV", "eng") == "chapter 4"
+    assert normalize_numbers("iv", "eng") == "4"
+    assert normalize_numbers("mcm", "eng") == "1900"
+
+
+def test_normalize_numbers_regression_single_letter_corruption() -> None:
+    """The four verified-bug cases from the 2026-07-04 vault measurement (#118)."""
+    assert normalize_numbers("A. I. S. C.", "eng") == "A. I. S. C."
+    assert normalize_numbers("faulkner m", "eng") == "faulkner m"
+    assert normalize_numbers("whitehead l", "eng") == "whitehead l"
+    assert normalize_numbers("doolittle h d", "eng") == "doolittle h d"
+
+
+def test_normalize_numbers_single_roman_at_start_not_converted() -> None:
+    """A leading single-letter Roman has no preceding cue, so it is preserved (#118)."""
+    assert normalize_numbers("V widgets", "eng") == "V widgets"
+
+
+def test_normalize_numbers_per_language_cue_converts_single_roman() -> None:
+    """Each corpus language recognizes its own numbering cues (#118)."""
+    assert normalize_numbers("Band V", "ger") == "Band 5"
+    assert normalize_numbers("tome C", "fre") == "tome 100"
+    assert normalize_numbers("tomo L", "spa") == "tomo 50"
+    assert normalize_numbers("parte M", "ita") == "parte 1000"
+    assert normalize_numbers("chapter I", "eng") == "chapter 1"
+
+
+def test_normalize_numbers_per_language_preserves_bare_initial() -> None:
+    """A bare initial after a non-cue token is preserved in every language (#118)."""
+    assert normalize_numbers("Dumas, A. et M.", "fre") == "Dumas, A. et M."
+    assert normalize_numbers("Mann, D.", "ger") == "Mann, D."
+    assert normalize_numbers("Cela, C.", "spa") == "Cela, C."
+    assert normalize_numbers("Levi, C.", "ita") == "Levi, C."
+    assert normalize_numbers("Doolittle, H. D.", "eng") == "Doolittle, H. D."
+
+
+def test_normalize_numbers_cue_match_is_order_agnostic_to_diacritics() -> None:
+    """Accented and diacritic-stripped cue forms both fire the guard (#118)."""
+    assert normalize_numbers("numéro V", "fre") == "numéro 5"
+    assert normalize_numbers("numero V", "fre") == "numero 5"
+    assert normalize_numbers("número V", "spa") == "número 5"
+    assert normalize_numbers("numero V", "spa") == "numero 5"
+
+
+def test_normalize_numbers_unknown_language_falls_back_to_english_cues() -> None:
+    """Unknown codes get the English cue set: English cues fire, foreign ones do not."""
+    assert normalize_numbers("part I", "lat") == "part 1"
+    assert normalize_numbers("tome C", "lat") == "tome C"
+    assert normalize_numbers("Henry V", "lat") == "Henry V"
