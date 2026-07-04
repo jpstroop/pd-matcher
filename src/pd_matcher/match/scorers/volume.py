@@ -325,15 +325,67 @@ def _cce_single_part(cce: IndexedNyplRegRecord, marc: MarcRecord) -> str | None:
     return _detect_bare_designator(cce.title)
 
 
+def _is_designator_enumeration(cce: IndexedNyplRegRecord) -> bool:
+    """Return whether the record ENUMERATES the members of a set.
+
+    An enumeration repeats the SAME designator type with different numbers
+    ("Vol. 1: ... [and Vol. 2: ...]") — the record describes the whole set,
+    exactly like a designator range. Mixed designator types with one number
+    each ("bk. 1, pt. 2"; "vol. III, pt. I") are a HIERARCHY: the address of
+    a single piece, which keeps its single-part meaning. Corpus census
+    2026-07-04: 5,864 records carry multi-designator text; the same-type
+    rule is what separates the two populations.
+    """
+    by_prefix: dict[str, set[str]] = {}
+    for text in (cce.title, cce.desc, *cce.notes):
+        if not text:
+            continue
+        for match in _PART_NUMBER_RE.finditer(text):
+            prefix = _canonical_prefix(match.group(0))
+            by_prefix.setdefault(prefix, set()).add(_canonical_part_number(match.group(1)))
+    return any(len(numbers) >= 2 for numbers in by_prefix.values())
+
+
+_PREFIX_CANON: dict[str, str] = {
+    "v": "v",
+    "vol": "v",
+    "vols": "v",
+    "volume": "v",
+    "pt": "pt",
+    "part": "pt",
+    "pts": "pt",
+    "bk": "bk",
+    "book": "bk",
+    "no": "no",
+    "number": "no",
+    "nos": "no",
+    "bd": "bd",
+    "band": "bd",
+    "t": "t",
+    "tome": "t",
+    "tomo": "t",
+}
+
+
+def _canonical_prefix(matched: str) -> str:
+    """Collapse a matched designator's leading token to a canonical type."""
+    token = matched.split()[0].rstrip(".").lower() if matched.split() else matched.lower()
+    head = token.rstrip("0123456789").rstrip(".")
+    return _PREFIX_CANON.get(head, head)
+
+
 def _classify_cce(cce: IndexedNyplRegRecord, marc: MarcRecord) -> tuple[str, str | None]:
     """Return ``(cardinality, part_number)`` for the CCE side.
 
     A single explicit part designator (in the title, desc, or notes) wins
     over a multi-volume ``desc`` count: a registered ``"Vol. 1"`` that
     spans ``"2 v."`` is still a single part of the larger MARC whole, not a
-    set. Only a covering RANGE or a collected-work title reads as whole.
+    set. A covering RANGE, a collected-work title, or an ENUMERATION of two
+    or more distinct designators reads as whole.
     """
     if _cce_whole_signal(cce):
+        return _Cardinality.WHOLE, None
+    if _is_designator_enumeration(cce):
         return _Cardinality.WHOLE, None
     single_part = _cce_single_part(cce, marc)
     if single_part is not None:
