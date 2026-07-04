@@ -31,7 +31,7 @@ from pd_matcher.workers.pool import WorkerDiedError
 from pd_matcher.workers.pool import _build_jsonl_writer
 from pd_matcher.workers.pool import _dead_workers
 from pd_matcher.workers.pool import _default_workers
-from pd_matcher.workers.pool import _drain_sentinels
+from pd_matcher.workers.pool import _drain_pool
 from pd_matcher.workers.pool import _make_guarded_put
 from pd_matcher.workers.pool import _resolve_source
 from pd_matcher.workers.pool import _shutdown_predicate
@@ -571,16 +571,108 @@ def test_guarded_put_returns_on_shutdown_after_full() -> None:
     assert queue.puts == []
 
 
-def test_drain_sentinels_puts_one_none_per_worker() -> None:
+class _DrainFakeProcess:
+    """Process stand-in whose liveness is driven by an external countdown.
+
+    ``alive_for`` is the number of ``is_alive`` polls before the process
+    reads as exited; ``terminate``/``kill``/``join`` record calls like
+    :class:`_FakeProcess`.
+    """
+
+    __slots__ = ("alive_for", "calls")
+
+    def __init__(self, alive_for: int) -> None:
+        self.alive_for: int = alive_for
+        self.calls: list[str] = []
+
+    def is_alive(self) -> bool:
+        if self.alive_for > 0:
+            self.alive_for -= 1
+            return True
+        return False
+
+    def terminate(self) -> None:
+        self.calls.append("terminate")
+
+    def kill(self) -> None:
+        self.calls.append("kill")
+
+    def join(self, timeout: float | None = None) -> None:
+        self.calls.append("join")
+
+
+class _TickClock:
+    """Deterministic clock advancing a fixed step per call."""
+
+    __slots__ = ("now", "step")
+
+    def __init__(self, step: float) -> None:
+        self.now: float = 0.0
+        self.step: float = step
+
+    def __call__(self) -> float:
+        self.now += self.step
+        return self.now
+
+
+def test_drain_pool_delivers_sentinels_and_returns_when_workers_exit() -> None:
     queue = _FakePutQueue(full_before_success=0)
-    _drain_sentinels(queue, 3, timeout=0.01)
-    assert queue.puts == [None, None, None]
+    workers = [_DrainFakeProcess(alive_for=2), _DrainFakeProcess(alive_for=2)]
+    _drain_pool(
+        queue,
+        workers,
+        2,
+        progress=lambda: 0,
+        no_progress_timeout=1000.0,
+        clock=_TickClock(step=0.1),
+    )
+    assert queue.puts == [None, None]
+    assert all("terminate" not in w.calls for w in workers)
 
 
-def test_drain_sentinels_returns_early_on_full() -> None:
-    queue = _FakePutQueue(full_before_success=1)
-    _drain_sentinels(queue, 3, timeout=0.01)
-    assert queue.puts == []
+def test_drain_pool_keeps_waiting_while_progress_advances() -> None:
+    """Progress advancing resets the standstill timer — a busy worker is
+    never executed, no matter how long the drain takes (issue #125)."""
+    queue = _FakePutQueue(full_before_success=0)
+    worker = _DrainFakeProcess(alive_for=50)
+    counter = iter(range(1000))
+    _drain_pool(
+        queue,
+        [worker],
+        1,
+        progress=lambda: next(counter),
+        no_progress_timeout=0.5,
+        clock=_TickClock(step=0.3),
+    )
+    assert "terminate" not in worker.calls
+
+
+def test_drain_pool_escalates_after_genuine_standstill() -> None:
+    queue = _FakePutQueue(full_before_success=0)
+    worker = _DrainFakeProcess(alive_for=1000)
+    _drain_pool(
+        queue,
+        [worker],
+        1,
+        progress=lambda: 7,
+        no_progress_timeout=0.5,
+        clock=_TickClock(step=0.3),
+    )
+    assert "terminate" in worker.calls
+
+
+def test_drain_pool_retries_sentinels_as_space_frees() -> None:
+    queue = _FakePutQueue(full_before_success=2)
+    workers = [_DrainFakeProcess(alive_for=6), _DrainFakeProcess(alive_for=6)]
+    _drain_pool(
+        queue,
+        workers,
+        2,
+        progress=lambda: 0,
+        no_progress_timeout=1000.0,
+        clock=_TickClock(step=0.1),
+    )
+    assert queue.puts == [None, None]
 
 
 def test_run_match_worker_died_tears_down_and_reraises(
