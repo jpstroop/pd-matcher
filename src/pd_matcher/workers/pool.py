@@ -55,6 +55,7 @@ _LOGGER = get_logger(__name__)
 _DEFAULT_BATCH_SIZE: int = 32
 _DEFAULT_REPORT_INTERVAL_SECONDS: float = 5.0
 _WORKER_JOIN_TIMEOUT_SECONDS: float = 30.0
+_DRAIN_NO_PROGRESS_TIMEOUT_SECONDS: float = 60.0
 _PRODUCER_PUT_TIMEOUT_SECONDS: float = 5.0
 _DEFAULT_STALL_TICKS: int = 60
 
@@ -178,23 +179,67 @@ def _make_guarded_put(
     return put
 
 
-def _drain_sentinels(
+class _DrainProcess(Protocol):
+    """Subset of :class:`SpawnProcess` used by :func:`_drain_pool`."""
+
+    def is_alive(self) -> bool: ...  # pragma: no cover
+    def terminate(self) -> None: ...  # pragma: no cover
+    def kill(self) -> None: ...  # pragma: no cover
+    def join(self, timeout: float | None = ...) -> None: ...  # pragma: no cover
+
+
+def _drain_pool(
     input_queue: _InputQueuePut,
+    processes: Sequence[_DrainProcess],
     worker_count: int,
     *,
-    timeout: float,
+    progress: Callable[[], int],
+    no_progress_timeout: float,
+    clock: Callable[[], float] = monotonic,
+    poll_seconds: float = 0.2,
 ) -> None:
-    """Push one stop sentinel per worker, bounded so a wedged pool can't deadlock.
+    """Deliver stop sentinels and wait out the drain without executing workers.
 
-    A stalled worker no longer draining the input queue would make an
-    unbounded ``put(None)`` block forever; the bounded put returns early on
-    :class:`queue.Full`, leaving the subsequent join/terminate to reap any
-    wedged workers.
+    When the producer finishes, the input queue still holds up to its full
+    capacity of batches — minutes of legitimate work. The old flat
+    ``join(timeout=30)`` + terminate reaped workers mid-batch at the end of
+    EVERY run, silently truncating the output tail (issue #125; ~100-200
+    records lost per production run since the #69 escalation landed).
+
+    This drainer keeps waiting as long as ``progress()`` (the reporter's
+    finished-record count) is advancing, retries sentinel delivery as queue
+    space frees, and only escalates to termination after
+    ``no_progress_timeout`` seconds of genuine standstill — a truly wedged
+    worker, not a busy one.
     """
-    for _ in range(worker_count):
-        try:
-            input_queue.put(None, timeout=timeout)
-        except Full:
+    sentinels_remaining = worker_count
+    last_progress = progress()
+    last_change = clock()
+    while True:
+        alive = [process for process in processes if process.is_alive()]
+        if not alive:
+            return
+        while sentinels_remaining:
+            try:
+                input_queue.put(None, timeout=poll_seconds)
+            except Full:
+                break
+            sentinels_remaining -= 1
+        for process in alive:
+            process.join(timeout=poll_seconds)
+        current = progress()
+        now = clock()
+        if current != last_progress:
+            last_progress = current
+            last_change = now
+        elif now - last_change >= no_progress_timeout:
+            _LOGGER.error(
+                "match.pool.drain_stalled",
+                no_progress_seconds=no_progress_timeout,
+                records_done=current,
+            )
+            for process in processes:
+                _terminate_if_alive(process, _WORKER_JOIN_TIMEOUT_SECONDS)
             return
 
 
@@ -522,10 +567,13 @@ def run_match(
                 is_shutdown=coord.event.is_set,
                 batch_size=batch_size,
             )
-            _drain_sentinels(input_queue, worker_count, timeout=_PRODUCER_PUT_TIMEOUT_SECONDS)
-            for process in worker_processes:
-                process.join(timeout=_WORKER_JOIN_TIMEOUT_SECONDS)
-                _terminate_if_alive(process, _WORKER_JOIN_TIMEOUT_SECONDS)
+            _drain_pool(
+                input_queue,
+                worker_processes,
+                worker_count,
+                progress=lambda: reporter.totals.records_done,
+                no_progress_timeout=_DRAIN_NO_PROGRESS_TIMEOUT_SECONDS,
+            )
             output_queue.put(None)
             writer_process.join(timeout=_WORKER_JOIN_TIMEOUT_SECONDS)
             _terminate_if_alive(writer_process, _WORKER_JOIN_TIMEOUT_SECONDS)
