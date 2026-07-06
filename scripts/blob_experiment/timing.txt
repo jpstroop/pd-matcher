@@ -1,0 +1,10 @@
+vault registration-arm entries: 1951  (match=1097, no_match=854)
+distinct MARCs: 1950  resolved in pool: 1937
+blob IDF: 2168402 CCE docs, 546545 tokens
+
+scored 50 MARCs, 127255 candidate-pairs in 132.1s
+pool size: min 102 p50 1226 p90 5715 max 22664 mean 2545.1
+
+per-MARC: 2642ms
+PROJECTED full run over 1937 MARCs: 85.3 min
+UNDER BUDGET: full run fits in 85.3 min

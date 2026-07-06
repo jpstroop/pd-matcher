@@ -59,3 +59,4 @@ data/harvested_renewal_pairs.jsonl
 
 # Training bundle (jpstroop/cce-marc-linkage) is mounted as the data/training
 # submodule (vault + marc.xml), not gitignored.
+!scripts/blob_experiment/

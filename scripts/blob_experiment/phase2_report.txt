@@ -1,0 +1,99 @@
+vault registration-arm entries: 1954  (match=1100, no_match=854)
+distinct MARCs: 1953  resolved in pool: 1938
+blob IDF: 2168402 CCE docs, 546545 tokens
+
+scored 1938 MARCs, 4223293 candidate-pairs in 1965.1s
+pool size: min 1 p50 1195 p90 5509 max 22664 mean 2179.2
+
+COVERAGE: 1938/1938 resolved MARCs (100.0%)
+
+======================================================================
+A. TOP-1 COMPLEMENTARITY (vault MATCH pairs, per distinct MARC)
+======================================================================
+MATCH-labeled MARCs: 1088
+true CCE in pool: 1088/1088 (100.0% in-pool rate)
+
+2x2 over 1088 in-pool MATCH MARCs (blob arm = unweighted Jaccard):
+  both top-1 correct : 1044 (96.0%)
+  only weighted      :   24 (2.2%)
+  only blob (RECOVERY):   13 (1.2%)
+  neither            :    7 (0.6%)
+
+  'neither' set (7): blob rank of true CCE <=5: 7  <=10: 7
+
+  ONLY-BLOB recovery examples (up to 15):
+   MARC 9925313813506421 | pool=1131 | 'Défense de la liberté individuelle'
+     true 7813D2BD-7240-1014-AB88-AD98078397AF: weighted=0.089 blob=0.538
+     weighted top-1 DD938E2F-7454-1014-B915-B2A8CD83C03B: w=0.175 blob=0.261
+   MARC 9915556133506421 | pool=3558 | 'Russia in the nineteenth century volume II of The history of'
+     true D771CAA4-6D99-1014-A5EA-BAD7E825951E: weighted=0.052 blob=0.533
+     weighted top-1 AD111B2E-6F17-1014-9F0D-96810182DD4A: w=0.166 blob=0.074
+   MARC 9915944743506421 | pool=6256 | 'Einführung in die algebraische Geometrie [von] B. L. van der'
+     true 96C44639-6D2F-1014-A550-82A757018889: weighted=0.520 blob=0.367
+     weighted top-1 44878752-73D1-1014-A526-C29EA9D2D19F: w=0.743 blob=0.281
+   MARC 9916070623506421 | pool=1217 | 'Isaac Newton 1643-1727'
+     true A13858C8-7673-1014-84AA-EF599F760546: weighted=0.998 blob=0.455
+     weighted top-1 AAFC71B4-7673-1014-B817-D52E0321EE79: w=0.998 blob=0.200
+   MARC 9916838013506421 | pool=154 | '"So few" the immortal record of the Royal Air Force'
+     true 3258ECDC-734A-1014-9154-C7651F0A5C6D: weighted=0.030 blob=0.333
+     weighted top-1 2AD4DDD6-734A-1014-B422-F1E61D7CD490: w=0.042 blob=0.053
+   MARC 9916953003506421 | pool=274 | 'The Parthenon of Pericles and its reproduction in America'
+     true F8E22B3A-7672-1014-B54D-FD0DCA39AFE7: weighted=0.999 blob=0.600
+     weighted top-1 66F33620-735A-1014-A944-84CE4D952701: w=0.999 blob=0.333
+   MARC 9941128323506421 | pool=4951 | 'Regge poles in particle physics'
+     true CE46D711-6CA4-1014-AFF1-C0B6E171A089: weighted=0.065 blob=0.321
+     weighted top-1 CE469291-6CA4-1014-AFF1-C0B6E171A089: w=0.852 blob=0.152
+   MARC 9922973883506421 | pool=1202 | 'Les otages [roman]'
+     true B1CF1370-7950-1014-8674-C1ED2059688C: weighted=0.063 blob=0.385
+     weighted top-1 B11487E3-7950-1014-8674-C1ED2059688C: w=0.131 blob=0.125
+   MARC 9925002403506421 | pool=2252 | 'Historia de la villa imperial de Potosí'
+     true 06A4FE77-70AF-1014-98B5-BD1CA90B7FB2: weighted=0.052 blob=0.382
+     weighted top-1 A13052BF-70AE-1014-98B5-BD1CA90B7FB2: w=0.207 blob=0.062
+   MARC 992386733506421 | pool=6820 | 'Thomas Hardy: an annotated bibliography of writings about hi'
+     true 4D0BB6D5-73CF-1014-A526-C29EA9D2D19F: weighted=0.052 blob=0.400
+     weighted top-1 695B5F48-72DA-1014-B3A3-DDF21CF07E3D: w=0.655 blob=0.154
+   MARC 9970446443506421 | pool=717 | 'Madrid & Toledo'
+     true F647605B-6F8C-1014-8936-C5CC072A57A5: weighted=0.987 blob=0.360
+     weighted top-1 42CF44BC-6E5A-1014-8662-AF35A7EA7700: w=0.987 blob=0.222
+   MARC 9912002913506421 | pool=7625 | 'The days when the animals talked Black American folktales an'
+     true 4B182949-728E-1014-8DCA-EDC48D7CF4C8: weighted=0.997 blob=0.353
+     weighted top-1 4B189001-728E-1014-8DCA-EDC48D7CF4C8: w=0.998 blob=0.308
+   MARC 9929741983506421 | pool=1103 | 'Robert M. La Follette, June 14, 1855-June 18, 1925'
+     true BD2D8D3D-6F17-1014-9F0D-96810182DD4A: weighted=0.052 blob=0.720
+     weighted top-1 BB01CDC7-6F17-1014-9F0D-96810182DD4A: w=0.069 blob=0.031
+
+======================================================================
+B. POOL-LEVEL SEPARATION (true CCE = positive, other pool members = negatives)
+======================================================================
+pooled pairs: 2245212  (pos 1088, neg 2244124)
+
+  weighted arm   pooled AUC: 0.9999
+  blob unweighted pooled AUC: 0.9982
+  blob IDF-wtd   pooled AUC: 0.9996
+
+  quantiles p10/25/50/75/90:
+  weighted  TRUE:     0.790/0.938/0.996/0.999/0.999
+  weighted  NON-TRUE: 0.001/0.001/0.001/0.003/0.007
+  blob-unw  TRUE:     0.261/0.364/0.500/0.625/0.750
+  blob-unw  NON-TRUE: 0.024/0.032/0.050/0.071/0.097
+  blob-idf  TRUE:     0.259/0.370/0.501/0.652/0.786
+  blob-idf  NON-TRUE: 0.013/0.019/0.027/0.039/0.056
+
+======================================================================
+C. FP-VETO AT SCALE (vault NO_MATCH pairs — known hard negatives)
+======================================================================
+NO_MATCH pairs (this sample): 851; wrong CCE surfaced in pool: 740
+
+  weighted ranks wrong CCE #1 with cal>=0.5 (production FP): 69/740
+    of those, blob (unw) < 0.3: 58/69 (84%)  < 0.5: 68/69 (99%)
+  weighted rank of wrong CCE: #1 in 209/740 pools
+  wrong-CCE score quantiles p10/25/50/75/90:
+    weighted: 0.003/0.005/0.022/0.058/0.554
+    blob-unw: 0.030/0.049/0.081/0.143/0.250
+
+======================================================================
+D. TIER PREVIEW (weighted x blob agreement, two-way; learned treated absent)
+======================================================================
+MATCH side: weighted top-1 correct: 1068
+  blob agrees on same top-1 uuid: 1044/1068 (97.8%)
+NO_MATCH side: both arms reject wrong CCE (weighted<0.5 AND blob<0.3): 615/740 (83.1%)

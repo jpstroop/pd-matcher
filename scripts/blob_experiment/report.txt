@@ -1,0 +1,100 @@
+vault registration-arm entries: 1944; marc resolved: 1934
+blob IDF: 2168402 CCE docs, 546545 tokens, default_idf 15.590
+  scored 400
+  scored 800
+  scored 1200
+  scored 1600
+pairs scored: 1935
+  matches: 1084  non-matches: 851
+
+======================================================================
+AUC TABLE (vs stock references on the SAME pairs)
+======================================================================
+  stock combined (weighted arm)     AUC 0.9879   [/tmp/dual harness: 0.9880]
+  stock title.token_set evidence    AUC 0.9298   [reference: 0.9298]
+  stock name.author evidence        AUC 0.8393
+  ---- blob variants ----
+  blob full IDF-weighted Jaccard    AUC 0.9649
+  blob top-8  IDF-weighted Jaccard  AUC 0.9392
+  blob top-12 IDF-weighted Jaccard  AUC 0.9500
+  blob top-16 IDF-weighted Jaccard  AUC 0.9544
+  blob top-24 IDF-weighted Jaccard  AUC 0.9597
+  blob unweighted Jaccard (floor)   AUC 0.9632
+
+  BEST blob variant: blob_full  (AUC 0.9649)
+
+======================================================================
+BOTH TAILS — winner blob_full (p10/p25/p50/p75/p90)
+======================================================================
+  MATCH     blob: 0.259/0.370/0.501/0.651/0.785
+  NON-MATCH blob: 0.021/0.033/0.059/0.106/0.224
+  MATCH     stock combined: 0.796/0.942/0.996/0.999/0.999
+  NON-MATCH stock combined: 0.002/0.004/0.016/0.052/0.458
+
+======================================================================
+COMPLEMENTARITY (does blob disagree in the RIGHT direction?)
+======================================================================
+
+(i) MATCH pairs where stock combined < 0.8 (weighted arm's weak spot): 110
+    blob(blob_full) on them  p10/25/50/75/90: 0.208/0.281/0.385/0.543/0.625
+    stock combined on them p10/25/50/75/90: 0.089/0.455/0.627/0.708/0.753
+    blob >= 0.3: 77/110 (70%) rescued above that bar
+    blob >= 0.5: 35/110 (32%) rescued above that bar
+
+(ii) NON-MATCH pairs where stock combined > 0.5 (weighted false-positive tail): 81
+    blob(blob_full) on them  p10/25/50/75/90: 0.073/0.099/0.152/0.230/0.340
+    stock combined on them p10/25/50/75/90: 0.582/0.656/0.742/0.821/0.904
+    blob <  0.3: 70/81 (86%) kept low (blob would not confirm)
+    blob <  0.5: 81/81 (100%) kept low (blob would not confirm)
+
+======================================================================
+FIELD-BLEED SUBSET: MATCH pairs with stock title.token_set < 0.5
+(data in the wrong field / mangled title — where a blob should win)
+======================================================================
+  count: 127
+    blob(blob_full)   p10/25/50/75/90: 0.233/0.316/0.411/0.560/0.693
+    stock title    p10/25/50/75/90: 0.157/0.255/0.340/0.420/0.469
+    stock combined p10/25/50/75/90: 0.388/0.610/0.777/0.878/0.932
+    blob >= 0.3: 97/127 (76%)
+    blob >= 0.5: 44/127 (35%)
+
+======================================================================
+SAME-AUTHOR TRAP: NON-MATCH pairs with stock name.author > 0.8
+(same/similar author, different work — where blob should fail worst)
+======================================================================
+  count: 106
+    blob(blob_full)   p10/25/50/75/90: 0.092/0.163/0.242/0.399/0.581
+    stock combined p10/25/50/75/90: 0.052/0.052/0.233/0.686/0.845
+    blob >= 0.3: 40/106 (38%) blob false-confirms here
+    blob >= 0.5: 16/106 (15%) blob false-confirms here
+======================================================================
+READ / RECOMMENDATION
+======================================================================
+DECISIVE NUMBER: of the weighted arm's false-positive tail (NON-MATCH pairs
+with stock combined > 0.5, n=81), 100% score blob < 0.5 and 86% score blob
+< 0.3 (blob median 0.152 vs stock 0.742). Meanwhile 70% of the weighted arm's
+weak-spot MATCH pairs (stock combined < 0.8, n=110) score blob >= 0.3. The arm
+disagrees with weighted precisely where weighted is wrong, in both directions.
+
+VERDICT: earns a Phase-2 ranking test (top-1 over real retrieval pools).
+Rationale: as a standalone classifier blob is WEAKER than the weighted arm
+(AUC 0.9649 vs 0.9879) — but that is the wrong bar for a third arm. It carries
+independent, correctly-signed information: it vetoes 100% of the weighted arm's
+worst false positives and lifts field-bleed matches (median 0.411 vs stock
+title 0.340). A learned/ranking combiner using blob as a FEATURE (not an
+additive vote) can exploit the FP-tail veto without being dragged by the
+same-author trap.
+
+CAVEATS to carry into Phase 2:
+- IDF weighting adds almost nothing on this vault: unweighted Jaccard AUC 0.9632
+  vs full IDF-weighted 0.9649 (+0.0017). Blob power is raw token overlap, not
+  rarity weighting. Keep the cheaper unweighted form in play as a baseline.
+- Full-blob beats every top-k fingerprint (k=24 AUC 0.9597 < full 0.9649);
+  truncation only loses signal here. Do not fingerprint-truncate.
+- Same-author trap is the honest failure: 15% of same-author NON-MATCH pairs
+  score blob >= 0.5 (author tokens overlap in the blob). An additive
+  combination would worsen these; a learned combiner must gate blob on the
+  presence of independent title/publisher token overlap.
+- The vault is structurally MATCH-biased for retrieval widenings; a null top-1
+  flip is not disproof. Gate Phase 2 on separation AUC over real pools AND on
+  the FP-tail veto rate, not top-1 alone.
