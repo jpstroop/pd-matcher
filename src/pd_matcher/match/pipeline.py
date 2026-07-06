@@ -18,8 +18,15 @@ is intentionally small:
 from collections.abc import Callable
 from collections.abc import Sequence
 
+from msgspec import Struct
+
 from pd_matcher.config.schemas import MatchingConfig
 from pd_matcher.index.lookup import NyplIndexLookup
+from pd_matcher.match.claimant_routing import AUTHOR_SCORER
+from pd_matcher.match.claimant_routing import PUBLISHER_SCORER
+from pd_matcher.match.claimant_routing import compute_routing
+from pd_matcher.match.claimant_routing import is_blank_publisher
+from pd_matcher.match.claimant_routing import value_key
 from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.combiners.base import Combiner
 from pd_matcher.match.combiners.calibrator import PlattCalibrator
@@ -37,6 +44,7 @@ from pd_matcher.match.scorers.isbn import score_isbn
 from pd_matcher.match.scorers.lccn import score_lccn
 from pd_matcher.match.scorers.name import score_author
 from pd_matcher.match.scorers.name import score_publisher
+from pd_matcher.match.scorers.organization import looks_like_organization
 from pd_matcher.match.scorers.title import prepare_cross_field_stems
 from pd_matcher.match.scorers.title import score_title
 from pd_matcher.match.scorers.volume import score_volume
@@ -59,6 +67,11 @@ _NON_CORROBORATING_SCORERS: frozenset[str] = frozenset(
         "year.delta",  # many records share a year; year alone is too weak a corroboration signal
     }
 )
+_MAX_NAME_SCORE: float = 100.0
+_GENUINE_PUBLISHER_CCE: str = "publisher_names"
+_ROUTED_TO_AUTHOR_SOURCE: tuple[str, str] = ("", "routed → name.author")
+_ROUTED_TO_PUBLISHER_SOURCE: tuple[str, str] = ("", "routed → name.publisher")
+_BLANK_PUBLISHER_SOURCE: tuple[str, str] = ("", "skipped: no CCE publisher")
 
 
 def _build_context(
@@ -116,27 +129,6 @@ def _select_best(evidences: Sequence[Evidence]) -> tuple[int, Evidence, tuple[Ev
 
 
 _GroupScorer = Callable[[str | None, str | None, ScorerContext], Evidence]
-
-
-def _best_element_evidence(
-    scorer: _GroupScorer,
-    marc_value: str | None,
-    cce_values: tuple[str, ...],
-    ctx: ScorerContext,
-) -> Evidence:
-    """Score ``marc_value`` against each CCE element and keep the best Evidence.
-
-    A ``best``-combined CCE field surfaces one element per co-claimant, so the
-    correct name in a "Putnam James D. Horan" list is scored on its own instead
-    of diluted into one blob. An empty tuple (the CCE field is absent) is scored
-    once against ``None`` to emit the group's skipped Evidence. A scalar or
-    ``first``/``join`` field yields a 1-tuple, so the common case makes exactly
-    one scorer call and one 1-tuple, matching the pre-change cost.
-    """
-    if not cce_values:
-        return scorer(marc_value, None, ctx)
-    scored = tuple(scorer(marc_value, cce_value, ctx) for cce_value in cce_values)
-    return scored[_argmax_by_score(scored)]
 
 
 def _best_title_element_evidence(
@@ -212,10 +204,212 @@ def _with_multiplier(evidence: Evidence, multiplier: float) -> Evidence:
     )
 
 
-_GROUP_SCORERS: dict[str, _GroupScorer] = {
-    "author": score_author,
-    "publisher": score_publisher,
-}
+class _PairingResult(Struct, frozen=True, forbid_unknown_fields=True):
+    """One name pairing's best-of-element outcome, retained for routing.
+
+    ``cce_value`` is the winning CCE element string (``None`` when the pairing
+    had no CCE values and scored ``skipped``); ``cce_key`` is its normalized
+    token-set key, matched against a :class:`RoutingDecision`'s routed-away key
+    sets. ``evidence`` is the best Evidence across the pairing's elements.
+    """
+
+    pairing: CompiledPairing
+    cce_value: str | None
+    cce_key: frozenset[str]
+    evidence: Evidence
+
+
+def _skipped_name_evidence(scorer_name: str) -> Evidence:
+    """Return a skipped Evidence for a name group emptied by routing / gating."""
+    return Evidence(
+        scorer=scorer_name,
+        score=0.0,
+        max=_MAX_NAME_SCORE,
+        skipped=True,
+        decisive=False,
+        features=(),
+    )
+
+
+def _best_pairing_result(
+    scorer: _GroupScorer,
+    marc_value: str | None,
+    cce_values: tuple[str, ...],
+    ctx: ScorerContext,
+    pairing: CompiledPairing,
+) -> _PairingResult:
+    """Score ``marc_value`` against each CCE element and keep the best result.
+
+    A ``best``-combined CCE field surfaces one element per co-claimant, so the
+    correct name in a "Putnam James D. Horan" list is scored on its own instead
+    of diluted into one blob. An empty tuple (the CCE field is absent) scores
+    once against ``None`` to emit the pairing's skipped Evidence with no winning
+    value. A scalar or ``first``/``join`` field yields a 1-tuple, so the common
+    case makes exactly one scorer call, matching the pre-routing cost.
+    """
+    if not cce_values:
+        return _PairingResult(
+            pairing=pairing,
+            cce_value=None,
+            cce_key=frozenset(),
+            evidence=scorer(marc_value, None, ctx),
+        )
+    scored = tuple((value, scorer(marc_value, value, ctx)) for value in cce_values)
+    best_value, best_evidence = scored[_argmax_by_score(tuple(ev for _, ev in scored))]
+    return _PairingResult(
+        pairing=pairing,
+        cce_value=best_value,
+        cce_key=value_key(best_value),
+        evidence=best_evidence,
+    )
+
+
+def _name_pairing_results(
+    pairings: tuple[CompiledPairing, ...],
+    marc: MarcRecord,
+    candidate: IndexedNyplRegRecord,
+    ctx: ScorerContext,
+    scorer: _GroupScorer,
+) -> tuple[_PairingResult, ...]:
+    """Return the best-of-element result for every pairing in a name group."""
+    return tuple(
+        _best_pairing_result(
+            scorer, pairing.marc_accessor(marc), pairing.cce_accessor(candidate), ctx, pairing
+        )
+        for pairing in pairings
+    )
+
+
+def _apply_blank_publisher_gate(
+    results: tuple[_PairingResult, ...],
+    candidate: IndexedNyplRegRecord,
+) -> tuple[tuple[_PairingResult, ...], bool]:
+    """Skip publisher pairings that compare a person against an empty publisher.
+
+    When the CCE record carries no publisher of its own (issue #86, direction
+    A2), the only publisher pairings left are cross-field fallbacks against the
+    ``author_name`` / ``claimants`` slots. A person comparand there fabricates a
+    ``name.publisher = 0.0`` that penalizes a genuine match, so it is forced to
+    ``skipped`` (dropped from the combiner) unless the comparand
+    :func:`~pd_matcher.match.scorers.organization.looks_like_organization` — a
+    corporate self-publisher (``Knopf``) is legitimately the publisher and is
+    kept. The genuine ``publisher_names`` pairing is never gated. Returns the
+    (possibly transformed) results and whether the gate fired.
+    """
+    if not is_blank_publisher(candidate.publisher_names):
+        return results, False
+    gated: list[_PairingResult] = []
+    fired = False
+    for result in results:
+        if (
+            result.cce_value is not None
+            and result.pairing.cce_name != _GENUINE_PUBLISHER_CCE
+            and not looks_like_organization(result.cce_value)
+        ):
+            gated.append(
+                _PairingResult(
+                    pairing=result.pairing,
+                    cce_value=result.cce_value,
+                    cce_key=result.cce_key,
+                    evidence=_skipped_name_evidence(PUBLISHER_SCORER),
+                )
+            )
+            fired = True
+        else:
+            gated.append(result)
+    return tuple(gated), fired
+
+
+def _finalize_name_group(
+    results: tuple[_PairingResult, ...],
+    winning: list[Evidence],
+    losing: list[Evidence],
+    winning_sources: list[tuple[str, str]],
+    *,
+    dropped_keys: frozenset[frozenset[str]],
+    routed_source: tuple[str, str],
+    gate_source: tuple[str, str],
+    gate_fired: bool,
+    skipped_scorer: str,
+) -> None:
+    """Keep the best routed-eligible Evidence for one name group.
+
+    Pairings whose winning CCE value was routed to the *other* group (its key
+    is in ``dropped_keys``) are excluded so a shared ``publisher==claimant``
+    value contributes evidence at most once. The best remaining non-skipped
+    Evidence represents the group; when routing or the blank-publisher gate
+    leaves nothing, a skipped Evidence is emitted (the group goes missing) and
+    the recorded source names why — ``routed_source`` when a routing drop caused
+    it, ``gate_source`` when the blank-publisher gate did, else the empty
+    sentinel. An empty ``results`` (the group has no pairings) appends nothing,
+    matching the pre-routing early return.
+    """
+    if not results:
+        return
+    kept = [result for result in results if not (result.cce_key and result.cce_key in dropped_keys)]
+    eligible = [result for result in kept if not result.evidence.skipped]
+    if eligible:
+        best = eligible[_argmax_by_score(tuple(result.evidence for result in eligible))]
+        winning.append(best.evidence)
+        winning_sources.append((best.pairing.marc_name, best.pairing.cce_name))
+        losing.extend(result.evidence for result in results if result is not best)
+        return
+    winning.append(_skipped_name_evidence(skipped_scorer))
+    losing.extend(result.evidence for result in results)
+    if any(result.cce_key and result.cce_key in dropped_keys for result in results):
+        winning_sources.append(routed_source)
+    elif gate_fired:
+        winning_sources.append(gate_source)
+    else:
+        winning_sources.append(_FIXED_SOURCE)
+
+
+def _score_name_groups(
+    pairings: CompiledPairings,
+    marc: MarcRecord,
+    candidate: IndexedNyplRegRecord,
+    ctx: ScorerContext,
+    winning: list[Evidence],
+    losing: list[Evidence],
+    winning_sources: list[tuple[str, str]],
+) -> None:
+    """Score the author and publisher groups with issue #86 claimant routing.
+
+    Both groups are scored per pairing, then a shared ``publisher==claimant``
+    value that clears the floor is routed to the better-matching group and
+    dropped from the other (direction A1); when the CCE publisher slot is empty,
+    person comparands in the publisher group are gated out (direction A2). The
+    author Evidence is appended before the publisher Evidence, preserving the
+    combiner's field order.
+    """
+    author_results = _name_pairing_results(pairings.author, marc, candidate, ctx, score_author)
+    publisher_results = _name_pairing_results(
+        pairings.publisher, marc, candidate, ctx, score_publisher
+    )
+    publisher_results, gate_fired = _apply_blank_publisher_gate(publisher_results, candidate)
+    routing = compute_routing(marc, candidate.publisher_names, candidate.claimants, ctx)
+    _finalize_name_group(
+        author_results,
+        winning,
+        losing,
+        winning_sources,
+        dropped_keys=routing.publisher_routed,
+        routed_source=_ROUTED_TO_PUBLISHER_SOURCE,
+        gate_source=_FIXED_SOURCE,
+        gate_fired=False,
+        skipped_scorer=AUTHOR_SCORER,
+    )
+    _finalize_name_group(
+        publisher_results,
+        winning,
+        losing,
+        winning_sources,
+        dropped_keys=routing.author_routed,
+        routed_source=_ROUTED_TO_AUTHOR_SOURCE,
+        gate_source=_BLANK_PUBLISHER_SOURCE,
+        gate_fired=gate_fired,
+        skipped_scorer=PUBLISHER_SCORER,
+    )
 
 
 def _finalize_group(
@@ -238,33 +432,6 @@ def _finalize_group(
     winning.append(best)
     losing.extend(losers)
     winning_sources.append((pairings[best_index].marc_name, pairings[best_index].cce_name))
-
-
-def _score_group(
-    pairings: tuple[CompiledPairing, ...],
-    marc: MarcRecord,
-    candidate: IndexedNyplRegRecord,
-    ctx: ScorerContext,
-    winning: list[Evidence],
-    losing: list[Evidence],
-    winning_sources: list[tuple[str, str]],
-) -> None:
-    """Score every pairing in one author/publisher group and keep the best.
-
-    Each pairing's CCE accessor returns a tuple of candidate values; the best
-    Evidence across those elements represents the pairing (see
-    :func:`_best_element_evidence`), then the best pairing represents the group.
-    """
-    if not pairings:
-        return
-    scorer = _GROUP_SCORERS[pairings[0].group]
-    evidences = tuple(
-        _best_element_evidence(
-            scorer, pairing.marc_accessor(marc), pairing.cce_accessor(candidate), ctx
-        )
-        for pairing in pairings
-    )
-    _finalize_group(pairings, evidences, winning, losing, winning_sources)
 
 
 def _score_title_group(
@@ -317,12 +484,11 @@ def _score_candidate(
     title_index = len(winning)
     _score_title_group(pairings.title, marc, candidate, ctx, winning, losing, sources)
     author_index = len(winning)
-    _score_group(pairings.author, marc, candidate, ctx, winning, losing, sources)
+    _score_name_groups(pairings, marc, candidate, ctx, winning, losing, sources)
     if author_index < len(winning) and is_translation_signal(candidate):
         winning[author_index] = _with_multiplier(
             winning[author_index], _TRANSLATION_AUTHOR_MULTIPLIER
         )
-    _score_group(pairings.publisher, marc, candidate, ctx, winning, losing, sources)
 
     winning.append(score_year(marc.publication_year, candidate.reg_year, ctx))
     sources.append(_FIXED_SOURCE)

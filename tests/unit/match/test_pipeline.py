@@ -15,9 +15,12 @@ from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.idf import build_idf_table
 from pd_matcher.match.pairing_compiler import CompiledPairings
 from pd_matcher.match.pairing_compiler import compile_pairings
+from pd_matcher.match.pipeline import _BLANK_PUBLISHER_SOURCE
+from pd_matcher.match.pipeline import _ROUTED_TO_AUTHOR_SOURCE
+from pd_matcher.match.pipeline import _ROUTED_TO_PUBLISHER_SOURCE
 from pd_matcher.match.pipeline import _apply_title_isolation_multiplier
 from pd_matcher.match.pipeline import _build_context
-from pd_matcher.match.pipeline import _score_group
+from pd_matcher.match.pipeline import _score_name_groups
 from pd_matcher.match.pipeline import _score_title_group
 from pd_matcher.match.pipeline import _with_multiplier
 from pd_matcher.match.pipeline import match_record
@@ -449,13 +452,169 @@ def test_score_group_best_of_element_scores_best_publisher_not_blob(
     winning: list[Evidence] = []
     losing: list[Evidence] = []
     sources: list[tuple[str, str]] = []
-    _score_group(pairings.publisher, marc, candidate, scorer_context, winning, losing, sources)
+    _score_name_groups(pairings, marc, candidate, scorer_context, winning, losing, sources)
     best_single = score_publisher("Macmillan", "Macmillan", scorer_context)
     blob = score_publisher("Macmillan", "Alfred A. Knopf Macmillan", scorer_context)
-    assert len(winning) == 1
-    assert winning[0].score == best_single.score
-    assert winning[0].score > blob.score
-    assert sources == [("pub", "pn")]
+    publisher_evidence = winning[-1]
+    assert publisher_evidence.score == best_single.score
+    assert publisher_evidence.score > blob.score
+    assert sources[-1] == ("pub", "pn")
+
+
+def _run_name_groups(
+    marc: MarcRecord,
+    candidate: IndexedNyplRegRecord,
+    ctx: ScorerContext,
+    compiled_pairings: CompiledPairings,
+) -> tuple[Evidence, tuple[str, str], Evidence, tuple[str, str]]:
+    """Score the name groups and return (author_ev, author_src, pub_ev, pub_src)."""
+    winning: list[Evidence] = []
+    losing: list[Evidence] = []
+    sources: list[tuple[str, str]] = []
+    _score_name_groups(compiled_pairings, marc, candidate, ctx, winning, losing, sources)
+    assert len(winning) == 2
+    assert len(sources) == 2
+    return winning[0], sources[0], winning[1], sources[1]
+
+
+def test_claimant_routing_routes_person_echo_to_author(
+    scorer_context: ScorerContext, compiled_pairings: CompiledPairings
+) -> None:
+    """A claimant echoed into the publisher slot routes to author; publisher drops.
+
+    Direction A1: the shared value "Jane Albuquerque" matches the MARC author,
+    so it becomes author evidence and the publisher comparison goes missing —
+    contributing evidence exactly once (single-contribution guard).
+    """
+    marc = MarcRecord(
+        control_id="m",
+        title="t",
+        title_main="t",
+        main_author="Albuquerque, Jane",
+        publisher="Random House",
+    )
+    candidate = IndexedNyplRegRecord(
+        uuid="u",
+        title="t",
+        was_renewed=False,
+        author_name="Jane Albuquerque",
+        publisher_names=("Jane Albuquerque",),
+        claimants=("Jane Albuquerque",),
+    )
+    author_ev, _author_src, pub_ev, pub_src = _run_name_groups(
+        marc, candidate, scorer_context, compiled_pairings
+    )
+    assert author_ev.scorer == "name.author"
+    assert author_ev.skipped is False
+    assert author_ev.normalized > 0.9
+    assert pub_ev.scorer == "name.publisher"
+    assert pub_ev.skipped is True
+    assert pub_src == _ROUTED_TO_AUTHOR_SOURCE
+
+
+def test_claimant_routing_routes_corporate_self_publisher_to_publisher(
+    scorer_context: ScorerContext, compiled_pairings: CompiledPairings
+) -> None:
+    """A corporate self-publisher echoed into the claimant slot routes to publisher."""
+    marc = MarcRecord(
+        control_id="m",
+        title="t",
+        title_main="t",
+        main_author="Smith, John",
+        publisher="Knopf",
+    )
+    candidate = IndexedNyplRegRecord(
+        uuid="u",
+        title="t",
+        was_renewed=False,
+        publisher_names=("Knopf",),
+        claimants=("Knopf",),
+    )
+    author_ev, author_src, pub_ev, _pub_src = _run_name_groups(
+        marc, candidate, scorer_context, compiled_pairings
+    )
+    assert author_ev.skipped is True
+    assert author_src == _ROUTED_TO_PUBLISHER_SOURCE
+    assert pub_ev.skipped is False
+    assert pub_ev.normalized > 0.9
+
+
+def test_claimant_routing_preserves_sub_floor_publisher_mismatch(
+    scorer_context: ScorerContext, compiled_pairings: CompiledPairings
+) -> None:
+    """A shared value matching neither MARC field leaves the real mismatch intact."""
+    marc = MarcRecord(
+        control_id="m",
+        title="t",
+        title_main="t",
+        main_author="Smith, John",
+        publisher="Random House",
+    )
+    candidate = IndexedNyplRegRecord(
+        uuid="u",
+        title="t",
+        was_renewed=False,
+        author_name="Jane Albuquerque",
+        publisher_names=("Jane Albuquerque",),
+        claimants=("Jane Albuquerque",),
+    )
+    _author_ev, _author_src, pub_ev, _pub_src = _run_name_groups(
+        marc, candidate, scorer_context, compiled_pairings
+    )
+    assert pub_ev.skipped is False
+    assert pub_ev.normalized < 0.05
+
+
+def test_blank_publisher_skips_person_comparand(
+    scorer_context: ScorerContext, compiled_pairings: CompiledPairings
+) -> None:
+    """Direction A2: an empty CCE publisher slot skips a person cross-field pairing."""
+    marc = MarcRecord(
+        control_id="m",
+        title="t",
+        title_main="t",
+        main_author="Albuquerque, Jane",
+        publisher="Random House",
+    )
+    candidate = IndexedNyplRegRecord(
+        uuid="u",
+        title="t",
+        was_renewed=False,
+        author_name="Jane Albuquerque",
+        publisher_names=(),
+        claimants=("Jane Albuquerque",),
+    )
+    _author_ev, _author_src, pub_ev, pub_src = _run_name_groups(
+        marc, candidate, scorer_context, compiled_pairings
+    )
+    assert pub_ev.skipped is True
+    assert pub_src == _BLANK_PUBLISHER_SOURCE
+
+
+def test_blank_publisher_keeps_corporate_claimant(
+    scorer_context: ScorerContext, compiled_pairings: CompiledPairings
+) -> None:
+    """A corporate claimant is a legitimate publisher even with an empty CCE slot."""
+    marc = MarcRecord(
+        control_id="m",
+        title="t",
+        title_main="t",
+        main_author="Smith, John",
+        publisher="Acme Press",
+    )
+    candidate = IndexedNyplRegRecord(
+        uuid="u",
+        title="t",
+        was_renewed=False,
+        publisher_names=(),
+        claimants=("Acme Press",),
+    )
+    _author_ev, _author_src, pub_ev, pub_src = _run_name_groups(
+        marc, candidate, scorer_context, compiled_pairings
+    )
+    assert pub_ev.skipped is False
+    assert pub_ev.normalized > 0.9
+    assert pub_src == ("publisher", "claimants")
 
 
 def test_match_record_captures_winning_source_for_each_evidence(

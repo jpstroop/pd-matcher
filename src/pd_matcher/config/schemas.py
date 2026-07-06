@@ -35,6 +35,13 @@ class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
     give standard identifiers a non-trivial false-positive rate, so the
     Platt calibrator learns the empirical ``P(true match)`` for the
     resulting raw scores.
+
+    ``claimant_routing_floor`` is the normalized-score threshold the
+    ``publisher==claimant`` routing rule (issue #86) must clear before a
+    shared publisher/claimant value is routed to the better-matching name
+    group and dropped from the other. A sub-floor winner matches neither
+    MARC field, so re-routing is suppressed and stock evidence survives to
+    preserve a genuine publisher mismatch.
     """
 
     title_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
@@ -48,6 +55,7 @@ class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
     year_window: Annotated[int, Meta(ge=0)]
     min_combined_score: Annotated[float, Meta(ge=0.0, le=100.0)]
     scorer: Literal["weighted_mean", "learned"] = "weighted_mean"
+    claimant_routing_floor: Annotated[float, Meta(ge=0.0, le=1.0)] = 0.7
 
     def __post_init__(self) -> None:
         """Reject weight tuples that do not sum to 1.0 within tolerance."""
