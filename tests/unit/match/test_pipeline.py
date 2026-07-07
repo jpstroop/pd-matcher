@@ -461,6 +461,58 @@ def test_score_group_best_of_element_scores_best_publisher_not_blob(
     assert sources[-1] == ("pub", "pn")
 
 
+def test_score_title_group_labels_source_when_window_fires(
+    scorer_context: ScorerContext,
+) -> None:
+    """When the sliding window wins the title group, its source reads ``title_window`` (#133).
+
+    A distinctive short CCE title ("Widgets Albuquerque", 2 tokens) contained in
+    the long MARC title ("Studies of widgets in Albuquerque machines", 4 tokens)
+    trips the length trigger; the window rescues the title to a full score, so
+    the recorded evidence source names the window instead of the composed-field
+    pairing, letting the review card show what fired.
+    """
+    cfg = PairingConfig(
+        marc_fields={"tf": FieldSpec(fields=("title",), combine="first")},
+        cce_fields={"t": FieldSpec(fields=("title",), combine="first")},
+        pairings=(PairingSpec(group="title", marc="tf", cce="t"),),
+    )
+    pairings = compile_pairings(cfg)
+    marc = MarcRecord(
+        control_id="m",
+        title="Studies of widgets in Albuquerque machines",
+        title_main="Studies",
+    )
+    candidate = IndexedNyplRegRecord(uuid="u", title="Widgets Albuquerque", was_renewed=False)
+    winning: list[Evidence] = []
+    losing: list[Evidence] = []
+    sources: list[tuple[str, str]] = []
+    _score_title_group(pairings.title, marc, candidate, scorer_context, winning, losing, sources)
+    assert winning[-1].note == "title_window"
+    assert winning[-1].score == 100.0
+    assert sources[-1] == ("title_window", "t")
+
+
+def test_score_title_group_keeps_field_source_when_window_idle(
+    scorer_context: ScorerContext,
+) -> None:
+    """A balanced title pairing keeps its composed-field source (window did not fire)."""
+    cfg = PairingConfig(
+        marc_fields={"tf": FieldSpec(fields=("title",), combine="first")},
+        cce_fields={"t": FieldSpec(fields=("title",), combine="first")},
+        pairings=(PairingSpec(group="title", marc="tf", cce="t"),),
+    )
+    pairings = compile_pairings(cfg)
+    marc = MarcRecord(control_id="m", title="A study of widgets", title_main="A study of widgets")
+    candidate = IndexedNyplRegRecord(uuid="u", title="A study of widgets", was_renewed=False)
+    winning: list[Evidence] = []
+    losing: list[Evidence] = []
+    sources: list[tuple[str, str]] = []
+    _score_title_group(pairings.title, marc, candidate, scorer_context, winning, losing, sources)
+    assert winning[-1].note is None
+    assert sources[-1] == ("tf", "t")
+
+
 def _run_name_groups(
     marc: MarcRecord,
     candidate: IndexedNyplRegRecord,

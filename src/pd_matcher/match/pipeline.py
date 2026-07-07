@@ -45,6 +45,7 @@ from pd_matcher.match.scorers.lccn import score_lccn
 from pd_matcher.match.scorers.name import score_author
 from pd_matcher.match.scorers.name import score_publisher
 from pd_matcher.match.scorers.organization import looks_like_organization
+from pd_matcher.match.scorers.title import TITLE_WINDOW_NOTE as _TITLE_WINDOW_NOTE
 from pd_matcher.match.scorers.title import prepare_cross_field_stems
 from pd_matcher.match.scorers.title import score_title
 from pd_matcher.match.scorers.volume import score_volume
@@ -462,6 +463,8 @@ def _score_title_group(
         for pairing in pairings
     )
     _finalize_group(pairings, evidences, winning, losing, winning_sources)
+    if winning[-1].note == _TITLE_WINDOW_NOTE:
+        winning_sources[-1] = (_TITLE_WINDOW_NOTE, winning_sources[-1][1])
 
 
 def _score_candidate(
