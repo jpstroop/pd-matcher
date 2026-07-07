@@ -557,6 +557,44 @@ def test_score_title_window_disabled_by_zero_trigger(scorer_context: ScorerConte
     assert ev.score < 100.0
 
 
+def test_score_title_window_suppressed_when_one_side_has_part_designator(
+    scorer_context: ScorerContext,
+) -> None:
+    """The window is suppressed when exactly one side names a volume/part slice (#133).
+
+    A MARC whole ("Widgets") against a CCE that registers only a numbered slice
+    ("Widgets. [Vols. 3-4: Albuquerque machines]") is contained by construction,
+    the whole/part false-high the window must never manufacture. The window flag
+    is absent and the score falls back to the (low) symmetric comparison.
+    """
+    ev = score_title("Widgets", "Widgets. [Vols. 3-4: Albuquerque machines]", scorer_context)
+    assert TITLE_WINDOW_FEATURE not in dict(ev.features)
+    assert ev.score < 100.0
+
+
+def test_score_title_window_kept_when_neither_side_has_designator(
+    scorer_context: ScorerContext,
+) -> None:
+    """Containment with no designator on either side keeps the window (#133).
+
+    A dropped-subtitle / translated-original parenthetical ("Widgets" inside
+    "Widgets Albuquerque machines studies") carries no volume designator on
+    either side, so the legitimate containment is credited as before.
+    """
+    ev = score_title("Widgets Albuquerque machines studies", "Widgets Albuquerque", scorer_context)
+    assert (TITLE_WINDOW_FEATURE, 1.0) in ev.features
+
+
+def test_score_title_window_kept_when_both_sides_have_designator(
+    scorer_context: ScorerContext,
+) -> None:
+    """A designator on BOTH sides is symmetric, not a whole/part signature (#133)."""
+    ev = score_title(
+        "Widgets vol. 1", "Widgets Albuquerque machines studies vol. 1", scorer_context
+    )
+    assert (TITLE_WINDOW_FEATURE, 1.0) in ev.features
+
+
 def test_best_window_score_empty_side_returns_zero(idf_table: IdfTable) -> None:
     """An empty token sequence yields no window score."""
     assert _best_window_score((), ("widget", "studi"), idf_table, 2.0, 0.6) == 0.0
