@@ -42,6 +42,24 @@ class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
     group and dropped from the other. A sub-floor winner matches neither
     MARC field, so re-routing is suppressed and stock evidence survives to
     preserve a genuine publisher mismatch.
+
+    ``title_window_trigger_ratio`` is the structural trigger for the title
+    scorer's sliding-window containment comparison (issue #133). When the two
+    normalized title token sequences differ substantially in length —
+    ``len(shorter) / len(longer) <= title_window_trigger_ratio`` — the shorter
+    sequence is slid along the longer one and each position scored with the
+    same IDF-weighted alignment the symmetric score uses; the best window
+    competes with the symmetric score via ``max``. The trigger is structural
+    (a length ratio, not a score), so the comparison only runs on the skewed
+    pairs it targets and never fires on balanced titles. IDF weighting is the
+    intrinsic generic-title guard: a window matched only on common tokens
+    carries thin shared mass and scores near zero. ``0.0`` disables the window
+    (no non-empty pair can clear it). The shipped ``0.5`` was picked from a
+    held-out both-arm separation sweep (0.5 / 0.6 / 0.7): 0.5 maximized held-out
+    ROC-AUC on both the learned and weighted arms while firing on the fewest
+    no_match containment pairs (whole/part and same-author siblings), so it is
+    the most conservative value that still recovers the length-asymmetry matches
+    the window targets.
     """
 
     title_weight: Annotated[float, Meta(ge=0.0, le=1.0)]
@@ -56,6 +74,7 @@ class MatchingConfig(Struct, frozen=True, forbid_unknown_fields=True):
     min_combined_score: Annotated[float, Meta(ge=0.0, le=100.0)]
     scorer: Literal["weighted_mean", "learned"] = "weighted_mean"
     claimant_routing_floor: Annotated[float, Meta(ge=0.0, le=1.0)] = 0.7
+    title_window_trigger_ratio: Annotated[float, Meta(ge=0.0, le=1.0)] = 0.5
 
     def __post_init__(self) -> None:
         """Reject weight tuples that do not sum to 1.0 within tolerance."""

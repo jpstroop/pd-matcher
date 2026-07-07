@@ -2,13 +2,30 @@
 
 from collections.abc import Callable
 
+from msgspec import structs
+
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.scorers.context import ScorerContext
+from pd_matcher.match.scorers.title import TITLE_WINDOW_NOTE
 from pd_matcher.match.scorers.title import _align_tokens
+from pd_matcher.match.scorers.title import _best_window_score
 from pd_matcher.match.scorers.title import _shared_weight
 from pd_matcher.match.scorers.title import _strip_cross_field
 from pd_matcher.match.scorers.title import prepare_cross_field_stems
 from pd_matcher.match.scorers.title import score_title
+
+
+def _windowless(ctx: ScorerContext) -> ScorerContext:
+    """Return a copy of ``ctx`` whose config disables the sliding window (#133)."""
+    return ScorerContext(
+        language=ctx.language,
+        stopwords=ctx.stopwords,
+        stemmer=ctx.stemmer,
+        idf=ctx.idf,
+        author_idf=ctx.author_idf,
+        publisher_idf=ctx.publisher_idf,
+        config=structs.replace(ctx.config, title_window_trigger_ratio=0.0),
+    )
 
 
 def _with_cross_field(ctx: ScorerContext, stems: frozenset[str]) -> ScorerContext:
@@ -95,11 +112,11 @@ def test_score_title_coverage_one_when_shorter_is_subset(
 
     The symmetric ``score`` is deflated by the longer side's extra distinctive
     tokens, but the asymmetric coverage sub-feature stays high because the
-    shorter side's whole mass is shared.
+    shorter side's whole mass is shared. The lengths (3 vs 2 tokens, ratio
+    0.667) stay above the sliding-window trigger (0.5), so the symmetric score
+    is measured in isolation without the window (#133) rescuing it.
     """
-    ev = score_title(
-        "Studies of widgets in Albuquerque machines", "Widgets Albuquerque", scorer_context
-    )
+    ev = score_title("Studies of widgets in Albuquerque", "Widgets Albuquerque", scorer_context)
     feature_map = dict(ev.features)
     assert feature_map["coverage"] == 1.0
     assert ev.score < 100.0
@@ -128,13 +145,13 @@ def test_score_title_coverage_does_not_change_score(
 
     The subset shape must produce the same symmetric Jaccard ``score`` it
     produced before coverage existed — the v1 regression was lifting this
-    score; coverage must not touch it.
+    score; coverage must not touch it. The lengths (3 vs 2 tokens, ratio 0.667)
+    stay above the sliding-window trigger (0.5) so the symmetric score is
+    isolated from the window (#133).
     """
-    ev = score_title(
-        "Studies of widgets in Albuquerque machines", "Widgets Albuquerque", scorer_context
-    )
+    ev = score_title("Studies of widgets in Albuquerque", "Widgets Albuquerque", scorer_context)
     shared = 3.0 + 5.0
-    union = shared + 2.5 + 3.0
+    union = shared + 2.5
     expected_raw = shared / union
     assert ev.score == expected_raw * 100.0
 
@@ -458,3 +475,103 @@ def test_score_title_cross_field_does_not_strip_shared_title_token(
     ctx = _with_cross_field(scorer_context, frozenset({"widget"}))
     ev = score_title("study widget", "study widget", ctx)
     assert ev.score == 100.0
+
+
+def test_score_title_window_credits_contained_distinctive_short_title(
+    scorer_context: ScorerContext,
+) -> None:
+    """A distinctive short title contained in a long one is lifted by the window (#133).
+
+    "Widgets Albuquerque" (2 tokens) sits inside "Studies of widgets in
+    Albuquerque machines" (4 tokens); the length ratio 0.5 clears the 0.5
+    trigger. The best 2-token window lands exactly on {widget, albuquerqu}, both
+    distinctive, so containment is credited to a full score and the Evidence
+    carries the window note.
+    """
+    ev = score_title(
+        "Studies of widgets in Albuquerque machines", "Widgets Albuquerque", scorer_context
+    )
+    assert ev.score == 100.0
+    assert ev.note == TITLE_WINDOW_NOTE
+
+
+def test_score_title_window_lifts_above_symmetric_score(
+    scorer_context: ScorerContext,
+) -> None:
+    """The window only ever raises the score; the same pair scores lower windowless."""
+    windowed = score_title(
+        "Studies of widgets in Albuquerque machines", "Widgets Albuquerque", scorer_context
+    )
+    windowless = score_title(
+        "Studies of widgets in Albuquerque machines",
+        "Widgets Albuquerque",
+        _windowless(scorer_context),
+    )
+    assert windowed.score > windowless.score
+    assert windowless.note is None
+
+
+def test_score_title_window_is_side_agnostic(scorer_context: ScorerContext) -> None:
+    """Containment is credited whether the long side is MARC or CCE."""
+    long_side = "Studies of widgets in Albuquerque machines"
+    short_side = "Widgets Albuquerque"
+    long_marc = score_title(long_side, short_side, scorer_context)
+    long_cce = score_title(short_side, long_side, scorer_context)
+    assert long_marc.score == 100.0
+    assert long_cce.score == 100.0
+    assert long_marc.note == TITLE_WINDOW_NOTE
+    assert long_cce.note == TITLE_WINDOW_NOTE
+
+
+def test_score_title_window_generic_token_discounted_below_distinctive(
+    scorer_context: ScorerContext,
+) -> None:
+    """A window matched on a common token scores below one matched on a rare token.
+
+    IDF weighting is the intrinsic generic-title guard: a lone contained
+    "american" (idf 1.0) carries half the mass floor, so its window confidence —
+    and score — stays well below a lone contained "widget" (idf 3.0), which
+    saturates. Containment alone never buys a full score on filler.
+    """
+    generic = score_title("Studies of american machines", "american", scorer_context)
+    distinctive = score_title("Studies of widget machines", "widget", scorer_context)
+    assert generic.score < distinctive.score
+    assert distinctive.score == 100.0
+
+
+def test_score_title_window_not_triggered_above_ratio(scorer_context: ScorerContext) -> None:
+    """A length ratio above the trigger (3 vs 2 tokens = 0.667 > 0.5) skips the window."""
+    ev = score_title("Studies of widgets in Albuquerque", "Widgets Albuquerque", scorer_context)
+    assert ev.note is None
+    assert ev.score < 100.0
+
+
+def test_score_title_window_disabled_by_zero_trigger(scorer_context: ScorerContext) -> None:
+    """A ``title_window_trigger_ratio`` of 0.0 disables the window entirely."""
+    ev = score_title(
+        "Studies of widgets in Albuquerque machines",
+        "Widgets Albuquerque",
+        _windowless(scorer_context),
+    )
+    assert ev.note is None
+    assert ev.score < 100.0
+
+
+def test_best_window_score_empty_side_returns_zero(idf_table: IdfTable) -> None:
+    """An empty token sequence yields no window score."""
+    assert _best_window_score((), ("widget", "studi"), idf_table, 2.0, 0.6) == 0.0
+
+
+def test_best_window_score_equal_length_returns_zero(idf_table: IdfTable) -> None:
+    """Equal-length sequences never slide (there is nothing to contain)."""
+    assert (
+        _best_window_score(("widget", "studi"), ("albuquerqu", "machin"), idf_table, 2.0, 0.6)
+        == 0.0
+    )
+
+
+def test_best_window_score_disabled_trigger_returns_zero(idf_table: IdfTable) -> None:
+    """A non-positive trigger ratio short-circuits before any sliding."""
+    assert (
+        _best_window_score(("widget",), ("studi", "widget", "machin"), idf_table, 2.0, 0.0) == 0.0
+    )

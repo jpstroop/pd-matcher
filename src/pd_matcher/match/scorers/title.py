@@ -121,6 +121,22 @@ _WHOLE_STRING_MIN_LEN: int = 10
 # knob (#84 sweeps it); 1.0 means "one once-seen token is full confidence".
 _GENERIC_TITLE_MASS_FACTOR: float = 1.0
 
+# The short/long title comparison the sliding window replaces (#133). When the
+# two normalized token sequences differ substantially in length, one side is a
+# subtitle-, translated-original-, or responsibility-statement-bloated version
+# of the other and the symmetric Jaccard craters even on a true match (the extra
+# distinctive tokens bloat the union). The window slides the shorter token
+# sequence along the longer one and scores each position with the SAME
+# IDF-weighted alignment machinery the symmetric path uses, then competes via
+# ``max`` — crediting containment instead of punishing the surplus. The trigger
+# is structural (a length ratio carried on the config, not a score), so the
+# comparison only runs on the skewed pairs it targets, and the IDF weighting is
+# the intrinsic generic-title guard: a window matched only on common tokens
+# carries thin shared mass, so its confidence — and thus its score — stays near
+# zero by construction ("Selected poems" containment cannot fire on filler).
+# The winning Evidence records this note so the review UI shows the window fired.
+TITLE_WINDOW_NOTE: str = "title_window"
+
 
 def _align_tokens(
     marc_set: set[str], nypl_set: set[str]
@@ -166,6 +182,91 @@ def _shared_weight(marc_token: str, nypl_token: str, idf: IdfTable) -> float:
     unit's weight close to the clean token's true distinctiveness.
     """
     return (idf.score(marc_token) + idf.score(nypl_token)) / 2.0
+
+
+def _alignment_masses(
+    marc_set: set[str], nypl_set: set[str], idf: IdfTable
+) -> tuple[tuple[tuple[str, str], ...], frozenset[str], frozenset[str], float, float, float]:
+    """Align two stem sets and return the aligned pairs plus their IDF masses.
+
+    Returns ``(matched, unique_marc, unique_nypl, weighted_intersection,
+    unique_marc_mass, unique_nypl_mass)``. The three masses are the IDF-weighted
+    shared, MARC-only, and CCE-only sums that both the symmetric score and the
+    sliding window (#133) build their similarity from, factored here so the two
+    paths compute them identically.
+    """
+    matched, unique_marc, unique_nypl = _align_tokens(marc_set, nypl_set)
+    weighted_intersection = sum(_shared_weight(a, b, idf) for a, b in matched)
+    unique_marc_mass = sum(idf.score(token) for token in unique_marc)
+    unique_nypl_mass = sum(idf.score(token) for token in unique_nypl)
+    return (
+        matched,
+        unique_marc,
+        unique_nypl,
+        weighted_intersection,
+        unique_marc_mass,
+        unique_nypl_mass,
+    )
+
+
+def _similarity_from_masses(
+    weighted_intersection: float,
+    unique_marc_mass: float,
+    unique_nypl_mass: float,
+    mass_floor: float,
+) -> float:
+    """Return the IDF-weighted Jaccard score, mass-confidence scaled, in ``[0, 100]``.
+
+    The IDF-weighted Jaccard ratio (shared mass over union mass) is multiplied
+    by the absolute-mass confidence that keeps a thin generic overlap off a
+    perfect score (see :data:`_GENERIC_TITLE_MASS_FACTOR`). Both the symmetric
+    path and the sliding window score through this one function so a window
+    matched only on filler is driven toward zero by the same guard.
+    """
+    weighted_union = weighted_intersection + unique_marc_mass + unique_nypl_mass
+    raw = weighted_intersection / weighted_union if weighted_union > 0 else 0.0
+    confidence = min(1.0, weighted_intersection / mass_floor) if mass_floor > 0 else 1.0
+    return raw * _MAX_SCORE * confidence
+
+
+def _best_window_score(
+    marc_tokens: tuple[str, ...],
+    nypl_tokens: tuple[str, ...],
+    idf: IdfTable,
+    mass_floor: float,
+    trigger_ratio: float,
+) -> float:
+    """Return the best sliding-window containment score, or ``0.0`` when idle (#133).
+
+    Fires only when the two normalized token sequences differ substantially in
+    length — ``len(shorter) / len(longer) <= trigger_ratio`` — a structural
+    trigger that is side-agnostic (MARC or CCE may be the longer side). A window
+    of ``len(shorter)`` tokens is slid across the longer sequence and each
+    position scored with :func:`_similarity_from_masses` over the same
+    IDF-weighted alignment the symmetric path uses, so a window that lands on the
+    shorter title's distinctive tokens scores high (containment credited) while
+    one matched only on common tokens stays near zero (thin shared mass). Returns
+    the maximum score over all window positions; ``0.0`` when the trigger is not
+    met, either side is empty, or the sequences are the same length.
+    """
+    if not marc_tokens or not nypl_tokens or trigger_ratio <= 0.0:
+        return 0.0
+    short, long = (
+        (marc_tokens, nypl_tokens)
+        if len(marc_tokens) <= len(nypl_tokens)
+        else (nypl_tokens, marc_tokens)
+    )
+    short_len = len(short)
+    long_len = len(long)
+    if short_len == long_len or short_len / long_len > trigger_ratio:
+        return 0.0
+    short_set = set(short)
+    best = 0.0
+    for start in range(long_len - short_len + 1):
+        window_set = set(long[start : start + short_len])
+        _, _, _, intersection, marc_mass, nypl_mass = _alignment_masses(short_set, window_set, idf)
+        best = max(best, _similarity_from_masses(intersection, marc_mass, nypl_mass, mass_floor))
+    return best
 
 
 def _tokenize_filter_stem(
@@ -342,22 +443,26 @@ def score_title(
     nypl_tokens = _strip_cross_field(nypl_tokens, marc_tokens, ctx)
     marc_set = set(marc_tokens)
     nypl_set = set(nypl_tokens)
-    matched, unique_marc, unique_nypl = _align_tokens(marc_set, nypl_set)
-    weighted_intersection = sum(_shared_weight(a, b, ctx.idf) for a, b in matched)
-    unique_marc_mass = sum(ctx.idf.score(token) for token in unique_marc)
-    unique_nypl_mass = sum(ctx.idf.score(token) for token in unique_nypl)
+    matched, unique_marc, unique_nypl, weighted_intersection, unique_marc_mass, unique_nypl_mass = (
+        _alignment_masses(marc_set, nypl_set, ctx.idf)
+    )
     weighted_union = weighted_intersection + unique_marc_mass + unique_nypl_mass
     coverage = _coverage(weighted_intersection, unique_marc_mass, unique_nypl_mass)
-    raw = weighted_intersection / weighted_union if weighted_union > 0 else 0.0
     mass_floor = _GENERIC_TITLE_MASS_FACTOR * ctx.idf.default_idf
-    confidence = min(1.0, weighted_intersection / mass_floor) if mass_floor > 0 else 1.0
-    score = raw * _MAX_SCORE * confidence
+    score = _similarity_from_masses(
+        weighted_intersection, unique_marc_mass, unique_nypl_mass, mass_floor
+    )
     marc_joined = "".join(marc_tokens)
     nypl_joined = "".join(nypl_tokens)
     if min(len(marc_joined), len(nypl_joined)) >= _WHOLE_STRING_MIN_LEN:
         whole_ratio = ratio(marc_joined, nypl_joined)
         if whole_ratio >= _WHOLE_STRING_MIN_RATIO:
             score = max(score, whole_ratio)
+    window_score = _best_window_score(
+        marc_tokens, nypl_tokens, ctx.idf, mass_floor, ctx.config.title_window_trigger_ratio
+    )
+    window_note = TITLE_WINDOW_NOTE if window_score > score else None
+    score = max(score, window_score)
     token_total = len(matched) + len(unique_marc) + len(unique_nypl)
     avg_idf = (weighted_union / token_total) if token_total else 0.0
     features: tuple[tuple[str, float], ...] = (
@@ -377,10 +482,12 @@ def score_title(
         skipped=False,
         decisive=False,
         features=features,
+        note=window_note,
     )
 
 
 __all__ = [
+    "TITLE_WINDOW_NOTE",
     "prepare_cross_field_stems",
     "score_title",
 ]
