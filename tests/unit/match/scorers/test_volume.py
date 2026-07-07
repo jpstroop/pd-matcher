@@ -1,9 +1,52 @@
 """Tests for :mod:`pd_matcher.match.scorers.volume`."""
 
+from pytest import mark
+
 from pd_matcher.match.scorers.context import ScorerContext
+from pd_matcher.match.scorers.volume import has_part_designator
 from pd_matcher.match.scorers.volume import score_volume
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
+
+
+@mark.parametrize(
+    "value",
+    [
+        "Vol. 1",
+        "Pt. 2",
+        "Vols. 3-4",
+        "Vols. 3\u20134",  # en dash
+        "T.1-3",
+        "Kontakia, I: On the person of Christ",
+    ],
+)
+def test_has_part_designator_detects_single_range_and_bare(value: str) -> None:
+    """Single, range (incl. plural/Unicode-dash), and bare designators all count."""
+    assert has_part_designator(value) is True
+
+
+@mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        "The letters of Theodore Roosevelt",
+        "On aggression",
+    ],
+)
+def test_has_part_designator_absent_on_plain_titles(value: str | None) -> None:
+    """A title without any volume/part designator returns ``False``."""
+    assert has_part_designator(value) is False
+
+
+def test_has_part_designator_bracketed_plural_range() -> None:
+    """A bracketed plural range with a Unicode en dash reads as a designator.
+
+    "Letters. [Vols. 3-4: ...]" carries a covering RANGE whose plural "Vols."
+    and en-dash connector the range detector now tolerates, so the whole/part
+    signature is visible on the CCE-side title.
+    """
+    assert has_part_designator("Letters. [Vols. 3\u20134: The Square Deal, 1901\u20131905]") is True
 
 
 def _marc(

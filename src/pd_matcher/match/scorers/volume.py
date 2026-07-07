@@ -107,10 +107,14 @@ _PART_NUMBER_RE = re_compile(
     r"([ivxlcdm]+|\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b",
     IGNORECASE,
 )
-# A designator RANGE ("Vol. 1-2", "T.1-3"): the CCE registered the whole
-# set of pieces, not a single piece. Generalised over every part prefix.
+# A designator RANGE ("Vol. 1-2", "T.1-3", "Vols. 3-4"): the CCE registered
+# the whole set of pieces, not a single piece. Generalised over every part
+# prefix. A trailing plural "s" ("Vols.", "Pts.") and any Unicode dash
+# (figure/en/em/minus, escaped below) in the connector are tolerated -- OCR'd
+# CCE ranges routinely carry both -- which keeps the whole/set direction
+# detectable on bracketed volume matter like "[Vols. 3-4: ...]".
 _PART_RANGE_RE = re_compile(
-    r"\b" + _PART_PREFIX + r"\.?\s*(\d+)\s*-\s*(\d+)\b",
+    r"\b" + _PART_PREFIX + r"s?\.?\s*(\d+)\s*[-\u2012\u2013\u2014\u2212]\s*(\d+)\b",
     IGNORECASE,
 )
 # A bare Roman-numeral / digit volume designator used as a subtitle marker
@@ -176,6 +180,27 @@ def _detect_part(value: str | None) -> str | None:
     if match is None:
         return None
     return _canonical_part_number(match.group(1))
+
+
+def has_part_designator(value: str | None) -> bool:
+    """Return ``True`` when ``value`` carries any volume/part designator.
+
+    A single designator (``"Vol. 1"``), a covering RANGE (``"Vols. 3-4"``), or
+    a bare Roman/digit subtitle marker (``", I: ..."``) all count. Reuses the
+    same detection the whole/part cardinality classifier runs, so a caller that
+    needs the whole/part *signature* of a lone string — without building the
+    full cross-side classification — shares one source of truth. The direction
+    (whole vs part) is deliberately collapsed: for the title sliding window the
+    only question is whether *this* string names a subdivision the other side
+    does not.
+    """
+    if not value:
+        return False
+    if _is_part_range(value):
+        return True
+    if _detect_part_match(value) is not None:
+        return True
+    return _detect_bare_designator(value) is not None
 
 
 def _detect_bare_designator(value: str | None) -> str | None:
@@ -498,5 +523,6 @@ def score_volume(
 
 
 __all__ = [
+    "has_part_designator",
     "score_volume",
 ]

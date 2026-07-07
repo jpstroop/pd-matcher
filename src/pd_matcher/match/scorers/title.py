@@ -70,6 +70,7 @@ from rapidfuzz.fuzz import ratio
 from pd_matcher.match.evidence import Evidence
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.scorers.context import ScorerContext
+from pd_matcher.match.scorers.volume import has_part_designator
 from pd_matcher.match.signals.script import scripts_mismatch
 from pd_matcher.normalize.numbers import normalize_numbers
 from pd_matcher.normalize.script import dominant_script
@@ -134,6 +135,13 @@ _GENERIC_TITLE_MASS_FACTOR: float = 1.0
 # the intrinsic generic-title guard: a window matched only on common tokens
 # carries thin shared mass, so its confidence — and thus its score — stays near
 # zero by construction ("Selected poems" containment cannot fire on filler).
+# The window is suppressed when exactly one side carries a volume/part
+# designator (:func:`_asymmetric_part_designator`): a MARC whole vs a CCE that
+# registers one numbered slice ("Letters" vs "Letters. [Vols. 3-4: ...]") is
+# contained by construction, and crediting that containment is precisely the
+# whole/part false-high the window must not manufacture. A parenthetical
+# translated original or a dropped subtitle carries no designator on either
+# side, so the legitimate containment case is untouched.
 # When the window wins the comparison the Evidence carries this flag (a
 # diagnostic sub-feature the learned model ignores — it is absent from the
 # canonical feature projection), so the pipeline can label the evidence source
@@ -270,6 +278,22 @@ def _best_window_score(
         _, _, _, intersection, marc_mass, nypl_mass = _alignment_masses(short_set, window_set, idf)
         best = max(best, _similarity_from_masses(intersection, marc_mass, nypl_mass, mass_floor))
     return best
+
+
+def _asymmetric_part_designator(marc_title: str, nypl_title: str) -> bool:
+    """Return ``True`` when exactly one side names a volume/part subdivision (#133).
+
+    The whole/part signature is a part designator on ONE side only: *Letters*
+    vs *Letters. [Vols. 3-4: The Square Deal]* -- the CCE registers a numbered
+    slice of the MARC whole, so the shorter title is contained in the longer by
+    construction and the window would wrongly credit that containment. When
+    NEITHER side (translated-original parentheticals, dropped subtitles) or BOTH
+    sides carry a designator the containment is legitimate, so the window is left
+    to compete. Reuses :func:`has_part_designator` so the detection is the same
+    one the volume cardinality scorer runs, on the raw title strings before
+    tokenization strips the designator away.
+    """
+    return has_part_designator(marc_title) != has_part_designator(nypl_title)
 
 
 def _tokenize_filter_stem(
@@ -464,6 +488,8 @@ def score_title(
     window_score = _best_window_score(
         marc_tokens, nypl_tokens, ctx.idf, mass_floor, ctx.config.title_window_trigger_ratio
     )
+    if _asymmetric_part_designator(marc_title, nypl_title):
+        window_score = 0.0
     window_fired = window_score > score
     score = max(score, window_score)
     token_total = len(matched) + len(unique_marc) + len(unique_nypl)
