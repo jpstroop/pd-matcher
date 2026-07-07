@@ -488,7 +488,7 @@ def test_score_title_group_labels_source_when_window_fires(
     losing: list[Evidence] = []
     sources: list[tuple[str, str]] = []
     _score_title_group(pairings.title, marc, candidate, scorer_context, winning, losing, sources)
-    assert winning[-1].note == "title_window"
+    assert ("title_window", 1.0) in winning[-1].features
     assert winning[-1].score == 100.0
     assert sources[-1] == ("title_window", "t")
 
@@ -509,7 +509,7 @@ def test_score_title_group_keeps_field_source_when_window_idle(
     losing: list[Evidence] = []
     sources: list[tuple[str, str]] = []
     _score_title_group(pairings.title, marc, candidate, scorer_context, winning, losing, sources)
-    assert winning[-1].note is None
+    assert "title_window" not in dict(winning[-1].features)
     assert sources[-1] == ("tf", "t")
 
 

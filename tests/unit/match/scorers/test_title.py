@@ -6,7 +6,7 @@ from msgspec import structs
 
 from pd_matcher.match.idf import IdfTable
 from pd_matcher.match.scorers.context import ScorerContext
-from pd_matcher.match.scorers.title import TITLE_WINDOW_NOTE
+from pd_matcher.match.scorers.title import TITLE_WINDOW_FEATURE
 from pd_matcher.match.scorers.title import _align_tokens
 from pd_matcher.match.scorers.title import _best_window_score
 from pd_matcher.match.scorers.title import _shared_weight
@@ -486,13 +486,13 @@ def test_score_title_window_credits_contained_distinctive_short_title(
     Albuquerque machines" (4 tokens); the length ratio 0.5 clears the 0.5
     trigger. The best 2-token window lands exactly on {widget, albuquerqu}, both
     distinctive, so containment is credited to a full score and the Evidence
-    carries the window note.
+    carries the window flag.
     """
     ev = score_title(
         "Studies of widgets in Albuquerque machines", "Widgets Albuquerque", scorer_context
     )
     assert ev.score == 100.0
-    assert ev.note == TITLE_WINDOW_NOTE
+    assert (TITLE_WINDOW_FEATURE, 1.0) in ev.features
 
 
 def test_score_title_window_lifts_above_symmetric_score(
@@ -508,7 +508,7 @@ def test_score_title_window_lifts_above_symmetric_score(
         _windowless(scorer_context),
     )
     assert windowed.score > windowless.score
-    assert windowless.note is None
+    assert TITLE_WINDOW_FEATURE not in dict(windowless.features)
 
 
 def test_score_title_window_is_side_agnostic(scorer_context: ScorerContext) -> None:
@@ -519,8 +519,8 @@ def test_score_title_window_is_side_agnostic(scorer_context: ScorerContext) -> N
     long_cce = score_title(short_side, long_side, scorer_context)
     assert long_marc.score == 100.0
     assert long_cce.score == 100.0
-    assert long_marc.note == TITLE_WINDOW_NOTE
-    assert long_cce.note == TITLE_WINDOW_NOTE
+    assert (TITLE_WINDOW_FEATURE, 1.0) in long_marc.features
+    assert (TITLE_WINDOW_FEATURE, 1.0) in long_cce.features
 
 
 def test_score_title_window_generic_token_discounted_below_distinctive(
@@ -542,7 +542,7 @@ def test_score_title_window_generic_token_discounted_below_distinctive(
 def test_score_title_window_not_triggered_above_ratio(scorer_context: ScorerContext) -> None:
     """A length ratio above the trigger (3 vs 2 tokens = 0.667 > 0.5) skips the window."""
     ev = score_title("Studies of widgets in Albuquerque", "Widgets Albuquerque", scorer_context)
-    assert ev.note is None
+    assert TITLE_WINDOW_FEATURE not in dict(ev.features)
     assert ev.score < 100.0
 
 
@@ -553,7 +553,7 @@ def test_score_title_window_disabled_by_zero_trigger(scorer_context: ScorerConte
         "Widgets Albuquerque",
         _windowless(scorer_context),
     )
-    assert ev.note is None
+    assert TITLE_WINDOW_FEATURE not in dict(ev.features)
     assert ev.score < 100.0
 
 

@@ -134,8 +134,11 @@ _GENERIC_TITLE_MASS_FACTOR: float = 1.0
 # the intrinsic generic-title guard: a window matched only on common tokens
 # carries thin shared mass, so its confidence — and thus its score — stays near
 # zero by construction ("Selected poems" containment cannot fire on filler).
-# The winning Evidence records this note so the review UI shows the window fired.
-TITLE_WINDOW_NOTE: str = "title_window"
+# When the window wins the comparison the Evidence carries this flag (a
+# diagnostic sub-feature the learned model ignores — it is absent from the
+# canonical feature projection), so the pipeline can label the evidence source
+# ``title_window`` and the review card shows the window fired.
+TITLE_WINDOW_FEATURE: str = "title_window"
 
 
 def _align_tokens(
@@ -461,7 +464,7 @@ def score_title(
     window_score = _best_window_score(
         marc_tokens, nypl_tokens, ctx.idf, mass_floor, ctx.config.title_window_trigger_ratio
     )
-    window_note = TITLE_WINDOW_NOTE if window_score > score else None
+    window_fired = window_score > score
     score = max(score, window_score)
     token_total = len(matched) + len(unique_marc) + len(unique_nypl)
     avg_idf = (weighted_union / token_total) if token_total else 0.0
@@ -475,6 +478,8 @@ def score_title(
         ("marc_token_len", float(len(marc_set))),
         ("nypl_token_len", float(len(nypl_set))),
     )
+    if window_fired:
+        features = (*features, (TITLE_WINDOW_FEATURE, 1.0))
     return Evidence(
         scorer=_SCORER_NAME,
         score=score,
@@ -482,12 +487,11 @@ def score_title(
         skipped=False,
         decisive=False,
         features=features,
-        note=window_note,
     )
 
 
 __all__ = [
-    "TITLE_WINDOW_NOTE",
+    "TITLE_WINDOW_FEATURE",
     "prepare_cross_field_stems",
     "score_title",
 ]
