@@ -94,6 +94,9 @@
   {% endif %}
 </div>
 {% endif %}
+{% if alt_card %}
+<a class="alt-flag" href="#alt-compare">&#9878; Two candidates for this book &mdash; an alternative registration ({{ alt_card.cce_regnum or "no regnum" }}, score {{ "%.3f"|format(alt_card.score) }}) is <span class="alt-flag-score">below the evidence panel &darr;</span></a>
+{% endif %}
 {% if card.audit_note %}<div class="audit-note">{{ card.audit_note }}</div>{% endif %}
 
 <form id="label-form" method="post" action="/label">
@@ -199,7 +202,7 @@
 </form>
 
 {% if alt_card %}
-<div class="alt-compare">
+<div class="alt-compare" id="alt-compare">
   <div class="alt-compare-heading">
     <h2>Matcher's top-1 alternative <span class="ev-heading-score">{{ "%.3f"|format(alt_card.score) }}</span></h2>
     <a href="/pair/{{ alt_card.pair_id }}">open / label this pair (#{{ alt_card.pair_id }})</a>
