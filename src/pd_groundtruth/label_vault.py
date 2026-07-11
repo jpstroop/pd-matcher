@@ -52,6 +52,18 @@ pipeline that links a single pair through both pathways). It defaults to
 ``migrate-vault-v6`` migration backfills ``"registration"`` on every
 pre-schema-7 entry, and the review server stamps it at label time from the
 review pair's ``pairing_type``.
+
+Schema 8 marks the ``same_work_foreign_publication`` addition to the
+:data:`CategoryKey` vocabulary. Unlike the empty-tuple / uniform backfills of
+schemas 5 through 7, extending the ``CategoryKey`` ``Literal`` is only
+forward-compatible: an entry carrying the new key cannot be decoded by code
+built against the prior vocabulary, so the bump marks the boundary at which
+the key may appear. The addition also completes a semantic axis —
+``different_edition`` marks *different content* (rides ``no_match`` /
+``unsure``) while ``same_work_foreign_publication`` marks *the same content*
+published under a foreign publication event (rides ``match``). The
+``migrate-vault-v7`` migration re-stamps every pre-schema-8 entry to schema 8
+without altering any field.
 """
 
 from collections.abc import Iterator
@@ -67,7 +79,7 @@ from msgspec.json import encode as json_encode
 from pd_matcher.models import IndexedNyplRegRecord
 from pd_matcher.models import MarcRecord
 
-SCHEMA_VERSION: int = 7
+SCHEMA_VERSION: int = 8
 
 MatchSource = Literal[
     "registration",
@@ -180,12 +192,14 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
       MARC is one member (``match`` by inference per the labeling guide).
     * ``translation`` — one side registers a translation, the other the
       original.
-    * ``different_edition`` — same work, different edition / printing
-      (typically year or publisher mismatch on otherwise identical title
-      + author).
-    * ``same_work_foreign_publication`` — the CCE registration's
-      publication event is in a different country from the MARC's
-      (transatlantic edition of the same work).
+    * ``different_edition`` — a different edition / printing whose *content*
+      differs enough to be a different registration (typically year or
+      publisher mismatch on an otherwise similar title + author); the
+      different-content pole, so it rides ``no_match`` / ``unsure``.
+    * ``same_work_foreign_publication`` — *the same content* under a foreign
+      publication event: the CCE registration's publication event is in a
+      different country from the MARC's (transatlantic edition of the same
+      work); the same-content pole, so it rides ``match``.
     * ``ocr_confusion`` — match obscured by an OCR transcription error.
     * ``same_title_different_work`` — full title agreement with author /
       publisher / year all contradicting.

@@ -214,9 +214,9 @@ def test_extract_marc_identifiers_handles_missing_identifiers() -> None:
     assert identifiers.isbns == ()
 
 
-def test_schema_version_is_seven() -> None:
-    """New vault writes use schema 7 (adds the ``match_source`` pathway field)."""
-    assert SCHEMA_VERSION == 7
+def test_schema_version_is_eight() -> None:
+    """New vault writes use schema 8 (the ``same_work_foreign_publication`` category)."""
+    assert SCHEMA_VERSION == 8
 
 
 def test_legacy_schema_entries_with_old_fields_reject_decode(tmp_path: Path) -> None:

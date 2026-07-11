@@ -43,6 +43,8 @@ Evidence anchors:
 - Same-year publication of the same title/author across countries is presumptively the same text. Simultaneous transatlantic publication was standard practice under the 1909 Act: its ad interim provisions pushed publishers of English-language works first published abroad to secure US publication quickly (this is the mechanism behind the AI registration class).
 - Extent differences across different publishers are weak evidence of content difference. The manufacturing clause required US typesetting for full-term protection, so page counts routinely differ between printings of identical text. Extent is a strong differentiator only within the same publisher.
 
+`same_work_foreign_publication` and `different_edition` sit at opposite ends of the same axis, and it is worth keeping them straight: `same_work_foreign_publication` means the *same content* under a foreign publication event (a `match`), whereas `different_edition` means the *content itself differs* enough to be a separate registration (a `no_match` or `unsure`). This is guidance, not a rule the tooling enforces — genuine edge cases exist, so let the evidence decide the verdict and use the category to record what you saw.
+
 ## E-book reprint badge
 
 When the card shows a yellow **E-book reprint** badge, the MARC record's `extent` field contains "online resource" — Princeton's record describes a digital reissue, not the original publication. Year and publisher in the MARC side belong to the digital reissue (e.g. a modern aggregator), not to the original artifact the CCE entry would have registered.
