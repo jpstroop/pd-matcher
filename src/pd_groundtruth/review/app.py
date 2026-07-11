@@ -72,6 +72,7 @@ _CATEGORY_CHOICES: tuple[tuple[str, str], ...] = (
     ("cce_whole_marc_part", "CCE=whole / MARC=part"),
     ("translation", "Translation"),
     ("different_edition", "Different edition"),
+    ("same_work_foreign_publication", "Foreign publication"),
     ("ocr_confusion", "OCR confusion"),
     ("same_title_different_work", "Same title, different work"),
     ("generic_title", "Generic title"),

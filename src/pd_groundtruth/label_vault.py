@@ -80,6 +80,7 @@ CategoryKey = Literal[
     "cce_whole_marc_part",
     "translation",
     "different_edition",
+    "same_work_foreign_publication",
     "ocr_confusion",
     "same_title_different_work",
     "generic_title",
@@ -182,6 +183,9 @@ class VaultEntry(Struct, frozen=True, forbid_unknown_fields=True):
     * ``different_edition`` — same work, different edition / printing
       (typically year or publisher mismatch on otherwise identical title
       + author).
+    * ``same_work_foreign_publication`` — the CCE registration's
+      publication event is in a different country from the MARC's
+      (transatlantic edition of the same work).
     * ``ocr_confusion`` — match obscured by an OCR transcription error.
     * ``same_title_different_work`` — full title agreement with author /
       publisher / year all contradicting.

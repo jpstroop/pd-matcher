@@ -1441,6 +1441,38 @@ def test_label_post_writes_categories_to_db(client: TestClient, tmp_path: Path) 
     assert rows[0].categories == ("translation", "ocr_confusion")
 
 
+def test_card_renders_foreign_publication_category_checkbox(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'name="categories" value="same_work_foreign_publication"' in response.text
+    assert "Foreign publication" in response.text
+
+
+def test_card_renders_match_foreign_pub_button_with_hotkey(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'data-action="match-foreign"' in response.text
+    assert "Match, foreign pub (p)" in response.text
+
+
+def test_label_post_writes_foreign_publication_category_to_vault(
+    client: TestClient, vault_path: Path
+) -> None:
+    response = client.post(
+        "/label",
+        data={
+            "pair_id": "1",
+            "verdict": "match",
+            "categories": ["same_work_foreign_publication"],
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    [entry] = list(iter_entries(vault_path))
+    assert entry.verdict == "match"
+    assert entry.categories == ("same_work_foreign_publication",)
+
+
 @fixture
 def categories_client(tmp_path: Path, vault_path: Path) -> Iterator[TestClient]:
     db_path = tmp_path / "review.db"

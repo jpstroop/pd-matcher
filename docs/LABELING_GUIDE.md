@@ -30,6 +30,19 @@ When MARC and CCE describe different scopes within the same series or set, the v
 
 When you can't tell whether a CCE registration is series-level or volume-level → `unsure`, note the doubt.
 
+## Country/publisher divergence (transatlantic editions)
+
+Divergence in publisher and publication country alone is never grounds for `no_match`.
+
+- If the connection can be affirmatively established — a documented imprint or co-publishing relationship, renewal data confirming the same translation or setting, or overwhelming content identity (unique title + author + year) — label `match`, and add the `same_work_foreign_publication` category when the CCE registration's publication event is in a different country from the MARC's.
+- If the connection cannot be established, label `unsure` with `[reasons: pub_differs]`.
+- `no_match` requires a content-level disagreement: a different work, a different title, or an incompatible extent within the same publisher.
+
+Evidence anchors:
+
+- Same-year publication of the same title/author across countries is presumptively the same text. Simultaneous transatlantic publication was standard practice under the 1909 Act: its ad interim provisions pushed publishers of English-language works first published abroad to secure US publication quickly (this is the mechanism behind the AI registration class).
+- Extent differences across different publishers are weak evidence of content difference. The manufacturing clause required US typesetting for full-term protection, so page counts routinely differ between printings of identical text. Extent is a strong differentiator only within the same publisher.
+
 ## E-book reprint badge
 
 When the card shows a yellow **E-book reprint** badge, the MARC record's `extent` field contains "online resource" — Princeton's record describes a digital reissue, not the original publication. Year and publisher in the MARC side belong to the digital reissue (e.g. a modern aggregator), not to the original artifact the CCE entry would have registered.
