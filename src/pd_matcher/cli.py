@@ -19,6 +19,7 @@ from importlib.resources import as_file
 from importlib.resources import files
 from json import dumps
 from logging import WARNING
+from logging import getLogger
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Annotated
@@ -72,6 +73,8 @@ _AUTHOR_IDF_CACHE_NAME: str = "author_idf.msgpack"
 _PUBLISHER_IDF_CACHE_NAME: str = "publisher_idf.msgpack"
 _CALIBRATOR_NAME: str = "calibrator.msgpack"
 _LEARNED_SCORER: str = "learned"
+
+_LOGGER = getLogger(__name__)
 
 _YEAR_WINDOW_MIN: int = 0
 _YEAR_WINDOW_MAX: int = 100
@@ -372,6 +375,34 @@ def _load_calibrator(parent: Path) -> PlattCalibrator | None:
     return load_calibrator(candidate)
 
 
+def _weighted_calibrator(parent: Path, config: MatchingConfig) -> PlattCalibrator | None:
+    """Return the weighted arm's Platt calibrator, or ``None`` for the learned arm.
+
+    The Platt sigmoid calibrates the weighted-mean raw score; it must not be
+    applied to the learned arm, which carries its own isotonic calibrator
+    (issue #130) inside its combiner. Gating on ``config.scorer`` keeps each
+    arm's calibration independent — the exact mirror of
+    :func:`_learned_model_dir`.
+
+    When the weighted arm runs without a calibrator artifact the run falls back
+    to ``calibrated = raw / 100`` (uncalibrated), so a WARNING is logged rather
+    than failing silently (issue #117): ``--min-score`` then means a raw score,
+    not a probability.
+    """
+    if config.scorer == _LEARNED_SCORER:
+        return None
+    calibrator = _load_calibrator(parent)
+    if calibrator is None:
+        _LOGGER.warning(
+            "calibrator.missing weighted arm running UNCALIBRATED "
+            "(--min-score is a raw score, not a probability); "
+            "fit one with `pdm run fit-calibrator` — see issue #117 (%s/%s)",
+            parent,
+            _CALIBRATOR_NAME,
+        )
+    return calibrator
+
+
 def _learned_model_dir(parent: Path, config: MatchingConfig) -> Path | None:
     """Return the learned-model directory only when the learned scorer is active.
 
@@ -615,8 +646,8 @@ def match(
         )
     except OSError as exc:
         raise _fail(f"failed to load/build IDF table: {exc}") from exc
-    calibrator = _load_calibrator(index.parent)
     learned_model_dir = _learned_model_dir(index.parent, matching_config)
+    calibrator = _weighted_calibrator(index.parent, matching_config)
     try:
         build_combiner(matching_config, learned_model_dir=learned_model_dir)
     except ValueError as exc:
@@ -717,8 +748,8 @@ def eval_(
         pairing_config = _load_default_pairing_config()
     except ConfigError as exc:
         raise _fail(f"failed to load pairing defaults: {exc}") from exc
-    calibrator = _load_calibrator(index.parent)
     learned_model_dir = _learned_model_dir(index.parent, matching_config)
+    calibrator = _weighted_calibrator(index.parent, matching_config)
     try:
         eval_report = run_eval(
             vault_path=vault,

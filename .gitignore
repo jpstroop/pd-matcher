@@ -38,6 +38,7 @@ scripts/*
 !scripts/additional_entry_join_measure.py
 !scripts/renewal_matcher_eval.py
 !scripts/fit_calibrator.py
+!scripts/fit_learned_calibrator.py
 !scripts/publisher_split_ab.py
 !scripts/class_fold_scan.py
 

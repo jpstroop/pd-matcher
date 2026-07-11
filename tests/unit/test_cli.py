@@ -242,6 +242,46 @@ def test_learned_model_dir_returns_parent_for_learned_scorer(tmp_path: Path) -> 
     assert _learned_model_dir(tmp_path, _matching_config("learned")) == tmp_path
 
 
+def test_weighted_calibrator_none_for_learned_scorer(tmp_path: Path) -> None:
+    """The learned arm never loads the weighted Platt calibrator (issue #130)."""
+    from pd_matcher.cli import _CALIBRATOR_NAME
+    from pd_matcher.cli import _weighted_calibrator
+
+    calibrator = PlattCalibrator(
+        a=-0.1,
+        b=7.0,
+        trained_at="2026-07-11T00:00:00+00:00",
+        n_positive=1,
+        n_negative=1,
+    )
+    (tmp_path / _CALIBRATOR_NAME).write_bytes(Encoder().encode(calibrator))
+    assert _weighted_calibrator(tmp_path, _matching_config("learned")) is None
+
+
+def test_weighted_calibrator_loads_for_weighted_scorer(tmp_path: Path) -> None:
+    """The weighted arm loads its Platt calibrator when the artifact is present."""
+    from pd_matcher.cli import _CALIBRATOR_NAME
+    from pd_matcher.cli import _weighted_calibrator
+
+    calibrator = PlattCalibrator(
+        a=-0.1,
+        b=7.0,
+        trained_at="2026-07-11T00:00:00+00:00",
+        n_positive=1,
+        n_negative=1,
+    )
+    (tmp_path / _CALIBRATOR_NAME).write_bytes(Encoder().encode(calibrator))
+    loaded = _weighted_calibrator(tmp_path, _matching_config("weighted_mean"))
+    assert loaded == calibrator
+
+
+def test_weighted_calibrator_none_when_absent(tmp_path: Path) -> None:
+    """No artifact means no calibrator, even on the weighted arm."""
+    from pd_matcher.cli import _weighted_calibrator
+
+    assert _weighted_calibrator(tmp_path, _matching_config("weighted_mean")) is None
+
+
 def test_index_build_succeeds_on_tiny_fixtures(tmp_path: Path) -> None:
     """``index build`` against the tiny fixtures returns code 0 and prints counts."""
     reg_dir, ren_dir = _stage_sources(tmp_path)
