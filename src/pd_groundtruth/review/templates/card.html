@@ -108,6 +108,7 @@
   <div class="action-bar">
     <div class="actions">
       <button type="button" class="match{% if card.current_verdict == 'match' %} current{% endif %}" data-verdict="match">Match (y)</button>
+      <button type="button" class="match match-foreign" data-action="match-foreign">Match, foreign pub (p)</button>
       <button type="button" class="no{% if card.current_verdict == 'no_match' %} current{% endif %}" data-verdict="no_match">No match (n)</button>
       <button type="button" class="unsure{% if card.current_verdict == 'unsure' %} current{% endif %}" data-verdict="unsure">Unsure (u)</button>
       <button type="button" class="skip" data-verdict="">Skip (s / space)</button>
@@ -237,7 +238,7 @@
   <span>reg <code>{{ card.nypl_uuid }}</code></span>
   {% if card.cce_renewal_id %}<span>ren <code>{{ card.cce_renewal_id }}</code></span>{% endif %}
 </div>
-<p class="hint">Keyboard: <strong>y</strong> match · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}{% if forward_id is not none %} · <strong>f</strong> or <strong>&rarr;</strong> forward{% endif %}. The note field captures whatever you think is worth flagging about the pair; accumulated notes will be analyzed later to surface patterns.</p>
+<p class="hint">Keyboard: <strong>y</strong> match · <strong>p</strong> match, foreign pub · <strong>n</strong> no match · <strong>u</strong> unsure · <strong>s</strong> or <strong>space</strong> skip{% if back_id is not none %} · <strong>b</strong> or <strong>&larr;</strong> back{% endif %}{% if forward_id is not none %} · <strong>f</strong> or <strong>&rarr;</strong> forward{% endif %}. The note field captures whatever you think is worth flagging about the pair; accumulated notes will be analyzed later to surface patterns.</p>
 
 <script>
 (function () {
@@ -248,11 +249,19 @@
   const skipUrl = "/{% set qs = filters.next_query_string(additional_skip_id=card.pair_id) %}{% if qs %}?{{ qs | safe }}{% endif %}";
   const backLink = document.getElementById("back-link");
   const forwardLink = document.getElementById("forward-link");
+  const foreignPubCheckbox = form.querySelector(
+    'input[name="categories"][value="same_work_foreign_publication"]'
+  );
 
   function submitVerdict(verdict) {
     if (!verdict) { window.location.href = skipUrl; return; }
     verdictField.value = verdict;
     form.submit();
+  }
+
+  function submitMatchForeignPub() {
+    if (foreignPubCheckbox) { foreignPubCheckbox.checked = true; }
+    submitVerdict("match");
   }
 
   function goBack() {
@@ -264,7 +273,10 @@
   }
 
   document.querySelectorAll(".actions button").forEach(function (btn) {
-    btn.addEventListener("click", function () { submitVerdict(btn.dataset.verdict); });
+    btn.addEventListener("click", function () {
+      if (btn.dataset.action === "match-foreign") { submitMatchForeignPub(); return; }
+      submitVerdict(btn.dataset.verdict);
+    });
   });
 
   document.addEventListener("keydown", function (e) {
@@ -272,6 +284,7 @@
     if (e.target === noteField) { return; }
     switch (e.key) {
       case "y": e.preventDefault(); submitVerdict("match"); break;
+      case "p": e.preventDefault(); submitMatchForeignPub(); break;
       case "n": e.preventDefault(); submitVerdict("no_match"); break;
       case "u": e.preventDefault(); submitVerdict("unsure"); break;
       case "s": case " ": e.preventDefault(); submitVerdict(""); break;

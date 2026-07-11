@@ -34,6 +34,7 @@ _SCHEMA_V3: int = 3
 _SCHEMA_V4: int = 4
 _SCHEMA_V5: int = 5
 _SCHEMA_V7: int = 7
+_SCHEMA_V8: int = 8
 _DEFAULT_MATCH_SOURCE: str = "registration"
 _ARCHIVE_SUFFIX: str = ".pre-v3"
 
@@ -76,6 +77,17 @@ class MigrationReportV6(Struct, frozen=True, forbid_unknown_fields=True):
 
     ``migrated`` is the number of entries whose ``schema`` was below 7 and
     that received the ``match_source="registration"`` backfill.
+    """
+
+    total_entries: int
+    migrated: int
+
+
+class MigrationReportV7(Struct, frozen=True, forbid_unknown_fields=True):
+    """Counts emitted by :func:`migrate_vault_v7` for the CLI to print.
+
+    ``migrated`` is the number of entries whose ``schema`` was below 8 and
+    that were re-stamped to schema 8.
     """
 
     total_entries: int
@@ -367,14 +379,50 @@ def migrate_vault_v6(vault_path: Path) -> MigrationReportV6:
     return MigrationReportV6(total_entries=len(raw_entries), migrated=migrated)
 
 
+def migrate_vault_v7(vault_path: Path) -> MigrationReportV7:
+    """Re-stamp every entry to schema 8 (no field changes).
+
+    Schema 8 marks the ``same_work_foreign_publication`` addition to the
+    :data:`~pd_groundtruth.label_vault.CategoryKey` vocabulary. Extending that
+    ``Literal`` is only forward-compatible, so the bump exists purely to mark
+    the boundary at which the new key may appear; no field is added or altered.
+    Every pre-v8 entry is re-stamped to ``schema=8`` and its existing fields —
+    including any ``categories`` — pass through untouched.
+
+    Idempotent: a vault already entirely at schema 8 returns a zero-count
+    report and is not rewritten. A missing or empty vault is also a
+    zero-count no-op.
+
+    The write itself is atomic: a temp file in the same directory is renamed
+    over the canonical path. The pre-migration vault is preserved in git
+    history rather than on disk.
+    """
+    if not vault_path.exists() or vault_path.stat().st_size == 0:
+        return MigrationReportV7(total_entries=0, migrated=0)
+    raw_entries = list(_iter_raw_entries(vault_path))
+    if all(_schema_at_least(entry, _SCHEMA_V8) for entry in raw_entries):
+        return MigrationReportV7(total_entries=len(raw_entries), migrated=0)
+    migrated = 0
+    migrated_entries: list[dict[str, object]] = []
+    for raw in raw_entries:
+        if not _schema_at_least(raw, _SCHEMA_V8):
+            raw["schema"] = _SCHEMA_V8
+            migrated += 1
+        migrated_entries.append(raw)
+    _atomic_write_jsonl(vault_path, migrated_entries)
+    return MigrationReportV7(total_entries=len(raw_entries), migrated=migrated)
+
+
 __all__ = [
     "CceLookupFn",
     "MigrationReport",
     "MigrationReportV4",
     "MigrationReportV5",
     "MigrationReportV6",
+    "MigrationReportV7",
     "migrate_vault_v3",
     "migrate_vault_v4",
     "migrate_vault_v5",
     "migrate_vault_v6",
+    "migrate_vault_v7",
 ]

@@ -32,6 +32,7 @@ _VALID_CATEGORY_KEYS: frozenset[str] = frozenset(
         "cce_whole_marc_part",
         "translation",
         "different_edition",
+        "same_work_foreign_publication",
         "ocr_confusion",
         "same_title_different_work",
         "generic_title",

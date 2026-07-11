@@ -152,7 +152,7 @@ def test_enrich_writes_derived_fields_and_preserves_human_fields(tmp_path: Path)
         learned_scored=1,
     )
     [entry] = list(iter_entries(vault_path))
-    assert entry.schema == 7
+    assert entry.schema == 8
     assert entry.reg_year == 1953
     assert entry.renewal_year == 1981
     assert entry.was_renewed is True

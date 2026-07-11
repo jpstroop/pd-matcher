@@ -214,9 +214,9 @@ def test_extract_marc_identifiers_handles_missing_identifiers() -> None:
     assert identifiers.isbns == ()
 
 
-def test_schema_version_is_seven() -> None:
-    """New vault writes use schema 7 (adds the ``match_source`` pathway field)."""
-    assert SCHEMA_VERSION == 7
+def test_schema_version_is_eight() -> None:
+    """New vault writes use schema 8 (the ``same_work_foreign_publication`` category)."""
+    assert SCHEMA_VERSION == 8
 
 
 def test_legacy_schema_entries_with_old_fields_reject_decode(tmp_path: Path) -> None:
@@ -346,6 +346,25 @@ def test_round_trip_preserves_categories(tmp_path: Path) -> None:
     upsert_entry(path, entry)
     [read_back] = list(iter_entries(path))
     assert read_back.categories == ("marc_whole_cce_part", "generic_title")
+
+
+def test_round_trip_preserves_foreign_publication_category(tmp_path: Path) -> None:
+    """The ``same_work_foreign_publication`` key survives encode/decode."""
+    path = tmp_path / "vault.jsonl"
+    entry = VaultEntry(
+        schema=SCHEMA_VERSION,
+        marc_control_id="ctrl-1",
+        nypl_uuid="uuid-1",
+        verdict="match",
+        note=None,
+        labeled_at="2026-06-01T00:00:00+00:00",
+        labeler="jpstroop",
+        marc_identifiers=MarcIdentifiers(lccn=None, oclc=None, isbns=()),
+        categories=("same_work_foreign_publication",),
+    )
+    upsert_entry(path, entry)
+    [read_back] = list(iter_entries(path))
+    assert read_back.categories == ("same_work_foreign_publication",)
 
 
 def test_unknown_category_key_raises_validation_error(tmp_path: Path) -> None:

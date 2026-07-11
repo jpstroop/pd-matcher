@@ -175,6 +175,11 @@ def test_parse_label_filters_drops_unknown_category_keys() -> None:
     assert filters.categories == ("translation", "generic_title")
 
 
+def test_parse_label_filters_accepts_foreign_publication_category() -> None:
+    filters = parse_label_filters(None, None, None, None, ["same_work_foreign_publication"])
+    assert filters.categories == ("same_work_foreign_publication",)
+
+
 def test_parse_label_filters_empty_categories_collapse_to_empty_tuple() -> None:
     assert parse_label_filters(None, None, None, None, None).categories == ()
     assert parse_label_filters(None, None, None, None, []).categories == ()

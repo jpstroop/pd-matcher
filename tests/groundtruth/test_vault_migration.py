@@ -13,6 +13,7 @@ from pd_groundtruth.vault_migration import migrate_vault_v3
 from pd_groundtruth.vault_migration import migrate_vault_v4
 from pd_groundtruth.vault_migration import migrate_vault_v5
 from pd_groundtruth.vault_migration import migrate_vault_v6
+from pd_groundtruth.vault_migration import migrate_vault_v7
 from pd_matcher.models import IndexedNyplRegRecord
 
 _RUNNER = CliRunner()
@@ -824,3 +825,137 @@ def test_cli_migrate_vault_v6_missing_file_reports_zero(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "migrated 0 entries" in result.stdout
     assert "bumped 0 to schema 7" in result.stdout
+
+
+# ---- v7 migration (-> schema 8, category-vocabulary boundary) --------------
+
+
+def _v8_line(
+    *,
+    marc_id: str,
+    nypl_uuid: str,
+    schema: int = 8,
+    categories: tuple[str, ...] = (),
+) -> str:
+    rendered = "[" + ",".join(f'"{c}"' for c in categories) + "]"
+    return (
+        f'{{"schema":{schema},"marc_control_id":"{marc_id}","nypl_uuid":"{nypl_uuid}",'
+        '"verdict":"match","note":null,"labeled_at":"2026-07-11T00:00:00+00:00",'
+        '"labeler":"jpstroop","marc_identifiers":{"lccn":null,"oclc":null,"isbns":[]},'
+        '"cce_regnum":null,"cce_renewal_id":null,"cce_renewal_oreg":null,'
+        f'"categories":{rendered},"reg_year":null,"renewal_year":null,"was_renewed":null,'
+        '"scores":null,"matcher_version":null,"match_source":"registration"}'
+    )
+
+
+def test_v7_restamps_pre_v8_vault_to_schema_8(tmp_path: Path) -> None:
+    """Every pre-v8 entry becomes schema 8 with all other fields untouched."""
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v8_line(marc_id="a", nypl_uuid="u-a", schema=7),
+            _v8_line(marc_id="b", nypl_uuid="u-b", schema=7, categories=("translation",)),
+        ],
+    )
+    report = migrate_vault_v7(path)
+    assert report.total_entries == 2
+    assert report.migrated == 2
+    entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
+    assert entries["a"].schema == 8
+    assert entries["b"].schema == 8
+    # Pre-existing fields survive the re-stamp.
+    assert entries["b"].categories == ("translation",)
+    assert entries["a"].match_source == "registration"
+
+
+def test_v7_preserves_foreign_publication_category_through_the_bump(tmp_path: Path) -> None:
+    """The new ``same_work_foreign_publication`` key round-trips the re-stamp."""
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v8_line(
+                marc_id="a",
+                nypl_uuid="u-a",
+                schema=7,
+                categories=("same_work_foreign_publication",),
+            ),
+        ],
+    )
+    report = migrate_vault_v7(path)
+    assert report.migrated == 1
+    [entry] = list(iter_entries(path))
+    assert entry.schema == 8
+    assert entry.categories == ("same_work_foreign_publication",)
+
+
+def test_v7_is_idempotent_on_already_v8_vault(tmp_path: Path) -> None:
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v8_line(marc_id="a", nypl_uuid="u-a"),
+            _v8_line(
+                marc_id="b",
+                nypl_uuid="u-b",
+                categories=("same_work_foreign_publication",),
+            ),
+        ],
+    )
+    original_bytes = path.read_bytes()
+    report = migrate_vault_v7(path)
+    assert report.total_entries == 2
+    assert report.migrated == 0
+    assert path.read_bytes() == original_bytes
+
+
+def test_v7_handles_missing_vault_file(tmp_path: Path) -> None:
+    path = tmp_path / "absent.jsonl"
+    report = migrate_vault_v7(path)
+    assert report.total_entries == 0
+    assert report.migrated == 0
+    assert not path.exists()
+
+
+def test_v7_handles_empty_vault_file(tmp_path: Path) -> None:
+    path = tmp_path / "empty.jsonl"
+    path.write_bytes(b"")
+    report = migrate_vault_v7(path)
+    assert report.total_entries == 0
+    assert report.migrated == 0
+
+
+def test_v7_mixed_vault_only_bumps_pre_v8_entries(tmp_path: Path) -> None:
+    """A mix of v7 and v8 entries: only the v7 ones get re-stamped."""
+    path = tmp_path / "vault.jsonl"
+    _write_vault(
+        path,
+        [
+            _v8_line(marc_id="old", nypl_uuid="u-old", schema=7),
+            _v8_line(marc_id="new", nypl_uuid="u-new", schema=8),
+        ],
+    )
+    report = migrate_vault_v7(path)
+    assert report.total_entries == 2
+    assert report.migrated == 1
+    entries = {entry.marc_control_id: entry for entry in iter_entries(path)}
+    assert entries["old"].schema == 8
+    assert entries["new"].schema == 8
+
+
+def test_cli_migrate_vault_v7_runs_and_reports(tmp_path: Path) -> None:
+    vault_path = tmp_path / "vault.jsonl"
+    _write_vault(vault_path, [_v8_line(marc_id="a", nypl_uuid="u-a", schema=7)])
+    result = _RUNNER.invoke(app, ["migrate-vault-v7", "--vault", str(vault_path)])
+    assert result.exit_code == 0, result.stdout
+    assert "migrated 1 entries" in result.stdout
+    assert "bumped 1 to schema 8" in result.stdout
+
+
+def test_cli_migrate_vault_v7_missing_file_reports_zero(tmp_path: Path) -> None:
+    vault_path = tmp_path / "absent.jsonl"
+    result = _RUNNER.invoke(app, ["migrate-vault-v7", "--vault", str(vault_path)])
+    assert result.exit_code == 0
+    assert "migrated 0 entries" in result.stdout
+    assert "bumped 0 to schema 8" in result.stdout
