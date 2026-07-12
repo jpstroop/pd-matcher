@@ -42,6 +42,13 @@ pdm run pd-matcher index build \
 
 You only repeat this when the NYPL submodules update or the parser changes (see [When to rebuild caches](#when-to-rebuild-caches)).
 
+The score calibrators are local artifacts that live beside the index and are **not** checked in. On a fresh checkout (or after deleting `caches/`), regenerate them before matching, or the matchers run on raw, uncalibrated scores (a warning is logged when this happens):
+
+```sh
+pdm run fit-calibrator
+pdm run python scripts/fit_learned_calibrator.py
+```
+
 ### 2. Filter your MARCXML to in-scope records
 
 `pd-groundtruth filter` takes a **local MARCXML file** and writes out only the records this matcher can do anything with — no download, no cap, no Princeton or any other institution involved:
