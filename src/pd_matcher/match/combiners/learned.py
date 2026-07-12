@@ -41,6 +41,10 @@ from numpy.typing import NDArray
 from pd_matcher.match.combiners.base import CombinedScore
 from pd_matcher.match.combiners.features import feature_names
 from pd_matcher.match.combiners.features import feature_row
+from pd_matcher.match.combiners.learned_calibrator import CALIBRATOR_FILENAME
+from pd_matcher.match.combiners.learned_calibrator import IsotonicCalibrator
+from pd_matcher.match.combiners.learned_calibrator import apply_isotonic
+from pd_matcher.match.combiners.learned_calibrator import load_learned_calibrator
 from pd_matcher.match.evidence import Evidence
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -137,33 +141,43 @@ def load_learned_model(directory: Path) -> LearnedCombiner:
             f"`{_TRAIN_COMMAND}`."
         )
     booster = booster_cls(model_file=str(directory / MODEL_FILENAME))
-    return LearnedCombiner(booster=booster, names=current)
+    calibrator_path = directory / CALIBRATOR_FILENAME
+    calibrator = load_learned_calibrator(calibrator_path) if calibrator_path.is_file() else None
+    return LearnedCombiner(booster=booster, names=current, calibrator=calibrator)
 
 
 @dataclass(frozen=True, slots=True)
 class LearnedCombiner:
     """Combiner backed by a trained LightGBM Booster.
 
-    Holds the Booster and the feature-name order it was trained on. A plain
-    frozen slotted dataclass (not a msgspec Struct) because the Booster is an
-    opaque foreign object msgspec cannot validate or encode.
+    Holds the Booster, the feature-name order it was trained on, and an
+    optional isotonic calibrator (issue #130). A plain frozen slotted dataclass
+    (not a msgspec Struct) because the Booster is an opaque foreign object
+    msgspec cannot validate or encode.
     """
 
     booster: Booster
     names: tuple[str, ...]
+    calibrator: IsotonicCalibrator | None = None
 
     def combine(self, evidence: Sequence[Evidence]) -> CombinedScore:
         """Score one pair's Evidence via the Booster's match probability.
 
-        Projects ``evidence`` through the canonical
-        :func:`feature_row`, predicts a single probability, and returns it as
-        both the calibrated score (``[0, 1]``) and the raw score
-        (``probability * 100``).
+        Projects ``evidence`` through the canonical :func:`feature_row` and
+        predicts a single probability. ``raw`` is ``probability * 100`` (the
+        ranking key, unchanged). ``calibrated`` is the isotonic-calibrated
+        probability when a calibrator is attached, else the raw probability.
+        Isotonic calibration is monotone, so it never reorders candidates.
         """
         row: NDArray[float64] = asarray([feature_row(evidence)], dtype=float64)
         predicted: NDArray[float64] = asarray(self.booster.predict(row), dtype=float64)
         probability = float(predicted[0])
-        return CombinedScore(raw=probability * _RAW_MAX, calibrated=probability)
+        calibrated = (
+            apply_isotonic(probability, self.calibrator)
+            if self.calibrator is not None
+            else probability
+        )
+        return CombinedScore(raw=probability * _RAW_MAX, calibrated=calibrated)
 
 
 def model_metadata(

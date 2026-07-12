@@ -20,6 +20,9 @@ from pd_matcher.match.combiners.learned import LearnedModelMeta
 from pd_matcher.match.combiners.learned import load_learned_model
 from pd_matcher.match.combiners.learned import model_metadata
 from pd_matcher.match.combiners.learned import save_learned_model
+from pd_matcher.match.combiners.learned_calibrator import CALIBRATOR_FILENAME
+from pd_matcher.match.combiners.learned_calibrator import IsotonicCalibrator
+from pd_matcher.match.combiners.learned_calibrator import save_learned_calibrator
 from pd_matcher.match.evidence import Evidence
 
 _N_FEATURES: int = len(feature_names())
@@ -177,3 +180,77 @@ def test_metadata_records_feature_contract(trained_booster: Booster) -> None:
     assert meta.feature_names == feature_names()
     assert meta.lightgbm_version
     assert meta.n_positive == _N_ROWS // 2
+
+
+def _identity_shifting_calibrator() -> IsotonicCalibrator:
+    """A monotone calibrator that maps every probability to a strictly lower value.
+
+    Strictly increasing in the input, so it preserves ordering while changing
+    the reported numbers — the property the learned calibration layer relies on.
+    """
+    return IsotonicCalibrator(
+        xs=(0.0, 1.0),
+        ys=(0.0, 0.5),
+        trained_at="2026-07-11T00:00:00+00:00",
+        n_positive=10,
+        n_negative=10,
+    )
+
+
+def test_combine_applies_calibrator_to_calibrated_only(trained_booster: Booster) -> None:
+    """A calibrator changes ``calibrated`` but leaves ``raw`` at the probability."""
+    plain = LearnedCombiner(booster=trained_booster, names=feature_names())
+    calibrated = LearnedCombiner(
+        booster=trained_booster,
+        names=feature_names(),
+        calibrator=_identity_shifting_calibrator(),
+    )
+    evidence = _full_evidence()
+    plain_result = plain.combine(evidence)
+    cal_result = calibrated.combine(evidence)
+    assert cal_result.raw == plain_result.raw
+    assert cal_result.calibrated == plain_result.calibrated * 0.5
+
+
+def test_load_attaches_calibrator_when_present(
+    trained_booster: Booster,
+    tmp_path: Path,
+) -> None:
+    """load_learned_model wires an isotonic calibrator sitting beside the model."""
+    save_learned_model(trained_booster, _meta(trained_booster), tmp_path)
+    save_learned_calibrator(_identity_shifting_calibrator(), tmp_path / CALIBRATOR_FILENAME)
+    loaded = load_learned_model(tmp_path)
+    assert loaded.calibrator is not None
+    evidence = _full_evidence()
+    plain = LearnedCombiner(booster=trained_booster, names=feature_names())
+    assert loaded.combine(evidence).calibrated == plain.combine(evidence).calibrated * 0.5
+
+
+def test_load_leaves_calibrator_none_when_absent(
+    trained_booster: Booster,
+    tmp_path: Path,
+) -> None:
+    """Without the artifact the combiner runs uncalibrated (raw probability)."""
+    save_learned_model(trained_booster, _meta(trained_booster), tmp_path)
+    loaded = load_learned_model(tmp_path)
+    assert loaded.calibrator is None
+
+
+def test_calibration_preserves_candidate_ranking(trained_booster: Booster) -> None:
+    """Monotone calibration must not reorder candidates (zero top-1 change).
+
+    Applies the calibrator to a spread of probabilities and asserts the argmax
+    and the full ordering are identical before and after — the guarantee that
+    lets the layer ship without touching precision/recall.
+    """
+    from pd_matcher.match.combiners.learned_calibrator import apply_isotonic
+
+    cal = _identity_shifting_calibrator()
+    raw = [0.02, 0.61, 0.899, 0.9, 0.9001, 0.5, 0.5, 0.999]
+    calibrated = [apply_isotonic(p, cal) for p in raw]
+    raw_order = sorted(range(len(raw)), key=lambda i: raw[i])
+    cal_order = sorted(range(len(calibrated)), key=lambda i: calibrated[i])
+    assert raw_order == cal_order
+    assert max(range(len(raw)), key=lambda i: raw[i]) == max(
+        range(len(calibrated)), key=lambda i: calibrated[i]
+    )
