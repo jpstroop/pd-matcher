@@ -5,9 +5,9 @@
     "year_window": 0
   },
   "metrics": {
-    "precision": 0.9854413102820746,
-    "recall": 0.9661016949152542,
-    "f1": 0.9756756756756757,
+    "precision": 0.9823747680890538,
+    "recall": 0.944692239072257,
+    "f1": 0.9631650750341064,
     "auc_roc": 0.9855506730048563,
     "average_precision": 0.9887786971078023
   },
@@ -17,8 +17,8 @@
     "pairs_negative": 865,
     "pairs_unsure_excluded": 62,
     "marcs_evaluated": 1121,
-    "marcs_with_matcher_top": 1099,
-    "marcs_with_correct_top": 1083
+    "marcs_with_matcher_top": 1078,
+    "marcs_with_correct_top": 1059
   },
   "tolerance": 0.02,
   "notes": "Vault-driven eval. Pair-level AUC/AP plus per-MARC P/R; gate is precision/recall only on linkage agreement (latest 'match' verdict wins). Generated: vault=data/training/label_vault.jsonl pool=data/candidates year_window=0."
